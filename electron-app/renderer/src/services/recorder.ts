@@ -1,4 +1,5 @@
 import { ipcClient } from './ipc'
+import { loadPromptDictionaryTerms } from './dictionaryStore'
 import { hideFloatingPanel, showFreeAskResult } from './floatingPanel'
 import { getSelectedAudioDeviceId, getTranslationTargetLanguage } from './settingsStore'
 import type { ShortcutIntent } from './shortcutGuard'
@@ -165,14 +166,18 @@ async function startRecordingFromIntent(intent: ShortcutIntent) {
   }
 }
 
-async function getStartAudioParameters(mode: VoiceMode, selectedText = ''): Promise<Record<string, string>> {
+async function getStartAudioParameters(mode: VoiceMode, selectedText = ''): Promise<Record<string, unknown>> {
+  const dictionaryTerms = await loadPromptDictionaryTerms()
+  const dictionaryParameters = dictionaryTerms.length ? { dictionary_terms: dictionaryTerms } : {}
+
   if (mode === 'Ask') {
-    return selectedText ? { selected_text: selectedText } : {}
+    return selectedText ? { ...dictionaryParameters, selected_text: selectedText } : dictionaryParameters
   }
 
-  if (mode !== 'Translate') return {}
+  if (mode !== 'Translate') return dictionaryParameters
 
   return {
+    ...dictionaryParameters,
     output_language: await getTranslationTargetLanguage(),
   }
 }

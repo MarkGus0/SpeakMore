@@ -7,6 +7,7 @@ from runtime_config import load_server_env
 load_server_env()
 
 _client = None
+MAX_DICTIONARY_TERMS = 100
 
 
 def _get_client() -> AsyncOpenAI:
@@ -120,6 +121,97 @@ SYSTEM_PROMPTS = {
 }
 
 
+def normalize_dictionary_terms(parameters: dict | None) -> list[dict]:
+    if not isinstance(parameters, dict):
+        return []
+
+    terms = parameters.get("dictionary_terms", [])
+    if not isinstance(terms, list):
+        return []
+
+    normalized = []
+    for item in terms[:MAX_DICTIONARY_TERMS]:
+        if not isinstance(item, dict):
+            continue
+
+        phrase = str(item.get("phrase", "")).strip()
+        aliases = item.get("aliases", [])
+        if not phrase:
+            continue
+
+        normalized_aliases = []
+        if isinstance(aliases, list):
+            for alias in aliases:
+                text = str(alias).strip()
+                if text and text.lower() != phrase.lower() and text not in normalized_aliases:
+                    normalized_aliases.append(text)
+
+        normalized.append({"phrase": phrase, "aliases": normalized_aliases})
+
+    return normalized
+
+
+def build_dictionary_context(dictionary_terms: list[dict]) -> str:
+    terms = normalize_dictionary_terms({"dictionary_terms": dictionary_terms})
+    if not terms:
+        return ""
+
+    lines = ["用户个人词表："]
+    for term in terms:
+        aliases = term["aliases"]
+        if aliases:
+            lines.append(f"- {'、'.join(aliases)} 应写作 {term['phrase']}")
+        else:
+            lines.append(f"- {term['phrase']} 是用户词表中的正确写法")
+
+    lines.append("")
+    lines.append("修复 ASR 错词、专业术语、品牌名和代码词时，优先遵循用户个人词表。")
+    return "\n".join(lines)
+
+
+def build_refiner_user_message(
+    raw_text: str,
+    mode: str = "transcript",
+    context: dict | None = None,
+    parameters: dict | None = None,
+) -> str:
+    dictionary_context = build_dictionary_context(normalize_dictionary_terms(parameters))
+    user_message = raw_text
+
+    if mode == "transcript" and context:
+        app_info = context.get("active_application", {})
+        text_point = context.get("text_insertion_point", {})
+        cursor_state = text_point.get("cursor_state", {})
+
+        context_parts = []
+        if app_info.get("app_name"):
+            context_parts.append(f"App: {app_info['app_name']}")
+        if app_info.get("browser_context", {}).get("domain"):
+            context_parts.append(f"Website: {app_info['browser_context']['domain']}")
+        if cursor_state.get("text_before_cursor"):
+            before = cursor_state["text_before_cursor"][-200:]
+            context_parts.append(f"Text before cursor: {before}")
+
+        if context_parts:
+            user_message = f"[Context: {'; '.join(context_parts)}]\n\nTranscription to refine:\n{raw_text}"
+
+    elif mode == "transcript" and dictionary_context:
+        user_message = f"Transcription to refine:\n{raw_text}"
+
+    elif mode == "translation" and parameters:
+        target_lang = parameters.get("output_language", "en")
+        user_message = f"目标语言：{target_lang}\n\n待翻译的语音转写文本：\n{raw_text}"
+
+    elif mode == "ask_anything" and parameters:
+        selected_text = parameters.get("selected_text", "")
+        if selected_text:
+            user_message = f"[Selected text in editor: {selected_text}]\n\nUser's voice command:\n{raw_text}"
+
+    if dictionary_context:
+        return f"{dictionary_context}\n\n{user_message}"
+    return user_message
+
+
 async def refine_text(
     raw_text: str,
     mode: str = "transcript",
@@ -143,35 +235,13 @@ async def refine_text(
     client = _get_client()
     system_prompt = SYSTEM_PROMPTS.get(mode, SYSTEM_PROMPTS["transcript"])
 
-    # 构建上下文增强的 user message
-    user_message = raw_text
-
-    if mode == "transcript" and context:
-        # 利用上下文信息帮助润色（模仿 Typeless 的上下文感知）
-        app_info = context.get("active_application", {})
-        text_point = context.get("text_insertion_point", {})
-        cursor_state = text_point.get("cursor_state", {})
-
-        context_parts = []
-        if app_info.get("app_name"):
-            context_parts.append(f"App: {app_info['app_name']}")
-        if app_info.get("browser_context", {}).get("domain"):
-            context_parts.append(f"Website: {app_info['browser_context']['domain']}")
-        if cursor_state.get("text_before_cursor"):
-            before = cursor_state["text_before_cursor"][-200:]
-            context_parts.append(f"Text before cursor: {before}")
-
-        if context_parts:
-            user_message = f"[Context: {'; '.join(context_parts)}]\n\nTranscription to refine:\n{raw_text}"
-
-    elif mode == "translation" and parameters:
-        target_lang = parameters.get("output_language", "en")
-        user_message = f"目标语言：{target_lang}\n\n待翻译的语音转写文本：\n{raw_text}"
-
-    elif mode == "ask_anything" and parameters:
-        selected_text = parameters.get("selected_text", "")
-        if selected_text:
-            user_message = f"[Selected text in editor: {selected_text}]\n\nUser's voice command:\n{raw_text}"
+    # 词典属于用户偏好上下文，只影响术语纠错，不改变任务边界。
+    user_message = build_refiner_user_message(
+        raw_text=raw_text,
+        mode=mode,
+        context=context,
+        parameters=parameters,
+    )
 
     try:
         response = await client.chat.completions.create(
