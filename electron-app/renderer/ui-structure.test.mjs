@@ -629,6 +629,25 @@ test('P1 历史页面与历史 store 统一走主进程 JSON 数据源', async (
   assert.match(historyPage, /clipboard:write-text/);
 });
 
+test('P1 词典数据统一走主进程 JSON 数据源', async () => {
+  const main = await readProjectFile('../main.js');
+
+  assert.match(main, /DICTIONARY_FILE_NAME\s*=\s*['"]dictionary\.json['"]/);
+  assert.match(main, /DICTIONARY_CANDIDATES_FILE_NAME\s*=\s*['"]dictionary-candidates\.json['"]/);
+  assert.match(main, /function\s+readDictionaryEntries\(/);
+  assert.match(main, /function\s+writeDictionaryEntries\(/);
+  assert.match(main, /function\s+readDictionaryCandidates\(/);
+  assert.match(main, /function\s+writeDictionaryCandidates\(/);
+  assert.match(main, /ipcMain\.handle\(['"]dictionary:list['"]/);
+  assert.match(main, /ipcMain\.handle\(['"]dictionary:create['"]/);
+  assert.match(main, /ipcMain\.handle\(['"]dictionary:update['"]/);
+  assert.match(main, /ipcMain\.handle\(['"]dictionary:delete['"]/);
+  assert.match(main, /ipcMain\.handle\(['"]dictionary:candidates-list['"]/);
+  assert.match(main, /ipcMain\.handle\(['"]dictionary:candidate-promote['"]/);
+  assert.match(main, /ipcMain\.handle\(['"]dictionary:candidate-ignore['"]/);
+  assert.match(main, /ipcMain\.handle\(['"]dictionary:prompt-terms['"]/);
+});
+
 test('P1 设置页与设置 store 统一走主进程 JSON 数据源', async () => {
   const settingsStore = await readProjectFile('src/services/settingsStore.ts');
   const settingsPage = await readProjectFile('src/pages/Settings.tsx');

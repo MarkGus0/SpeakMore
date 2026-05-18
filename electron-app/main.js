@@ -38,6 +38,12 @@ const {
   calculateHistoryStatsForDashboard,
   upsertHistoryItemWithStats,
 } = require('./history-stats-store');
+const {
+  normalizeDictionaryEntry,
+  normalizeDictionaryCandidate,
+  upsertDictionaryEntry,
+  buildPromptDictionaryTerms,
+} = require('./dictionary-store');
 
 let mainWindow = null;
 let floatingBar = null;
@@ -72,6 +78,8 @@ const LOCAL_DATA_DIR_NAME = 'local-data';
 const SETTINGS_FILE_NAME = 'settings.json';
 const HISTORY_FILE_NAME = 'history.json';
 const HISTORY_STATS_FILE_NAME = 'history-stats.json';
+const DICTIONARY_FILE_NAME = 'dictionary.json';
+const DICTIONARY_CANDIDATES_FILE_NAME = 'dictionary-candidates.json';
 const DEFAULT_TRANSLATION_TARGET_LANGUAGE = 'en';
 const SUPPORTED_TRANSLATION_TARGET_LANGUAGES = new Set([DEFAULT_TRANSLATION_TARGET_LANGUAGE]);
 const SHORTCUT_DEBUG_ENABLED = ['1', 'true', 'yes', 'on'].includes(
@@ -224,6 +232,36 @@ function readHistoryStats() {
 
 function writeHistoryStats(stats) {
   return writeJsonFile(HISTORY_STATS_FILE_NAME, normalizeHistoryStats(stats));
+}
+
+function readDictionaryEntries() {
+  const value = readJsonFile(DICTIONARY_FILE_NAME, []);
+  if (!Array.isArray(value)) return [];
+  return value.map(normalizeDictionaryEntry).filter((entry) => entry.phrase);
+}
+
+function writeDictionaryEntries(entries) {
+  return writeJsonFile(
+    DICTIONARY_FILE_NAME,
+    entries.map(normalizeDictionaryEntry).filter((entry) => entry.phrase),
+  );
+}
+
+function readDictionaryCandidates() {
+  const value = readJsonFile(DICTIONARY_CANDIDATES_FILE_NAME, []);
+  if (!Array.isArray(value)) return [];
+  return value.map(normalizeDictionaryCandidate).filter((candidate) => candidate.wrong && candidate.correct);
+}
+
+function writeDictionaryCandidates(candidates) {
+  return writeJsonFile(
+    DICTIONARY_CANDIDATES_FILE_NAME,
+    candidates.map(normalizeDictionaryCandidate).filter((candidate) => candidate.wrong && candidate.correct),
+  );
+}
+
+function readPromptDictionaryTerms() {
+  return buildPromptDictionaryTerms(readDictionaryEntries());
 }
 
 function debugShortcut(event, payload = {}) {
@@ -1170,6 +1208,68 @@ function registerIpcHandlers() {
 
   ipcMain.handle('settings:get', () => readLocalSettings());
   ipcMain.handle('settings:update', (_, payload = {}) => writeLocalSettings({ ...readLocalSettings(), ...payload }));
+
+  ipcMain.handle('dictionary:list', () => readDictionaryEntries());
+  ipcMain.handle('dictionary:create', (_, payload = {}) => {
+    const entries = upsertDictionaryEntry(readDictionaryEntries(), {
+      ...payload,
+      source: payload.source === 'auto' ? 'auto' : 'manual',
+      status: payload.status === 'disabled' ? 'disabled' : 'active',
+    });
+    writeDictionaryEntries(entries);
+    const phrase = normalizeDictionaryEntry(payload).phrase.toLowerCase();
+    const created = entries.find((entry) => entry.phrase.toLowerCase() === phrase) || entries[0] || null;
+    return { success: Boolean(created), data: created };
+  });
+  ipcMain.handle('dictionary:update', (_, payload = {}) => {
+    const entries = readDictionaryEntries();
+    const target = entries.find((entry) => entry.id === payload.id);
+    if (!target) return { success: false, code: 'dictionary_entry_not_found' };
+
+    const updated = normalizeDictionaryEntry({
+      ...target,
+      ...payload,
+      id: target.id,
+      createdAt: target.createdAt,
+      updatedAt: new Date().toISOString(),
+    });
+    writeDictionaryEntries(entries.map((entry) => (entry.id === target.id ? updated : entry)));
+    return { success: true, data: updated };
+  });
+  ipcMain.handle('dictionary:delete', (_, id) => {
+    writeDictionaryEntries(readDictionaryEntries().filter((entry) => entry.id !== id));
+    return { success: true };
+  });
+  ipcMain.handle('dictionary:candidates-list', () => readDictionaryCandidates());
+  ipcMain.handle('dictionary:candidate-promote', (_, id) => {
+    const now = new Date().toISOString();
+    const candidates = readDictionaryCandidates();
+    const candidate = candidates.find((item) => item.id === id);
+    if (!candidate) return { success: false, code: 'dictionary_candidate_not_found' };
+
+    const entries = upsertDictionaryEntry(readDictionaryEntries(), {
+      phrase: candidate.correct,
+      aliases: [candidate.wrong],
+      source: 'auto',
+      status: 'active',
+      hitCount: candidate.count,
+      lastLearnedAt: now,
+    }, now);
+    const nextCandidates = candidates.map((item) => (
+      item.id === id ? normalizeDictionaryCandidate({ ...item, status: 'promoted', lastSeenAt: now }) : item
+    ));
+    writeDictionaryEntries(entries);
+    writeDictionaryCandidates(nextCandidates);
+    const promoted = entries.find((entry) => entry.phrase.toLowerCase() === candidate.correct.toLowerCase()) || entries[0] || null;
+    return { success: Boolean(promoted), data: promoted };
+  });
+  ipcMain.handle('dictionary:candidate-ignore', (_, id) => {
+    writeDictionaryCandidates(readDictionaryCandidates().map((item) => (
+      item.id === id ? normalizeDictionaryCandidate({ ...item, status: 'ignored' }) : item
+    )));
+    return { success: true };
+  });
+  ipcMain.handle('dictionary:prompt-terms', () => readPromptDictionaryTerms());
 
   ipcMain.handle('keyboard:start-keyboard-listener', () => true);
   ipcMain.handle('keyboard:stop-keyboard-listener', () => true);
