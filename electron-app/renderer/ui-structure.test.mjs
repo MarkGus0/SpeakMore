@@ -46,7 +46,7 @@ test('Electron 悬浮条加载本地 renderer 构建产物', async () => {
   assert.match(floatingBar, /particleCount\s*=\s*800/);
   assert.match(floatingBar, /setRecording\(isRecording/);
   assert.match(floatingBar, /setProcessing\(isProcessing/);
-  assert.match(floatingBar, /#particle-sphere-container\s*\{[^}]*width:\s*160px;[^}]*height:\s*160px/);
+  assert.match(floatingBar, /#particle-sphere-container\s*\{[^}]*width:\s*140px;[^}]*height:\s*140px/);
   assert.doesNotMatch(floatingBar, /id=["']bar["']/);
   assert.doesNotMatch(floatingBar, /id=["']levels["']/);
   assert.doesNotMatch(floatingBar, /-webkit-app-region:\s*drag/);
@@ -622,7 +622,8 @@ test('P0 悬浮条消费 voice-state.inputLevel 并驱动粒子球听写动态',
   assert.match(floatingBar, /setInputLevel\(stateLevel\)/);
   assert.match(floatingBar, /audioLevel/);
   assert.match(floatingBar, /this\.state\s*===\s*['"]recording['"]/);
-  assert.match(floatingBar, /0\.13\s*\+\s*this\.audioLevel\s*\*\s*0\.65/);
+  assert.match(floatingBar, /responsiveLevel\s*=\s*Math\.sqrt\(this\.audioLevel\)/);
+  assert.match(floatingBar, /0\.1\s*\+\s*responsiveLevel\s*\*\s*0\.75/);
   assert.match(floatingBar, /this\.state\s*===\s*['"]processing['"]/);
   assert.doesNotMatch(floatingBar, /renderLevels/);
   assert.doesNotMatch(floatingBar, /@keyframes\s+level/);
