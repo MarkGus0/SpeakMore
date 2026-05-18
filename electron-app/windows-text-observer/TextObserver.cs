@@ -75,7 +75,7 @@ public sealed class TextObserver : IDisposable
         {
             var pattern = (TextPattern)observedElement.GetCurrentPattern(TextPattern.Pattern);
             var text = pattern.DocumentRange.GetText(4000).Trim();
-            emit(new ObserverResponse("observed-text", audioId, true, text: text));
+            emit(new ObserverResponse("observed-text", audioId, true, Text: text));
         }
         catch
         {
