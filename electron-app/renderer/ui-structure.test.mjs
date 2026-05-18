@@ -38,17 +38,17 @@ test('Electron 悬浮条加载本地 renderer 构建产物', async () => {
   assert.doesNotMatch(main, /defaultFloatingBarX\s*=\s*660/);
   assert.doesNotMatch(main, /defaultFloatingBarY\s*=\s*739/);
   assert.match(main, /payload\?\.positions/);
-  assert.match(floatingBar, /gap:\s*9\.3px/);
-  assert.match(floatingBar, /height:\s*44\.6px/);
-  assert.match(floatingBar, /min-width:\s*230px/);
-  assert.match(floatingBar, /padding:\s*0 18\.6px/);
-  assert.match(floatingBar, /font-size:\s*13px/);
-  assert.match(floatingBar, /width:\s*9\.3px;\s*height:\s*9\.3px/);
-  assert.match(floatingBar, /const\s+BAR_COUNT\s*=\s*8/);
-  assert.match(floatingBar, /gap:\s*3\.7px/);
-  assert.match(floatingBar, /height:\s*22\.3px/);
-  assert.match(floatingBar, /width:\s*3\.7px;\s*height:\s*9\.3px/);
-  assert.match(floatingBar, /border-radius:\s*999px/);
+  assert.match(floatingBar, /src=["']\.\/lib\/three\.min\.js["']/);
+  assert.match(floatingBar, /id=["']particle-sphere-container["']/);
+  assert.match(floatingBar, /id=["']particle-canvas["']/);
+  assert.match(floatingBar, /id=["']hint-text["']/);
+  assert.match(floatingBar, /class\s+ParticleSphere/);
+  assert.match(floatingBar, /particleCount\s*=\s*800/);
+  assert.match(floatingBar, /setRecording\(isRecording/);
+  assert.match(floatingBar, /setProcessing\(isProcessing/);
+  assert.match(floatingBar, /#particle-sphere-container\s*\{[^}]*width:\s*160px;[^}]*height:\s*160px/);
+  assert.doesNotMatch(floatingBar, /id=["']bar["']/);
+  assert.doesNotMatch(floatingBar, /id=["']levels["']/);
   assert.doesNotMatch(floatingBar, /-webkit-app-region:\s*drag/);
   assert.doesNotMatch(floatingBar, /检测到长按快捷键/);
   assert.doesNotMatch(floatingBar, /shortcut-hint/);
@@ -517,17 +517,29 @@ test('P0 悬浮条消费 voice-state 而不是自行 toggle 快捷键状态', as
   assert.match(floatingBar, /applyVoiceState/);
   assert.doesNotMatch(floatingBar, /function\s+toggle\(/);
   assert.doesNotMatch(floatingBar, /global-keyboard[\s\S]*toggle\(\)/);
+  assert.doesNotMatch(floatingBar, /getUserMedia/);
+  assert.doesNotMatch(floatingBar, /MediaRecorder/);
+  assert.doesNotMatch(floatingBar, /addEventListener\(['"]mousedown['"]/);
+  assert.doesNotMatch(floatingBar, /addEventListener\(['"]touchstart['"]/);
 });
 
-test('自由提问录音文案由 voice-state.displayText 覆盖胶囊默认 recording 文案', async () => {
+test('三种语音方式在粒子 UI 中使用模式化录音和处理文案', async () => {
   const voiceTypes = await readProjectFile('src/services/voiceTypes.ts');
   const floatingBar = await readProjectFile('public/floating-bar.html');
 
   assert.match(voiceTypes, /mode:\s*session\.mode/);
   assert.match(voiceTypes, /session\.status\s*===\s*['"]recording['"][\s\S]*session\.mode\s*===\s*['"]Ask['"]/);
   assert.match(voiceTypes, /displayText:\s*['"]请随意提出问题['"]/);
-  assert.match(floatingBar, /if\s*\(displayText\)\s*\{[\s\S]*text\.textContent\s*=\s*displayText[\s\S]*return;/);
-  assert.match(floatingBar, /if\s*\(status\s*===\s*['"]recording['"]\)\s*\{[\s\S]*text\.textContent\s*=\s*['"]正在监听\.\.\.['"]/);
+  assert.match(floatingBar, /if\s*\(displayText\)\s*\{[\s\S]*setHintText\(displayText\)[\s\S]*return;/);
+  assert.match(floatingBar, /function\s+getRecordingText\(mode\)/);
+  assert.match(floatingBar, /if\s*\(mode\s*===\s*['"]Ask['"]\)\s*return\s*['"]请随意提出问题['"]/);
+  assert.match(floatingBar, /if\s*\(mode\s*===\s*['"]Translate['"]\)\s*return\s*['"]正在听取翻译内容\.\.\.['"]/);
+  assert.match(floatingBar, /return\s*['"]正在听写\.\.\.['"]/);
+  assert.match(floatingBar, /function\s+getProcessingText\(mode\)/);
+  assert.match(floatingBar, /if\s*\(mode\s*===\s*['"]Ask['"]\)\s*return\s*['"]正在处理\.\.\.['"]/);
+  assert.match(floatingBar, /if\s*\(mode\s*===\s*['"]Translate['"]\)\s*return\s*['"]正在翻译\.\.\.['"]/);
+  assert.match(floatingBar, /return\s*['"]正在转写\.\.\.['"]/);
+  assert.doesNotMatch(floatingBar, /setHintText\(['"]正在监听\.\.\.['"]\)/);
 });
 
 test('P0 长按提示通过通用悬浮面板独立显示在悬浮条位置', async () => {
@@ -552,31 +564,34 @@ test('P0 悬浮条提示卡依赖完整视口尺寸，避免定位容器塌陷',
   assert.match(floatingBar, /#scene\s*\{[^}]*width:\s*100%;[^}]*height:\s*100%;[^}]*\}/);
 });
 
-test('P0 悬浮条消费 voice-state.inputLevel 并渲染 8 根真实音量柱', async () => {
+test('P0 悬浮条消费 voice-state.inputLevel 并驱动粒子球听写动态', async () => {
   const voiceTypes = await readProjectFile('src/services/voiceTypes.ts');
   const floatingBar = await readProjectFile('public/floating-bar.html');
 
   assert.match(voiceTypes, /inputLevel:\s*number/);
   assert.match(voiceTypes, /inputLevel:\s*0/);
   assert.match(voiceTypes, /inputLevel:\s*session\.inputLevel/);
-  assert.match(floatingBar, /const\s+BAR_COUNT\s*=\s*8/);
   assert.match(floatingBar, /voice-state/);
   assert.match(floatingBar, /inputLevel/);
-  assert.match(floatingBar, /renderLevels/);
+  assert.match(floatingBar, /setInputLevel\(stateLevel\)/);
+  assert.match(floatingBar, /audioLevel/);
+  assert.match(floatingBar, /this\.state\s*===\s*['"]recording['"]/);
+  assert.match(floatingBar, /this\.state\s*===\s*['"]processing['"]/);
+  assert.doesNotMatch(floatingBar, /renderLevels/);
   assert.doesNotMatch(floatingBar, /@keyframes\s+level/);
   assert.doesNotMatch(floatingBar, /animation:\s*level/);
 });
 
-test('P0 悬浮条在非 recording 状态归零，并按权重渲染 8 根细柱', async () => {
+test('P0 悬浮条把语音状态映射到粒子球视觉态', async () => {
   const floatingBar = await readProjectFile('public/floating-bar.html');
 
-  assert.match(floatingBar, /BAR_WEIGHTS\s*=\s*\[0\.72,\s*0\.84,\s*0\.94,\s*1,\s*1,\s*0\.94,\s*0\.84,\s*0\.72\]/);
-  assert.match(floatingBar, /MIN_BAR_HEIGHT/);
-  assert.match(floatingBar, /MAX_BAR_HEIGHT/);
-  assert.match(floatingBar, /renderLevels\(stateLevel,\s*status\s*===\s*['"]recording['"]\)/);
   assert.match(floatingBar, /const\s+stateLevel\s*=\s*state\s*&&\s*typeof\s+state\.inputLevel\s*===\s*['"]number['"]/);
-  assert.match(floatingBar, /width:\s*3\.7px/);
-  assert.match(floatingBar, /gap:\s*3\.7px/);
+  assert.match(floatingBar, /particleSphere\.setInputLevel\(stateLevel\)/);
+  assert.match(floatingBar, /particleSphere\.setRecording\(status\s*===\s*['"]recording['"]\)/);
+  assert.match(floatingBar, /particleSphere\.setProcessing\(status\s*===\s*['"]stopping['"]\s*\|\|\s*status\s*===\s*['"]transcribing['"]\)/);
+  assert.match(floatingBar, /particleSphere\.cancel\(\)/);
+  assert.match(floatingBar, /particleSphere\.complete\(\)/);
+  assert.doesNotMatch(floatingBar, /BAR_WEIGHTS/);
 });
 
 test('P0 悬浮条在完成或取消后自动消失，并在错误后保持可见', async () => {
@@ -917,7 +932,7 @@ test('首页壳层和用户可见文案符合 SpeakMore 中文化要求', async 
   assert.doesNotMatch(appShell, /Typeless Local/);
   assert.match(dashboard, /首页/);
   assert.match(dashboard, /最近结果/);
-  assert.match(floatingBar, /正在监听/);
+  assert.match(floatingBar, /正在听写/);
   assert.doesNotMatch(floatingBar, /Listening\.\.\./);
   assert.match(main, /title:\s*['"]SpeakMore['"]/);
   assert.match(main, /tray\.setToolTip\(['"]SpeakMore['"]\)/);

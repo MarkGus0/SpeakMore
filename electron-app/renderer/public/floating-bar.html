@@ -15,129 +15,446 @@ html, body {
   position: relative;
   width: 100%;
   height: 100%;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}
-#bar {
-  pointer-events: auto;
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-}
-#bar {
-  display: inline-flex;
-  align-items: center;
-  gap: 9.3px;
-  height: 44.6px;
-  min-width: 230px;
-  padding: 0 18.6px;
-  border-radius: 9999px;
-  background: rgba(255,255,255,0.94);
-  backdrop-filter: blur(9px);
-  border: 0.5px solid rgba(119,119,119,0.14);
-  box-shadow: 0 8px 18px rgba(17,17,17,0.16), 0 2px 6px rgba(17,17,17,0.08);
-  font-size: 13px;
-  color: #333;
-}
-#dot {
-  width: 9.3px;
-  height: 9.3px;
-  border-radius: 50%;
-  background: #999;
-  flex-shrink: 0;
-}
-#dot.active { background: #44bedf; }
-#levels {
   display: flex;
   align-items: center;
-  gap: 3.7px;
-  height: 22.3px;
+  justify-content: center;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
-.lv {
-  width: 3.7px;
-  height: 9.3px;
-  border-radius: 999px;
-  background: #d0d4d8;
-  transition: height 70ms linear, background-color 120ms ease;
+#voice-visual {
+  width: 220px;
+  min-height: 224px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
 }
-.lv.active {
-  background: #44bedf;
+#hint-text {
+  min-height: 18px;
+  margin-bottom: 10px;
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 12px;
+  letter-spacing: 0;
+  text-align: center;
+  text-shadow: 0 0 18px rgba(255, 255, 255, 0.16);
+  transition: color 180ms ease, opacity 180ms ease, text-shadow 180ms ease;
+}
+#particle-sphere-container {
+  position: relative;
+  width: 160px;
+  height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#particle-sphere-container::before,
+#particle-sphere-container::after {
+  content: "";
+  position: absolute;
+  inset: 18px;
+  border-radius: 50%;
+  opacity: 0;
+  transform: scale(0.86);
+  transition: opacity 220ms ease, transform 220ms ease, box-shadow 220ms ease, border-color 220ms ease;
+}
+#particle-sphere-container::before {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+#particle-sphere-container::after {
+  filter: blur(26px);
+}
+#particle-sphere-container[data-state="recording"]::before {
+  opacity: 0.72;
+  transform: scale(1);
+  border-color: rgba(80, 190, 255, 0.42);
+  box-shadow: 0 0 22px rgba(68, 190, 223, 0.32);
+  animation: listening-ring 1.6s ease-in-out infinite;
+}
+#particle-sphere-container[data-state="recording"]::after {
+  opacity: 0.62;
+  transform: scale(1.08);
+  background: rgba(68, 190, 223, 0.24);
+}
+#particle-sphere-container[data-state="processing"]::before {
+  opacity: 0.78;
+  transform: scale(1.05);
+  border-color: rgba(74, 222, 128, 0.5);
+  box-shadow: 0 0 28px rgba(16, 185, 129, 0.34);
+  animation: processing-ring 1.1s ease-in-out infinite;
+}
+#particle-sphere-container[data-state="processing"]::after {
+  opacity: 0.68;
+  transform: scale(1.12);
+  background: rgba(16, 185, 129, 0.26);
+}
+#particle-sphere-container[data-state="cancelled"]::before,
+#particle-sphere-container[data-state="error"]::before {
+  opacity: 0.62;
+  transform: scale(0.78);
+  border-color: rgba(248, 113, 113, 0.36);
+  box-shadow: 0 0 18px rgba(248, 113, 113, 0.22);
+}
+#particle-sphere-container[data-state="completed"]::before {
+  opacity: 0.8;
+  transform: scale(1.06);
+  border-color: rgba(167, 243, 208, 0.46);
+  box-shadow: 0 0 30px rgba(52, 211, 153, 0.32);
+}
+#particle-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+body[data-tone="recording"] #hint-text {
+  color: rgba(125, 211, 252, 0.9);
+  text-shadow: 0 0 18px rgba(56, 189, 248, 0.35);
+}
+body[data-tone="processing"] #hint-text,
+body[data-tone="completed"] #hint-text {
+  color: rgba(74, 222, 128, 0.92);
+  text-shadow: 0 0 18px rgba(16, 185, 129, 0.36);
+}
+body[data-tone="cancelled"] #hint-text,
+body[data-tone="error"] #hint-text {
+  color: rgba(248, 113, 113, 0.9);
+  text-shadow: 0 0 18px rgba(248, 113, 113, 0.28);
+}
+body[data-tone="idle"] #hint-text {
+  opacity: 0.72;
+}
+@keyframes listening-ring {
+  0%, 100% { transform: scale(0.96); opacity: 0.48; }
+  50% { transform: scale(1.05); opacity: 0.86; }
+}
+@keyframes processing-ring {
+  0%, 100% { transform: scale(0.98); opacity: 0.56; }
+  50% { transform: scale(1.11); opacity: 0.92; }
 }
 </style>
 </head>
-<body>
+<body data-tone="idle">
 <div id="scene">
-  <div id="bar">
-    <div id="dot"></div>
-    <span id="text">Right Alt 录音</span>
-    <div id="levels"></div>
+  <div id="voice-visual">
+    <p id="hint-text">Right Alt 录音</p>
+    <div id="particle-sphere-container" data-state="idle">
+      <canvas id="particle-canvas"></canvas>
+    </div>
   </div>
 </div>
+<script src="./lib/three.min.js"></script>
 <script>
-const BAR_COUNT = 8;
-const BAR_WEIGHTS = [0.72, 0.84, 0.94, 1, 1, 0.94, 0.84, 0.72];
-const MIN_BAR_HEIGHT = 9.3;
-const MAX_BAR_HEIGHT = 33.4;
-const dot = document.getElementById('dot');
-const text = document.getElementById('text');
-const levelsContainer = document.getElementById('levels');
-
-levelsContainer.innerHTML = Array.from({ length: BAR_COUNT }, () => '<div class="lv"></div>').join('');
-const levels = Array.from(document.querySelectorAll('.lv'));
+const IDLE_TEXT = 'Right Alt 录音';
+const hintText = document.getElementById('hint-text');
+const particleContainer = document.getElementById('particle-sphere-container');
+const particleCanvas = document.getElementById('particle-canvas');
 
 let voiceState = null;
+let particleSphere = null;
 
 function clampLevel(value) {
   if (typeof value !== 'number' || Number.isNaN(value)) return 0;
   return Math.max(0, Math.min(1, value));
 }
 
-function renderLevels(inputLevel, active) {
-  const normalizedLevel = active ? clampLevel(inputLevel) : 0;
-  levels.forEach((element, index) => {
-    const weightedLevel = normalizedLevel * BAR_WEIGHTS[index];
-    const height = MIN_BAR_HEIGHT + ((MAX_BAR_HEIGHT - MIN_BAR_HEIGHT) * weightedLevel);
-    element.style.height = `${Math.round(height)}px`;
-    element.className = active ? 'lv active' : 'lv';
-  });
+function setHintText(value) {
+  hintText.textContent = value || IDLE_TEXT;
 }
 
-function renderCapsule(state) {
+function setVisualTone(tone) {
+  document.body.dataset.tone = tone;
+  particleContainer.dataset.state = tone;
+}
+
+function getRecordingText(mode) {
+  if (mode === 'Ask') return '请随意提出问题';
+  if (mode === 'Translate') return '正在听取翻译内容...';
+  return '正在听写...';
+}
+
+function getProcessingText(mode) {
+  if (mode === 'Ask') return '正在处理...';
+  if (mode === 'Translate') return '正在翻译...';
+  return '正在转写...';
+}
+
+class ParticleSphere {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.scene = new THREE.Scene();
+    this.camera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000);
+    this.renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+    this.particleCount = 800;
+    this.state = 'idle';
+    this.targetRadius = 1.5;
+    this.currentRadius = 1.5;
+    this.targetOpacity = 0.78;
+    this.currentOpacity = 0.78;
+    this.audioLevel = 0;
+    this.basePositions = [];
+    this.statusTimer = null;
+    this.frameId = null;
+
+    this.init();
+    this.animate();
+  }
+
+  init() {
+    this.camera.position.z = 4;
+    this.renderer.setPixelRatio(window.devicePixelRatio || 1);
+    this.resize();
+
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(this.particleCount * 3);
+    const colors = new Float32Array(this.particleCount * 3);
+
+    for (let i = 0; i < this.particleCount; i += 1) {
+      const phi = Math.acos(-1 + (2 * i) / this.particleCount);
+      const theta = Math.sqrt(this.particleCount * Math.PI) * phi;
+      const radius = 1.5 + (Math.random() - 0.5) * 0.3;
+      const x = radius * Math.cos(theta) * Math.sin(phi);
+      const y = radius * Math.sin(theta) * Math.sin(phi);
+      const z = radius * Math.cos(phi);
+
+      positions[i * 3] = x;
+      positions[i * 3 + 1] = y;
+      positions[i * 3 + 2] = z;
+      this.basePositions.push({ x, y, z });
+
+      colors[i * 3] = 1;
+      colors[i * 3 + 1] = 1;
+      colors[i * 3 + 2] = 1;
+    }
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+    const material = new THREE.PointsMaterial({
+      size: 0.04,
+      vertexColors: true,
+      transparent: true,
+      opacity: this.currentOpacity,
+      sizeAttenuation: true,
+    });
+
+    this.particles = new THREE.Points(geometry, material);
+    this.scene.add(this.particles);
+  }
+
+  resize() {
+    const width = this.canvas.clientWidth || 160;
+    const height = this.canvas.clientHeight || 160;
+    this.renderer.setSize(width, height, false);
+    this.camera.aspect = width / height;
+    this.camera.updateProjectionMatrix();
+  }
+
+  setState(nextState) {
+    if (this.state === nextState) return;
+    window.clearTimeout(this.statusTimer);
+    this.statusTimer = null;
+    this.state = nextState;
+
+    if (nextState === 'recording') {
+      this.targetRadius = 1.02;
+      this.targetOpacity = 0.9;
+      return;
+    }
+
+    if (nextState === 'processing') {
+      this.targetRadius = 2.35;
+      this.targetOpacity = 0.88;
+      return;
+    }
+
+    if (nextState === 'cancelled' || nextState === 'error') {
+      this.targetRadius = 0.34;
+      this.targetOpacity = 0.52;
+      this.statusTimer = window.setTimeout(() => this.setState('idle'), 900);
+      return;
+    }
+
+    if (nextState === 'completed') {
+      this.targetRadius = 2.05;
+      this.targetOpacity = 0.84;
+      this.statusTimer = window.setTimeout(() => this.setState('idle'), 900);
+      return;
+    }
+
+    this.targetRadius = 1.5;
+    this.targetOpacity = 0.78;
+    this.audioLevel = 0;
+  }
+
+  setRecording(isRecording) {
+    if (isRecording) {
+      this.setState('recording');
+      return;
+    }
+    if (this.state === 'recording') this.setState('idle');
+  }
+
+  setProcessing(isProcessing) {
+    if (isProcessing) {
+      this.setState('processing');
+      return;
+    }
+    if (this.state === 'processing') this.setState('idle');
+  }
+
+  setInputLevel(inputLevel) {
+    this.audioLevel = clampLevel(inputLevel);
+  }
+
+  cancel() {
+    this.setState('cancelled');
+  }
+
+  complete() {
+    this.setState('completed');
+  }
+
+  fail() {
+    this.setState('error');
+  }
+
+  animate() {
+    this.frameId = window.requestAnimationFrame(() => this.animate());
+    if (!this.particles) return;
+
+    const positions = this.particles.geometry.attributes.position.array;
+    const colors = this.particles.geometry.attributes.color.array;
+    const time = performance.now() * 0.001;
+
+    this.currentRadius += (this.targetRadius - this.currentRadius) * 0.08;
+    this.currentOpacity += (this.targetOpacity - this.currentOpacity) * 0.05;
+    this.particles.material.opacity = this.currentOpacity;
+
+    for (let i = 0; i < this.particleCount; i += 1) {
+      const base = this.basePositions[i];
+      const scale = this.currentRadius / 1.5;
+      let noise = 0;
+
+      if (this.state === 'recording') {
+        noise = Math.sin(time * 3 + i * 0.1) * (0.13 + this.audioLevel * 0.36);
+      } else if (this.state === 'processing') {
+        noise = Math.sin(time * 5 + i * 0.2) * 0.3;
+      } else if (this.state === 'completed') {
+        noise = Math.sin(time * 4 + i * 0.08) * 0.16;
+      }
+
+      positions[i * 3] = base.x * scale + noise * Math.sin(i);
+      positions[i * 3 + 1] = base.y * scale + noise * Math.cos(i);
+      positions[i * 3 + 2] = base.z * scale;
+
+      if (this.state === 'recording') {
+        colors[i * 3] = 0.4 + Math.sin(time * 2 + i * 0.05) * 0.24;
+        colors[i * 3 + 1] = 0.78 + Math.sin(time * 2 + i * 0.05) * 0.18;
+        colors[i * 3 + 2] = 1;
+      } else if (this.state === 'processing') {
+        colors[i * 3] = 0.18 + Math.sin(time * 3 + i * 0.04) * 0.08;
+        colors[i * 3 + 1] = 0.95;
+        colors[i * 3 + 2] = 0.48 + Math.sin(time * 3 + i * 0.04) * 0.12;
+      } else if (this.state === 'cancelled') {
+        colors[i * 3] = 0.42;
+        colors[i * 3 + 1] = 0.42;
+        colors[i * 3 + 2] = 0.42;
+      } else if (this.state === 'error') {
+        colors[i * 3] = 1;
+        colors[i * 3 + 1] = 0.28;
+        colors[i * 3 + 2] = 0.28;
+      } else if (this.state === 'completed') {
+        colors[i * 3] = 0.52;
+        colors[i * 3 + 1] = 1;
+        colors[i * 3 + 2] = 0.74;
+      } else {
+        colors[i * 3] += (1 - colors[i * 3]) * 0.05;
+        colors[i * 3 + 1] += (1 - colors[i * 3 + 1]) * 0.05;
+        colors[i * 3 + 2] += (1 - colors[i * 3 + 2]) * 0.05;
+      }
+    }
+
+    this.particles.geometry.attributes.position.needsUpdate = true;
+    this.particles.geometry.attributes.color.needsUpdate = true;
+
+    const rotationSpeed = this.state === 'processing' ? 0.004 : 0.003;
+    this.particles.rotation.y += rotationSpeed;
+    this.particles.rotation.x += rotationSpeed * 0.3;
+    this.renderer.render(this.scene, this.camera);
+  }
+}
+
+function renderFallback() {
+  particleContainer.style.border = '1px solid rgba(255,255,255,0.12)';
+  particleContainer.style.borderRadius = '50%';
+}
+
+function initializeParticleSphere() {
+  if (!window.THREE) {
+    renderFallback();
+    return;
+  }
+
+  particleSphere = new ParticleSphere(particleCanvas);
+  window.addEventListener('resize', () => particleSphere?.resize());
+}
+
+function renderVoiceState(state) {
   const status = state && typeof state.status === 'string' ? state.status : 'idle';
+  const mode = state && typeof state.mode === 'string' ? state.mode : 'Dictate';
   const displayText = state && typeof state.displayText === 'string' ? state.displayText : '';
   const errorMessage = state && typeof state.errorMessage === 'string' ? state.errorMessage : '';
   const stateLevel = state && typeof state.inputLevel === 'number' ? state.inputLevel : 0;
 
-  dot.className = status === 'recording' ? 'active' : '';
-  renderLevels(stateLevel, status === 'recording');
+  if (particleSphere) {
+    particleSphere.setInputLevel(stateLevel);
+    particleSphere.setRecording(status === 'recording');
+    particleSphere.setProcessing(status === 'stopping' || status === 'transcribing');
+  }
+
+  if (status === 'recording') setVisualTone('recording');
+  else if (status === 'stopping' || status === 'transcribing') setVisualTone('processing');
+  else if (status === 'completed') setVisualTone('completed');
+  else if (status === 'cancelled') setVisualTone('cancelled');
+  else if (status === 'error') setVisualTone('error');
+  else setVisualTone('idle');
 
   if (displayText) {
-    text.textContent = displayText;
+    setHintText(displayText);
     return;
   }
 
   if (status === 'recording') {
-    text.textContent = '正在监听...';
+    setHintText(getRecordingText(mode));
     return;
   }
 
-  if (status === 'connecting') text.textContent = '正在连接...';
-  else if (status === 'stopping') text.textContent = '正在停止...';
-  else if (status === 'transcribing') text.textContent = '正在转写...';
-  else if (status === 'cancelled') text.textContent = '当前转录已取消';
-  else if (status === 'completed') text.textContent = '已完成';
-  else if (status === 'error') text.textContent = errorMessage || '发生错误';
-  else text.textContent = 'Right Alt 录音';
+  if (status === 'connecting') setHintText('正在连接...');
+  else if (status === 'stopping' || status === 'transcribing') setHintText(getProcessingText(mode));
+  else if (status === 'cancelled') {
+    setHintText('当前转录已取消');
+    if (particleSphere) particleSphere.cancel();
+  } else if (status === 'completed') {
+    setHintText('已完成');
+    if (particleSphere) particleSphere.complete();
+  } else if (status === 'error') {
+    setHintText(errorMessage || '发生错误');
+    if (particleSphere) particleSphere.fail();
+  } else {
+    setHintText(IDLE_TEXT);
+  }
 }
 
 function render() {
-  renderCapsule(voiceState);
+  renderVoiceState(voiceState);
 }
 
 function applyVoiceState(state) {
   voiceState = state;
   render();
 }
+
+initializeParticleSphere();
 
 if (window.ipcRenderer) {
   window.ipcRenderer.on('voice-state', (_event, state) => applyVoiceState(state));
