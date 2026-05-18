@@ -1,6 +1,7 @@
 import threading
 import time
 import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -53,6 +54,16 @@ class ServiceReadinessTest(unittest.TestCase):
                 time.sleep(0.01)
 
         self.assertEqual(exit_codes, [1])
+
+    def test_config_reload_endpoint_refreshes_refiner_runtime(self):
+        app = main.create_app(preload_model=lambda: None, exit_scheduler=lambda _code: None)
+
+        with patch("main.reload_refiner_runtime_config") as reload_refiner_runtime_config, TestClient(app) as client:
+            response = client.post("/config/reload")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "ok")
+        reload_refiner_runtime_config.assert_called_once_with()
 
 
 if __name__ == "__main__":

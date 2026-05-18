@@ -20,6 +20,12 @@ def load_server_env() -> None:
     _env_loaded = True
 
 
+def reload_server_env() -> None:
+    global _env_loaded
+    load_dotenv(_ENV_FILE_PATH, override=True)
+    _env_loaded = True
+
+
 def get_server_host() -> str:
     return os.getenv("HOST", "127.0.0.1").strip() or "127.0.0.1"
 

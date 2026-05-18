@@ -24,7 +24,7 @@ from model_manager import (
     start_download_task,
     write_selected_model_id,
 )
-from refiner import refine_text
+from refiner import refine_text, reload_refiner_runtime_config
 from runtime_config import (
     get_cors_allowed_origins,
     get_server_host,
@@ -483,6 +483,11 @@ def create_app(preload_model=preload_whisper_model, exit_scheduler=schedule_star
         if is_voice_service_ready(app):
             return payload
         return JSONResponse(status_code=503, content=payload)
+
+    @app.post("/config/reload")
+    async def reload_config():
+        reload_refiner_runtime_config()
+        return {"status": "ok", "detail": "大模型配置已重载"}
 
     @app.get("/models")
     async def list_models():
