@@ -40,8 +40,8 @@ html, body {
 }
 #particle-sphere-container {
   position: relative;
-  width: 160px;
-  height: 160px;
+  width: 140px;
+  height: 140px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -181,8 +181,8 @@ class ParticleSphere {
   }
 
   resize() {
-    const width = this.canvas.clientWidth || 160;
-    const height = this.canvas.clientHeight || 160;
+    const width = this.canvas.clientWidth || 140;
+    const height = this.canvas.clientHeight || 140;
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
@@ -275,7 +275,8 @@ class ParticleSphere {
       let noise = 0;
 
       if (this.state === 'recording') {
-        noise = Math.sin(time * 3 + i * 0.1) * (0.13 + this.audioLevel * 0.65);
+        const responsiveLevel = Math.sqrt(this.audioLevel);
+        noise = Math.sin(time * 3 + i * 0.1) * (0.1 + responsiveLevel * 0.75);
       } else if (this.state === 'processing') {
         noise = Math.sin(time * 5 + i * 0.2) * 0.3;
       } else if (this.state === 'completed') {
