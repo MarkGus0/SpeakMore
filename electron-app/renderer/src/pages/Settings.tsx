@@ -1,7 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Box, Typography, Select, MenuItem, Switch, Button, TextField } from '@mui/material'
 import { ipcClient } from '../services/ipc'
-import { loadSettings, saveSettings, type LocalSettings, type TranslationTargetLanguage } from '../services/settingsStore'
+import {
+  defaultSettings,
+  loadSettings,
+  saveSettings,
+  type LlmProvider,
+  type LocalSettings,
+  type TranslationTargetLanguage,
+} from '../services/settingsStore'
 
 const keybindChip = {
   borderRadius: '6px',
@@ -34,14 +41,9 @@ function KeyChips({ keys }: { keys: string[] }) {
 type AudioDevice = { deviceId: string; label?: string }
 
 export default function Settings() {
-  const [settings, setSettings] = useState<LocalSettings>({
-    launchAtSystemStartup: false,
-    preferredLanguage: 'zh-CN',
-    translationTargetLanguage: 'en',
-    selectedAudioDeviceId: 'default',
-  })
+  const [settings, setSettings] = useState<LocalSettings>(defaultSettings)
   const [devices, setDevices] = useState<AudioDevice[]>([])
-  const [deepseekApiKey, setDeepseekApiKey] = useState('')
+  const settingsUpdateSeq = useRef(0)
 
   useEffect(() => {
     loadSettings().then(setSettings).catch(() => undefined)
@@ -53,8 +55,49 @@ export default function Settings() {
   }, [])
 
   const updateSettings = async (next: LocalSettings) => {
+    const seq = settingsUpdateSeq.current + 1
+    settingsUpdateSeq.current = seq
     setSettings(next)
-    setSettings(await saveSettings(next))
+    const saved = await saveSettings(next)
+    if (settingsUpdateSeq.current === seq) setSettings(saved)
+  }
+
+  const currentProvider = settings.llm.providers.find((provider) => provider.id === settings.llm.providerId)
+    ?? settings.llm.providers[0]
+
+  const updateLlm = (llm: LocalSettings['llm']) => {
+    void updateSettings({ ...settings, llm })
+  }
+
+  const updateProvider = (providerId: string) => {
+    if (!settings.llm.providers.some((provider) => provider.id === providerId)) return
+    updateLlm({ ...settings.llm, providerId })
+  }
+
+  const updateCurrentProvider = (updater: (provider: LlmProvider) => LlmProvider) => {
+    if (!currentProvider) return
+    updateLlm({
+      ...settings.llm,
+      providers: settings.llm.providers.map((provider) => (
+        provider.id === currentProvider.id ? updater(provider) : provider
+      )),
+    })
+  }
+
+  const updateCurrentApiKey = (apiKey: string) => {
+    if (!currentProvider) return
+    updateLlm({
+      ...settings.llm,
+      apiKeys: { ...settings.llm.apiKeys, [currentProvider.id]: apiKey },
+    })
+  }
+
+  const updateCurrentModel = (model: string) => {
+    if (!currentProvider) return
+    updateLlm({
+      ...settings.llm,
+      models: { ...settings.llm.models, [currentProvider.id]: model },
+    })
   }
 
   return (
@@ -125,14 +168,54 @@ export default function Settings() {
       {/* 大模型 */}
       <Typography sx={sectionTitle}>大模型</Typography>
       <Box sx={rowSx}>
+        <Typography>提供商</Typography>
+        <Select
+          size="small"
+          value={settings.llm.providerId}
+          onChange={(event) => updateProvider(String(event.target.value))}
+          sx={{ minWidth: 240 }}
+        >
+          {settings.llm.providers.map((provider) => (
+            <MenuItem key={provider.id} value={provider.id}>{provider.label}</MenuItem>
+          ))}
+        </Select>
+      </Box>
+      {currentProvider?.allowBaseUrlEdit && (
+        <Box sx={rowSx}>
+          <Typography>Base URL</Typography>
+          <TextField
+            fullWidth
+            size="small"
+            label="Base URL"
+            placeholder="请输入兼容 OpenAI 的 Base URL"
+            value={currentProvider.baseUrl}
+            onChange={(event) => updateCurrentProvider((provider) => ({ ...provider, baseUrl: event.target.value.trim() }))}
+            sx={{ maxWidth: 420 }}
+          />
+        </Box>
+      )}
+      <Box sx={rowSx}>
+        <Typography>API Key</Typography>
         <TextField
           fullWidth
           size="small"
           type="password"
-          label="DeepSeek API Key"
-          placeholder="请输入 DeepSeek API Key"
-          value={deepseekApiKey}
-          onChange={(event) => setDeepseekApiKey(event.target.value)}
+          label="API Key"
+          placeholder="请输入 API Key"
+          value={currentProvider ? settings.llm.apiKeys[currentProvider.id] ?? '' : ''}
+          onChange={(event) => updateCurrentApiKey(event.target.value)}
+          sx={{ maxWidth: 420 }}
+        />
+      </Box>
+      <Box sx={rowSx}>
+        <Typography>模型</Typography>
+        <TextField
+          fullWidth
+          size="small"
+          label="模型"
+          placeholder="请输入模型名称"
+          value={currentProvider ? settings.llm.models[currentProvider.id] ?? currentProvider.defaultModel : ''}
+          onChange={(event) => updateCurrentModel(event.target.value.trim())}
           sx={{ maxWidth: 420 }}
         />
       </Box>

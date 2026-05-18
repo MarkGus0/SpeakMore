@@ -1,14 +1,52 @@
 import assert from 'node:assert/strict'
 import { afterEach, test } from 'node:test'
-import { requestTextFlow } from './textFlow'
 
 const originalFetch = globalThis.fetch
+const originalWindow = globalThis.window
+
+type WindowWithIpc = typeof globalThis & {
+  ipcRenderer?: {
+    invoke: <T = unknown>(channel: string, payload?: unknown) => Promise<T>
+    send: (channel: string, payload?: unknown) => void
+    on: (channel: string, listener: (...args: unknown[]) => void) => void
+    off: (channel: string, listener: (...args: unknown[]) => void) => void
+  }
+}
 
 afterEach(() => {
   Object.defineProperty(globalThis, 'fetch', { configurable: true, value: originalFetch })
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow })
 })
 
+async function loadTextFlow(seed: string) {
+  return import(new URL(`./textFlow.ts?case=${seed}-${Date.now()}`, import.meta.url).href)
+}
+
+function installSettingsIpc() {
+  const windowLike = globalThis as WindowWithIpc
+  windowLike.ipcRenderer = {
+    invoke: async (channel: string) => {
+      if (channel === 'settings:get') {
+        return {
+          llm: {
+            providerId: 'openai',
+            apiKeys: { openai: 'sk-openai' },
+            models: { openai: 'gpt-5.4' },
+          },
+        } as never
+      }
+      return {} as never
+    },
+    send: () => undefined,
+    on: () => undefined,
+    off: () => undefined,
+  }
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: windowLike })
+}
+
 test('requestTextFlow 返回后端 refine_text', async () => {
+  installSettingsIpc()
+  const { requestTextFlow } = await loadTextFlow('success')
   const requests: Array<{ url: string; init?: RequestInit }> = []
   Object.defineProperty(globalThis, 'fetch', {
     configurable: true,
@@ -29,10 +67,25 @@ test('requestTextFlow 返回后端 refine_text', async () => {
 
   assert.equal(result, 'translated text')
   assert.match(requests[0].url, /\/ai\/text_flow$/)
-  assert.equal(JSON.parse(String(requests[0].init?.body)).text, '你好')
+  assert.deepEqual(JSON.parse(String(requests[0].init?.body)), {
+    mode: 'translation',
+    text: '你好',
+    parameters: {
+      output_language: 'en',
+      llm: {
+        provider_id: 'openai',
+        base_url: 'https://api.openai.com/v1',
+        api_key: 'sk-openai',
+        model: 'gpt-5.4',
+        auth_type: 'bearer',
+      },
+    },
+  })
 })
 
 test('requestTextFlow 在后端错误时抛出 detail', async () => {
+  installSettingsIpc()
+  const { requestTextFlow } = await loadTextFlow('http-error')
   Object.defineProperty(globalThis, 'fetch', {
     configurable: true,
     value: async () => ({
@@ -49,6 +102,8 @@ test('requestTextFlow 在后端错误时抛出 detail', async () => {
 })
 
 test('requestTextFlow 在业务状态 ERROR 时抛出 detail', async () => {
+  installSettingsIpc()
+  const { requestTextFlow } = await loadTextFlow('business-error')
   Object.defineProperty(globalThis, 'fetch', {
     configurable: true,
     value: async () => ({

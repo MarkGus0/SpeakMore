@@ -74,6 +74,73 @@ const HISTORY_FILE_NAME = 'history.json';
 const HISTORY_STATS_FILE_NAME = 'history-stats.json';
 const DEFAULT_TRANSLATION_TARGET_LANGUAGE = 'en';
 const SUPPORTED_TRANSLATION_TARGET_LANGUAGES = new Set([DEFAULT_TRANSLATION_TARGET_LANGUAGE]);
+const DEFAULT_LLM_PROVIDER_ID = 'deepseek';
+const DEFAULT_LLM_PROVIDERS = [
+  {
+    id: 'deepseek',
+    label: 'DeepSeek',
+    baseUrl: 'https://api.deepseek.com/v1',
+    defaultModel: 'deepseek-chat',
+    allowBaseUrlEdit: false,
+    authType: 'bearer',
+  },
+  {
+    id: 'openai',
+    label: 'OpenAI',
+    baseUrl: 'https://api.openai.com/v1',
+    defaultModel: 'gpt-5.4',
+    allowBaseUrlEdit: false,
+    authType: 'bearer',
+  },
+  {
+    id: 'zai',
+    label: 'Z.AI',
+    baseUrl: 'https://api.z.ai/api/paas/v4',
+    defaultModel: 'glm-4.6',
+    allowBaseUrlEdit: false,
+    authType: 'bearer',
+  },
+  {
+    id: 'openrouter',
+    label: 'OpenRouter',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    defaultModel: 'openai/gpt-5.4',
+    allowBaseUrlEdit: false,
+    authType: 'bearer',
+  },
+  {
+    id: 'anthropic',
+    label: 'Anthropic',
+    baseUrl: 'https://api.anthropic.com/v1',
+    defaultModel: 'claude-sonnet-4-5',
+    allowBaseUrlEdit: false,
+    authType: 'anthropic',
+  },
+  {
+    id: 'groq',
+    label: 'Groq',
+    baseUrl: 'https://api.groq.com/openai/v1',
+    defaultModel: 'llama-3.3-70b-versatile',
+    allowBaseUrlEdit: false,
+    authType: 'bearer',
+  },
+  {
+    id: 'cerebras',
+    label: 'Cerebras',
+    baseUrl: 'https://api.cerebras.ai/v1',
+    defaultModel: 'llama-3.3-70b',
+    allowBaseUrlEdit: false,
+    authType: 'bearer',
+  },
+  {
+    id: 'custom',
+    label: 'Custom',
+    baseUrl: 'http://localhost:11434/v1',
+    defaultModel: '',
+    allowBaseUrlEdit: true,
+    authType: 'bearer',
+  },
+];
 const SHORTCUT_DEBUG_ENABLED = ['1', 'true', 'yes', 'on'].includes(
   String(process.env.TYPELESS_SHORTCUT_DEBUG || '').toLowerCase(),
 );
@@ -125,6 +192,7 @@ const defaultLocalSettings = {
   translationTargetLanguage: DEFAULT_TRANSLATION_TARGET_LANGUAGE,
   launchAtSystemStartup: false,
   selectedAudioDeviceId: 'default',
+  llm: createDefaultLlmSettings(),
 };
 
 function localDataDir() {
@@ -161,6 +229,90 @@ function writeJsonFile(fileName, value) {
   return value;
 }
 
+function createDefaultLlmSettings() {
+  return {
+    providerId: DEFAULT_LLM_PROVIDER_ID,
+    providers: DEFAULT_LLM_PROVIDERS,
+    apiKeys: Object.fromEntries(DEFAULT_LLM_PROVIDERS.map((provider) => [provider.id, ''])),
+    models: Object.fromEntries(DEFAULT_LLM_PROVIDERS.map((provider) => [provider.id, provider.defaultModel])),
+  };
+}
+
+function normalizeStringMap(value = {}) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter((entry) => typeof entry[1] === 'string')
+      .map(([key, item]) => [key, item]),
+  );
+}
+
+function normalizeLlmProvider(candidate, fallback) {
+  const value = candidate && typeof candidate === 'object' && !Array.isArray(candidate) ? candidate : {};
+  const baseUrl = typeof value.baseUrl === 'string' && value.baseUrl.trim()
+    ? value.baseUrl.trim()
+    : fallback.baseUrl;
+  const defaultModel = typeof value.defaultModel === 'string'
+    ? value.defaultModel.trim()
+    : fallback.defaultModel;
+  return {
+    id: fallback.id,
+    label: typeof value.label === 'string' && value.label.trim() ? value.label.trim() : fallback.label,
+    baseUrl: fallback.allowBaseUrlEdit ? baseUrl : fallback.baseUrl,
+    defaultModel: defaultModel || fallback.defaultModel,
+    allowBaseUrlEdit: fallback.allowBaseUrlEdit,
+    authType: value.authType === 'anthropic' ? 'anthropic' : fallback.authType,
+  };
+}
+
+function normalizeLlmSettings(value = {}) {
+  const settings = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const existingProviders = Array.isArray(settings.providers) ? settings.providers : [];
+  const providers = DEFAULT_LLM_PROVIDERS.map((fallback) => {
+    const existing = existingProviders.find((provider) => provider?.id === fallback.id);
+    return normalizeLlmProvider(existing, fallback);
+  });
+  const providerId = providers.some((provider) => provider.id === settings.providerId)
+    ? settings.providerId
+    : DEFAULT_LLM_PROVIDER_ID;
+  const apiKeySource = normalizeStringMap(settings.apiKeys);
+  const modelSource = normalizeStringMap(settings.models);
+  const apiKeys = Object.fromEntries(providers.map((provider) => [provider.id, apiKeySource[provider.id] || '']));
+  const models = Object.fromEntries(providers.map((provider) => [
+    provider.id,
+    (modelSource[provider.id] || provider.defaultModel || '').trim(),
+  ]));
+
+  return { providerId, providers, apiKeys, models };
+}
+
+function buildCurrentLlmRequestConfig(settings = readLocalSettings()) {
+  const llm = normalizeLlmSettings(settings.llm);
+  const provider = llm.providers.find((item) => item.id === llm.providerId) || llm.providers[0] || DEFAULT_LLM_PROVIDERS[0];
+  return {
+    provider_id: provider.id,
+    base_url: provider.baseUrl,
+    api_key: llm.apiKeys[provider.id] || '',
+    model: llm.models[provider.id] || provider.defaultModel,
+    auth_type: provider.authType,
+  };
+}
+
+function normalizeLlmRequestConfig(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const providerId = typeof value.provider_id === 'string' ? value.provider_id.trim() : '';
+  const baseUrl = typeof value.base_url === 'string' ? value.base_url.trim() : '';
+  const model = typeof value.model === 'string' ? value.model.trim() : '';
+  if (!providerId || !baseUrl || !model) return null;
+  return {
+    provider_id: providerId,
+    base_url: baseUrl,
+    api_key: typeof value.api_key === 'string' ? value.api_key : '',
+    model,
+    auth_type: value.auth_type === 'anthropic' ? 'anthropic' : 'bearer',
+  };
+}
+
 function normalizeLocalSettings(value = {}) {
   return {
     ...defaultLocalSettings,
@@ -172,6 +324,7 @@ function normalizeLocalSettings(value = {}) {
     selectedAudioDeviceId: typeof value.selectedAudioDeviceId === 'string' && value.selectedAudioDeviceId
       ? value.selectedAudioDeviceId
       : 'default',
+    llm: normalizeLlmSettings(value.llm),
   };
 }
 
@@ -850,6 +1003,7 @@ function buildVoiceFlowParameters(payload = {}) {
 
   return {
     ...parameters,
+    llm: normalizeLlmRequestConfig(parameters.llm) || buildCurrentLlmRequestConfig(),
     ...(selectedText ? { selected_text: selectedText } : {}),
     ...(outputLanguage ? { output_language: outputLanguage } : {}),
   };
