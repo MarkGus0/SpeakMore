@@ -39,35 +39,11 @@ export const emptyModelsState: ModelsState = {
   selectionLocked: false,
 }
 
-function normalizeModelInfo(value: unknown): ModelInfo | null {
-  const model = value as Partial<ModelInfo> | null
-  if (!model || typeof model.id !== 'string' || typeof model.name !== 'string') return null
-  return {
-    id: model.id,
-    name: model.name,
-    repoId: typeof model.repoId === 'string' ? model.repoId : '',
-    engine: 'faster-whisper',
-    description: typeof model.description === 'string' ? model.description : '',
-    sizeMb: Number(model.sizeMb) || 0,
-    accuracyScore: Number(model.accuracyScore) || 0,
-    speedScore: Number(model.speedScore) || 0,
-    supportedLanguages: Array.isArray(model.supportedLanguages) ? model.supportedLanguages.map(String) : [],
-    isCurrent: Boolean(model.isCurrent),
-    isDownloaded: Boolean(model.isDownloaded),
-    isDownloading: Boolean(model.isDownloading),
-    downloadProgress: Math.max(0, Math.min(100, Number(model.downloadProgress) || 0)),
-    downloadError: typeof model.downloadError === 'string' ? model.downloadError : '',
-    snapshotPath: typeof model.snapshotPath === 'string' ? model.snapshotPath : '',
-  }
-}
-
 function normalizeModelsState(value: unknown): ModelsState {
-  const candidate = value as Partial<ModelsState> | null
+  const candidate = value && typeof value === 'object' ? value as Partial<ModelsState> : null
   return {
     currentModelId: typeof candidate?.currentModelId === 'string' ? candidate.currentModelId : 'base',
-    models: Array.isArray(candidate?.models)
-      ? candidate.models.map(normalizeModelInfo).filter((model): model is ModelInfo => Boolean(model))
-      : [],
+    models: Array.isArray(candidate?.models) ? candidate.models as ModelInfo[] : [],
     explicitModelDir: typeof candidate?.explicitModelDir === 'string' ? candidate.explicitModelDir : '',
     selectionLocked: Boolean(candidate?.selectionLocked),
   }

@@ -1,24 +1,29 @@
+import asyncio
 import json
 import os
 import shutil
 import threading
 from pathlib import Path
 
+
 DEFAULT_MODEL_ID = "base"
 AVAILABLE_MODEL_IDS = ("tiny", "base", "small", "medium", "large-v3")
-SELECTION_FILE_NAME = "model-selection.json"
-REQUIRED_MODEL_FILES = ("model.bin", "config.json")
 
-MODEL_CATALOG = [
+_SELECTION_FILE_NAME = "model-selection.json"
+_DOWNLOAD_STATUS = {}
+_DOWNLOAD_TASKS = {}
+_DOWNLOAD_STATUS_LOCK = threading.Lock()
+
+_MODEL_CATALOG = (
     {
         "id": "tiny",
         "name": "Faster Whisper Tiny",
         "repoId": "Systran/faster-whisper-tiny",
         "engine": "faster-whisper",
-        "description": "速度最快，适合临时测试和低配置设备。",
+        "description": "最快的入门模型，适合低资源设备和快速验证。",
         "sizeMb": 75,
-        "accuracyScore": 0.35,
-        "speedScore": 0.95,
+        "accuracyScore": 0.2,
+        "speedScore": 1.0,
         "supportedLanguages": ["multi", "zh", "en"],
     },
     {
@@ -26,10 +31,10 @@ MODEL_CATALOG = [
         "name": "Faster Whisper Base",
         "repoId": "Systran/faster-whisper-base",
         "engine": "faster-whisper",
-        "description": "默认模型，速度和资源占用较均衡。",
+        "description": "默认模型，在速度、体积和识别质量之间保持平衡。",
         "sizeMb": 145,
-        "accuracyScore": 0.50,
-        "speedScore": 0.85,
+        "accuracyScore": 0.4,
+        "speedScore": 0.8,
         "supportedLanguages": ["multi", "zh", "en"],
     },
     {
@@ -37,10 +42,10 @@ MODEL_CATALOG = [
         "name": "Faster Whisper Small",
         "repoId": "Systran/faster-whisper-small",
         "engine": "faster-whisper",
-        "description": "准确度更高，仍适合日常听写。",
-        "sizeMb": 470,
-        "accuracyScore": 0.65,
-        "speedScore": 0.68,
+        "description": "更好的识别质量，适合多数日常听写场景。",
+        "sizeMb": 466,
+        "accuracyScore": 0.6,
+        "speedScore": 0.6,
         "supportedLanguages": ["multi", "zh", "en"],
     },
     {
@@ -48,10 +53,10 @@ MODEL_CATALOG = [
         "name": "Faster Whisper Medium",
         "repoId": "Systran/faster-whisper-medium",
         "engine": "faster-whisper",
-        "description": "准确度高，加载和转写更慢。",
+        "description": "更高准确率，适合质量优先且设备性能充足的场景。",
         "sizeMb": 1500,
-        "accuracyScore": 0.80,
-        "speedScore": 0.42,
+        "accuracyScore": 0.8,
+        "speedScore": 0.4,
         "supportedLanguages": ["multi", "zh", "en"],
     },
     {
@@ -59,197 +64,191 @@ MODEL_CATALOG = [
         "name": "Faster Whisper Large v3",
         "repoId": "Systran/faster-whisper-large-v3",
         "engine": "faster-whisper",
-        "description": "准确度最高，资源占用最大。",
+        "description": "最高识别质量，适合准确率优先的场景。",
         "sizeMb": 3100,
-        "accuracyScore": 0.92,
-        "speedScore": 0.22,
+        "accuracyScore": 1.0,
+        "speedScore": 0.2,
         "supportedLanguages": ["multi", "zh", "en"],
     },
-]
-
-_download_status_by_model_id: dict[str, dict] = {}
-_download_lock = threading.Lock()
-_download_threads_by_model_id: dict[str, threading.Thread] = {}
+)
 
 
-def get_managed_models_root() -> Path:
-    local_app_data = Path(os.getenv("LOCALAPPDATA") or (Path.home() / "AppData" / "Local"))
-    return local_app_data / "Typeless" / "models"
+def get_managed_models_root():
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    base_dir = Path(local_app_data) if local_app_data else Path.home() / "AppData" / "Local"
+    return base_dir / "Typeless" / "models"
 
 
-def get_managed_whisper_cache_root() -> Path:
+def get_managed_whisper_cache_root():
     return get_managed_models_root() / "faster-whisper"
 
 
-def get_model_catalog() -> list[dict]:
-    return [dict(model) for model in MODEL_CATALOG]
-
-
-def get_model_definition(model_id: str) -> dict:
-    for model in MODEL_CATALOG:
-        if model["id"] == model_id:
-            return dict(model)
-    raise ValueError(f"未知模型: {model_id}")
-
-
-def selection_file_path() -> Path:
-    return get_managed_models_root() / SELECTION_FILE_NAME
-
-
-def normalize_model_id(model_id: str | None) -> str:
-    return model_id if model_id in AVAILABLE_MODEL_IDS else DEFAULT_MODEL_ID
-
-
-def read_selected_model_id() -> str:
-    try:
-        payload = json.loads(selection_file_path().read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return DEFAULT_MODEL_ID
-    return normalize_model_id(payload.get("currentModelId"))
-
-
-def write_selected_model_id(model_id: str) -> str:
-    normalized = normalize_model_id(model_id)
-    root = get_managed_models_root()
-    root.mkdir(parents=True, exist_ok=True)
-    selection_file_path().write_text(
-        json.dumps({"currentModelId": normalized}, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    return normalized
-
-
-def repo_cache_dir_name(repo_id: str) -> str:
+def repo_cache_dir_name(repo_id: str):
     return f"models--{repo_id.replace('/', '--')}"
 
 
-def is_valid_model_snapshot(path: Path) -> bool:
-    return path.is_dir() and all((path / name).exists() for name in REQUIRED_MODEL_FILES)
+def get_model_catalog():
+    return [{**model, "supportedLanguages": list(model["supportedLanguages"])} for model in _MODEL_CATALOG]
 
 
-def find_cached_model_snapshot(model_id: str) -> Path | None:
+def get_model_definition(model_id: str):
+    for model in get_model_catalog():
+        if model["id"] == model_id:
+            return model
+    raise ValueError(f"未知模型: {model_id}")
+
+
+def normalize_model_id(model_id):
+    return model_id if isinstance(model_id, str) and model_id in AVAILABLE_MODEL_IDS else DEFAULT_MODEL_ID
+
+
+def read_selected_model_id():
+    selection_file = get_managed_models_root() / _SELECTION_FILE_NAME
+    try:
+        selection = json.loads(selection_file.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return DEFAULT_MODEL_ID
+
+    if not isinstance(selection, dict):
+        return DEFAULT_MODEL_ID
+
+    return normalize_model_id(selection.get("currentModelId"))
+
+
+def write_selected_model_id(model_id):
+    normalized_model_id = normalize_model_id(model_id)
+    root = get_managed_models_root()
+    root.mkdir(parents=True, exist_ok=True)
+    selection_file = root / _SELECTION_FILE_NAME
+    selection_file.write_text(
+        json.dumps({"currentModelId": normalized_model_id}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return normalized_model_id
+
+
+def is_valid_model_snapshot(path: Path):
+    return path.is_dir() and (path / "model.bin").is_file() and (path / "config.json").is_file()
+
+
+def find_cached_model_snapshot(model_id: str, cache_root=None):
     model = get_model_definition(model_id)
-    snapshots_root = get_managed_whisper_cache_root() / repo_cache_dir_name(model["repoId"]) / "snapshots"
-    if not snapshots_root.exists():
+    root = Path(cache_root) if cache_root is not None else get_managed_whisper_cache_root()
+    snapshots_root = root / repo_cache_dir_name(model["repoId"]) / "snapshots"
+    try:
+        candidates = list(snapshots_root.iterdir())
+    except (FileNotFoundError, OSError):
         return None
 
-    candidates = sorted(
-        (candidate for candidate in snapshots_root.iterdir() if candidate.is_dir()),
-        key=lambda candidate: candidate.stat().st_mtime,
-        reverse=True,
-    )
-    for candidate in candidates:
-        if is_valid_model_snapshot(candidate):
-            return candidate
+    sortable_snapshots = []
+    for snapshot in candidates:
+        try:
+            if not snapshot.is_dir():
+                continue
+            sortable_snapshots.append((snapshot.stat().st_mtime, snapshot))
+        except OSError:
+            continue
+
+    sortable_snapshots.sort(key=lambda item: item[0], reverse=True)
+    for _, snapshot in sortable_snapshots:
+        if is_valid_model_snapshot(snapshot):
+            return snapshot
     return None
 
 
-def get_download_status(model_id: str) -> dict:
-    with _download_lock:
-        return dict(_download_status_by_model_id.get(model_id, {}))
+def _default_download_status():
+    return {
+        "isDownloading": False,
+        "downloadProgress": 0,
+        "downloadError": "",
+    }
 
 
-def mark_download_started(model_id: str) -> None:
-    get_model_definition(model_id)
-    with _download_lock:
-        _download_status_by_model_id[model_id] = {
+def _set_download_status(model_id, status):
+    normalized_model_id = get_model_definition(model_id)["id"]
+    with _DOWNLOAD_STATUS_LOCK:
+        _DOWNLOAD_STATUS[normalized_model_id] = status
+    return normalized_model_id
+
+
+def mark_download_started(model_id):
+    return _set_download_status(
+        model_id,
+        {
             "isDownloading": True,
             "downloadProgress": 0,
             "downloadError": "",
-            "cancelRequested": False,
-        }
+        },
+    )
 
 
-def update_download_progress(model_id: str, downloaded: int, total: int) -> None:
-    percentage = 0 if total <= 0 else max(0, min(100, round(downloaded / total * 100)))
-    with _download_lock:
-        current = _download_status_by_model_id.setdefault(model_id, {})
-        current.update({
+def update_download_progress(model_id, downloaded, total):
+    normalized_model_id = get_model_definition(model_id)["id"]
+    progress = 0 if total <= 0 else round(downloaded / total * 100)
+    progress = max(0, min(100, progress))
+
+    with _DOWNLOAD_STATUS_LOCK:
+        current = {**_default_download_status(), **_DOWNLOAD_STATUS.get(normalized_model_id, {})}
+        _DOWNLOAD_STATUS[normalized_model_id] = {
+            **current,
             "isDownloading": True,
-            "downloadProgress": percentage,
+            "downloadProgress": progress,
             "downloadError": "",
-        })
+        }
+    return normalized_model_id
 
 
-def mark_download_finished(model_id: str) -> None:
-    with _download_lock:
-        _download_status_by_model_id.pop(model_id, None)
+def mark_download_finished(model_id):
+    normalized_model_id = get_model_definition(model_id)["id"]
+    with _DOWNLOAD_STATUS_LOCK:
+        _DOWNLOAD_STATUS.pop(normalized_model_id, None)
+    return normalized_model_id
 
 
-def mark_download_failed(model_id: str, error: str) -> None:
-    with _download_lock:
-        _download_status_by_model_id[model_id] = {
+def mark_download_failed(model_id, error):
+    return _set_download_status(
+        model_id,
+        {
             "isDownloading": False,
             "downloadProgress": 0,
-            "downloadError": error,
-            "cancelRequested": False,
-        }
+            "downloadError": str(error),
+        },
+    )
 
 
-def request_download_cancel(model_id: str) -> None:
-    with _download_lock:
-        current = _download_status_by_model_id.setdefault(model_id, {})
-        current["cancelRequested"] = True
+def get_download_status(model_id):
+    normalized_model_id = get_model_definition(model_id)["id"]
+    with _DOWNLOAD_STATUS_LOCK:
+        return {**_default_download_status(), **_DOWNLOAD_STATUS.get(normalized_model_id, {})}
 
 
-def is_download_cancel_requested(model_id: str) -> bool:
-    return bool(get_download_status(model_id).get("cancelRequested"))
+def clear_download_status_for_tests():
+    # 模块级下载状态会跨测试保留，测试需要显式隔离。
+    with _DOWNLOAD_STATUS_LOCK:
+        _DOWNLOAD_STATUS.clear()
+        _DOWNLOAD_TASKS.clear()
 
 
-def download_model_files(model_id: str) -> None:
-    model = get_model_definition(model_id)
-    mark_download_started(model_id)
-    try:
-        from huggingface_hub import snapshot_download
-
-        snapshot_download(
-            repo_id=model["repoId"],
-            cache_dir=str(get_managed_whisper_cache_root()),
-            local_files_only=False,
-        )
-        if is_download_cancel_requested(model_id):
-            mark_download_failed(model_id, "下载已取消")
-            return
-        mark_download_finished(model_id)
-    except Exception as error:
-        mark_download_failed(model_id, str(error))
-
-
-def start_model_download(model_id: str) -> None:
-    model = get_model_definition(model_id)
-    normalized = model["id"]
-    if get_download_status(normalized).get("isDownloading"):
-        return
-
-    thread = threading.Thread(target=download_model_files, args=(normalized,), daemon=True)
-    with _download_lock:
-        _download_threads_by_model_id[normalized] = thread
-    thread.start()
-
-
-def cancel_model_download(model_id: str) -> None:
-    model = get_model_definition(model_id)
-    normalized = model["id"]
-    request_download_cancel(normalized)
-    mark_download_failed(normalized, "下载已取消")
-
-
-def create_models_state() -> dict:
+def create_models_state():
+    explicit_model_dir = os.environ.get("WHISPER_MODEL_DIR") or ""
     current_model_id = read_selected_model_id()
-    explicit_model_dir = os.getenv("WHISPER_MODEL_DIR", "").strip()
     models = []
+
     for model in get_model_catalog():
-        status = get_download_status(model["id"])
         snapshot = find_cached_model_snapshot(model["id"])
-        models.append({
-            **model,
-            "isCurrent": model["id"] == current_model_id,
-            "isDownloaded": snapshot is not None,
-            "isDownloading": bool(status.get("isDownloading")),
-            "downloadProgress": int(status.get("downloadProgress") or 0),
-            "downloadError": str(status.get("downloadError") or ""),
-            "snapshotPath": str(snapshot) if snapshot else "",
-        })
+        download_status = get_download_status(model["id"])
+        models.append(
+            {
+                **model,
+                "isCurrent": model["id"] == current_model_id,
+                "isDownloaded": snapshot is not None,
+                "isDownloading": download_status["isDownloading"],
+                "downloadProgress": download_status["downloadProgress"],
+                "downloadError": download_status["downloadError"],
+                "snapshotPath": str(snapshot) if snapshot else "",
+            }
+        )
+
     return {
         "currentModelId": current_model_id,
         "models": models,
@@ -258,11 +257,75 @@ def create_models_state() -> dict:
     }
 
 
-def delete_model_files(model_id: str) -> bool:
+def delete_model_files(model_id):
     model = get_model_definition(model_id)
-    cache_root = get_managed_whisper_cache_root() / repo_cache_dir_name(model["repoId"])
-    if not cache_root.exists():
+    cache_dir = get_managed_whisper_cache_root() / repo_cache_dir_name(model["repoId"])
+    mark_download_finished(model["id"])
+
+    if not cache_dir.exists():
         return False
-    shutil.rmtree(cache_root)
-    mark_download_finished(model_id)
+
+    shutil.rmtree(cache_dir)
+    return True
+
+
+async def download_model(model_id):
+    model = get_model_definition(model_id)
+    if find_cached_model_snapshot(model["id"]):
+        mark_download_finished(model["id"])
+        return
+
+    mark_download_started(model["id"])
+    try:
+        from huggingface_hub import snapshot_download
+
+        await asyncio.to_thread(
+            snapshot_download,
+            repo_id=model["repoId"],
+            cache_dir=str(get_managed_whisper_cache_root()),
+            local_files_only=False,
+        )
+        mark_download_finished(model["id"])
+    except asyncio.CancelledError:
+        mark_download_finished(model["id"])
+        raise
+    except Exception as error:
+        mark_download_failed(model["id"], str(error))
+        raise
+
+
+def _consume_download_task_result(task):
+    try:
+        task.result()
+    except asyncio.CancelledError:
+        return
+    except Exception:
+        return
+
+
+def start_download_task(model_id):
+    model = get_model_definition(model_id)
+    if find_cached_model_snapshot(model["id"]):
+        mark_download_finished(model["id"])
+        return False
+
+    existing_task = _DOWNLOAD_TASKS.get(model["id"])
+    if existing_task and not existing_task.done():
+        return False
+
+    mark_download_started(model["id"])
+    task = asyncio.create_task(download_model(model["id"]))
+    task.add_done_callback(_consume_download_task_result)
+    _DOWNLOAD_TASKS[model["id"]] = task
+    return True
+
+
+def cancel_download_task(model_id):
+    model = get_model_definition(model_id)
+    task = _DOWNLOAD_TASKS.get(model["id"])
+    if not task or task.done():
+        return False
+
+    task.cancel()
+    mark_download_finished(model["id"])
     return True

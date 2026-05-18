@@ -1,4 +1,4 @@
-"""ASR 模块 - 使用当前选择的 faster-whisper 模型进行语音转文字"""
+"""ASR 模块 - 唯一使用 faster-whisper 进行语音转文字"""
 
 import asyncio
 import os
@@ -11,16 +11,14 @@ from model_manager import (
     DEFAULT_MODEL_ID,
     find_cached_model_snapshot,
     get_managed_whisper_cache_root,
-    get_model_definition,
     normalize_model_id,
     read_selected_model_id,
-    repo_cache_dir_name,
+    write_selected_model_id,
 )
 
 load_server_env()
 
 DEFAULT_WHISPER_MODEL = DEFAULT_MODEL_ID
-BASE_MODEL_REPO_DIR = "models--Systran--faster-whisper-base"
 DIR_SOURCE = "dir"
 MANAGED_CACHE_SOURCE = "managed-cache"
 HF_CACHE_SOURCE = "hf-cache"
@@ -42,7 +40,9 @@ _model_lock = threading.Lock()
 
 def get_whisper_model_name() -> str:
     configured_model = os.getenv("WHISPER_MODEL", "").strip()
-    return normalize_model_id(configured_model) if configured_model else read_selected_model_id()
+    if configured_model:
+        return normalize_model_id(configured_model)
+    return normalize_model_id(read_selected_model_id())
 
 
 def get_hf_cache_root() -> Path:
@@ -54,27 +54,8 @@ def is_valid_whisper_model_dir(path: Path) -> bool:
     return path.is_dir() and all((path / name).exists() for name in REQUIRED_MODEL_FILES)
 
 
-def find_cached_whisper_snapshot(cache_root: Path, model_id: str | None = None) -> Path | None:
-    model = get_model_definition(normalize_model_id(model_id or get_whisper_model_name()))
-    snapshots_root = cache_root / repo_cache_dir_name(model["repoId"]) / "snapshots"
-    if not snapshots_root.exists():
-        return None
-
-    candidates = sorted(
-        (candidate for candidate in snapshots_root.iterdir() if candidate.is_dir()),
-        key=lambda candidate: candidate.stat().st_mtime,
-        reverse=True,
-    )
-
-    for candidate in candidates:
-        if is_valid_whisper_model_dir(candidate):
-            return candidate
-
-    return None
-
-
 def get_candidate_whisper_model_sources(model_id: str | None = None) -> list[WhisperModelSource]:
-    target_model_id = normalize_model_id(model_id or get_whisper_model_name())
+    selected_model_id = normalize_model_id(model_id) if model_id is not None else get_whisper_model_name()
 
     configured_dir = os.getenv("WHISPER_MODEL_DIR", "").strip()
     if configured_dir:
@@ -83,28 +64,42 @@ def get_candidate_whisper_model_sources(model_id: str | None = None) -> list[Whi
             raise ValueError(
                 "WHISPER_MODEL_DIR 必须指向包含 model.bin 和 config.json 的 faster-whisper 模型目录"
             )
-        return [WhisperModelSource(kind=DIR_SOURCE, model_ref=str(explicit_dir), model_id=target_model_id)]
+        return [
+            WhisperModelSource(
+                kind=DIR_SOURCE,
+                model_ref=str(explicit_dir),
+                model_id=selected_model_id,
+            )
+        ]
 
     sources: list[WhisperModelSource] = []
     managed_root = get_managed_whisper_cache_root()
-    managed_snapshot = find_cached_whisper_snapshot(managed_root, target_model_id)
+    managed_snapshot = find_cached_model_snapshot(selected_model_id)
     if managed_snapshot:
-        sources.append(WhisperModelSource(
-            kind=MANAGED_CACHE_SOURCE,
-            model_ref=str(managed_snapshot),
-            model_id=target_model_id,
-        ))
+        sources.append(
+            WhisperModelSource(
+                kind=MANAGED_CACHE_SOURCE,
+                model_ref=str(managed_snapshot),
+                model_id=selected_model_id,
+            )
+        )
 
-    hf_snapshot = find_cached_whisper_snapshot(get_hf_cache_root(), target_model_id)
+    hf_snapshot = find_cached_model_snapshot(selected_model_id, cache_root=get_hf_cache_root())
     if hf_snapshot:
-        sources.append(WhisperModelSource(kind=HF_CACHE_SOURCE, model_ref=str(hf_snapshot), model_id=target_model_id))
+        sources.append(
+            WhisperModelSource(
+                kind=HF_CACHE_SOURCE,
+                model_ref=str(hf_snapshot),
+                model_id=selected_model_id,
+            )
+        )
 
     sources.append(
         WhisperModelSource(
             kind=DOWNLOAD_SOURCE,
-            model_ref=target_model_id,
+            model_ref=selected_model_id,
             download_root=str(managed_root),
-            model_id=target_model_id,
+            model_id=selected_model_id,
         )
     )
     return sources
@@ -131,6 +126,24 @@ def build_whisper_model(source: WhisperModelSource):
     return WhisperModel(source.model_ref, **load_kwargs)
 
 
+def _load_whisper_model(model_id: str | None = None):
+    errors: list[str] = []
+    for source in get_candidate_whisper_model_sources(model_id):
+        try:
+            model = build_whisper_model(source)
+            print(f"[ASR] 模型加载完成，来源: {source.kind}")
+            return model
+        except Exception as error:
+            if source.kind == DOWNLOAD_SOURCE:
+                errors.append(
+                    f"{source.kind}: {source.model_ref} -> 下载或加载失败，目标目录: {source.download_root}: {error}"
+                )
+            else:
+                errors.append(f"{source.kind}: {source.model_ref} -> {error}")
+
+    raise RuntimeError("faster-whisper 模型加载失败: " + " | ".join(errors))
+
+
 def preload_whisper_model():
     global _model
     if _model is not None:
@@ -140,39 +153,25 @@ def preload_whisper_model():
         if _model is not None:
             return _model
 
-        errors: list[str] = []
-        for source in get_candidate_whisper_model_sources():
-            try:
-                _model = build_whisper_model(source)
-                print(f"[ASR] 模型加载完成，来源: {source.kind}")
-                return _model
-            except Exception as error:
-                if source.kind == DOWNLOAD_SOURCE:
-                    errors.append(
-                        f"{source.kind}: {source.model_ref} -> 下载或加载失败，目标目录: {source.download_root}: {error}"
-                    )
-                else:
-                    errors.append(f"{source.kind}: {source.model_ref} -> {error}")
-
-        raise RuntimeError("faster-whisper 模型加载失败: " + " | ".join(errors))
+        _model = _load_whisper_model()
+        return _model
 
 
 def reload_whisper_model(model_id: str):
     global _model
+    if os.getenv("WHISPER_MODEL_DIR", "").strip():
+        raise RuntimeError("WHISPER_MODEL_DIR 已设置，不能通过 reload_whisper_model 切换模型")
+
     normalized_model_id = normalize_model_id(model_id)
+
     with _model_lock:
         previous_model = _model
+
         try:
-            for source in get_candidate_whisper_model_sources(normalized_model_id):
-                try:
-                    next_model = build_whisper_model(source)
-                    _model = next_model
-                    return next_model
-                except Exception:
-                    if source.kind == DOWNLOAD_SOURCE:
-                        raise
-                    continue
-            raise RuntimeError(f"faster-whisper {normalized_model_id} 模型加载失败")
+            loaded_model = _load_whisper_model(normalized_model_id)
+            write_selected_model_id(normalized_model_id)
+            _model = loaded_model
+            return _model
         except Exception:
             _model = previous_model
             raise

@@ -1045,6 +1045,7 @@ async function callModelBackend(pathname = '', options = {}) {
       body: options.body ? JSON.stringify(options.body) : undefined,
     });
     const payload = await readJsonSafely(response);
+
     if (!response.ok) {
       return {
         success: false,
@@ -1053,6 +1054,7 @@ async function callModelBackend(pathname = '', options = {}) {
         data: payload,
       };
     }
+
     return { success: true, data: payload };
   } catch (error) {
     return {
@@ -1527,11 +1529,20 @@ function registerIpcHandlers() {
     return { success: true };
   });
   ipcMain.handle('dictionary:prompt-terms', () => readPromptDictionaryTerms());
+
   ipcMain.handle('model:list', () => callModelBackend());
-  ipcMain.handle('model:download', (_, modelId) => callModelBackend(`/${encodeURIComponent(String(modelId))}/download`, { method: 'POST' }));
-  ipcMain.handle('model:cancel-download', (_, modelId) => callModelBackend(`/${encodeURIComponent(String(modelId))}/cancel`, { method: 'POST' }));
-  ipcMain.handle('model:delete', (_, modelId) => callModelBackend(`/${encodeURIComponent(String(modelId))}`, { method: 'DELETE' }));
-  ipcMain.handle('model:select', (_, modelId) => callModelBackend(`/${encodeURIComponent(String(modelId))}/select`, { method: 'POST' }));
+  ipcMain.handle('model:download', (_, modelId) => (
+    callModelBackend(`/${encodeURIComponent(String(modelId))}/download`, { method: 'POST' })
+  ));
+  ipcMain.handle('model:cancel-download', (_, modelId) => (
+    callModelBackend(`/${encodeURIComponent(String(modelId))}/cancel`, { method: 'POST' })
+  ));
+  ipcMain.handle('model:delete', (_, modelId) => (
+    callModelBackend(`/${encodeURIComponent(String(modelId))}`, { method: 'DELETE' })
+  ));
+  ipcMain.handle('model:select', (_, modelId) => (
+    callModelBackend(`/${encodeURIComponent(String(modelId))}/select`, { method: 'POST' })
+  ));
 
   ipcMain.handle('keyboard:start-keyboard-listener', () => true);
   ipcMain.handle('keyboard:stop-keyboard-listener', () => true);

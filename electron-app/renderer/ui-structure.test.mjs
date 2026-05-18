@@ -224,6 +224,44 @@ test('主进程注册真实 bundle 首屏所需的 IPC shim', async () => {
   }
 });
 
+test('模型管理 IPC 只转发到后端，不在 Electron 主进程管理模型文件', async () => {
+  const main = await readProjectFile('../main.js');
+
+  for (const channel of ['model:list', 'model:download', 'model:cancel-download', 'model:delete', 'model:select']) {
+    assert.match(main, new RegExp(`ipcMain\\.handle\\(['"]${channel.replaceAll(':', '\\:')}['"]`));
+  }
+  assert.match(main, /VOICE_SERVER_MODELS_URL/);
+  assert.match(main, /callModelBackend/);
+  assert.doesNotMatch(main, /snapshot_download/);
+  assert.doesNotMatch(main, /models--Systran--faster-whisper/);
+});
+
+test('P1 模型页面接入导航并通过模型服务读取主进程 IPC', async () => {
+  const navigation = await readProjectFile('src/navigation.ts');
+  const sidebar = await readProjectFile('src/components/Sidebar.tsx');
+  const appShell = await readProjectFile('src/components/AppShell.tsx');
+  const modelStore = await readProjectFile('src/services/modelStore.ts');
+  const modelsPage = await readProjectFile('src/pages/Models.tsx');
+
+  assert.match(navigation, /'models'/);
+  assert.match(navigation, /模型/);
+  assert.match(sidebar, /MemoryIcon|StorageIcon|HubIcon/);
+  assert.match(appShell, /Models/);
+  assert.match(modelStore, /model:list/);
+  assert.match(modelStore, /model:download/);
+  assert.match(modelStore, /model:cancel-download/);
+  assert.match(modelStore, /model:delete/);
+  assert.match(modelStore, /model:select/);
+  assert.doesNotMatch(modelStore, /localStorage/);
+  assert.match(modelsPage, /转录模型/);
+  assert.match(modelsPage, /已下载的模型/);
+  assert.match(modelsPage, /可供下载/);
+  assert.match(modelsPage, /设为当前/);
+  assert.match(modelsPage, /取消下载/);
+  assert.match(modelsPage, /删除/);
+  assert.match(modelsPage, /所有语言/);
+});
+
 test('项目根启动脚本指向本地 Electron 壳而不是逆向资料目录', async () => {
   const rootPackage = JSON.parse(await readProjectFile('../../package.json'));
 
