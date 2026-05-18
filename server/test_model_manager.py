@@ -24,6 +24,7 @@ from model_manager import (
     normalize_model_id,
     read_selected_model_id,
     repo_cache_dir_name,
+    start_download_task,
     update_download_progress,
     write_selected_model_id,
 )
@@ -343,3 +344,26 @@ class ModelManagerStateTest(unittest.TestCase):
             (snapshot / "config.json").write_text("{}", encoding="utf-8")
 
             self.assertEqual(find_cached_model_snapshot("small", cache_root=cache_root), snapshot)
+
+    def test_start_download_task_marks_status_before_background_task_runs(self):
+        class PendingTask:
+            def done(self):
+                return False
+
+            def add_done_callback(self, _callback):
+                return None
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch.dict(os.environ, {"LOCALAPPDATA": str(Path(temp_dir) / "LocalAppData")}, clear=False):
+                def fake_create_task(coroutine):
+                    coroutine.close()
+                    return PendingTask()
+
+                with patch("model_manager.asyncio.create_task", side_effect=fake_create_task):
+                    self.assertTrue(start_download_task("small"))
+
+                status = get_download_status("small")
+
+        self.assertTrue(status["isDownloading"])
+        self.assertEqual(status["downloadProgress"], 0)
+        self.assertEqual(status["downloadError"], "")

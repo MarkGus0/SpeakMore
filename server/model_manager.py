@@ -305,10 +305,15 @@ def _consume_download_task_result(task):
 
 def start_download_task(model_id):
     model = get_model_definition(model_id)
+    if find_cached_model_snapshot(model["id"]):
+        mark_download_finished(model["id"])
+        return False
+
     existing_task = _DOWNLOAD_TASKS.get(model["id"])
     if existing_task and not existing_task.done():
         return False
 
+    mark_download_started(model["id"])
     task = asyncio.create_task(download_model(model["id"]))
     task.add_done_callback(_consume_download_task_result)
     _DOWNLOAD_TASKS[model["id"]] = task
