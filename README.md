@@ -18,6 +18,8 @@ SpeakMore 是一个 Windows 本地语音输入工具。它用 Electron 提供桌
 - 录音时显示悬浮胶囊栏和真实麦克风音量柱。
 - 听写和翻译完成后自动粘贴到当前焦点应用。
 - 自由提问录音时胶囊显示“请随意提出问题”，完成后在悬浮面板展示回答。
+- 词典用于提高专有名词、产品名、代码词和个人习惯写法的润色准确度。
+- 自动学习只在 SpeakMore 本轮粘贴后短时观察当前焦点输入控件；目标应用不支持 Windows UIA 文本读取时，本轮不会学习。
 - 主窗口关闭后隐藏到后台，托盘“退出”才真正结束 Electron。
 - 录音期间在 Windows 上尝试静音后台音频，结束后恢复本轮主动静音的会话。
 - 首页展示累计统计和最近结果，历史页展示最近 200 条记录，诊断页检查后端、麦克风和 IPC。
@@ -37,6 +39,7 @@ SpeakMore 是一个 Windows 本地语音输入工具。它用 Electron 提供桌
 │   ├── preload.js                  # Renderer 安全 IPC 桥接
 │   ├── right-alt-listener.ps1      # Windows 低级键盘监听器
 │   ├── audio-session-control.ps1   # Windows 后台音频会话静音/恢复
+│   ├── windows-text-observer/      # UIA 文本观察 helper，用于本轮粘贴后的自动学习
 │   └── renderer/                   # Vite + React + MUI + TypeScript 前端
 ├── docs/ai/context/                # AI 上下文、设计、计划和决策记录
 ├── .github/workflows/ci.yml        # CI：renderer 测试、统计测试、构建
@@ -200,6 +203,8 @@ Electron userData/local-data/
 - `settings.json`：本地设置。
 - `history.json`：最近历史列表。
 - `history-stats.json`：累计统计。
+- `dictionary.json`：正式词典词条。
+- `dictionary-candidates.json`：自动学习候选词条。
 - `recording.log`：诊断日志。
 - `recordings/`：录音相关本地产物目录。
 

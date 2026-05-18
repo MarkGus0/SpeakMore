@@ -465,6 +465,38 @@ test('翻译模式启动时会把设置里的目标语言传给后端', async ()
   }
 })
 
+test('启动录音时会把启用词典词条传给后端', async () => {
+  const env = createTestEnvironment()
+  let recorder: Awaited<ReturnType<typeof loadRecorderModule>> | null = null
+
+  try {
+    const originalInvoke = window.ipcRenderer!.invoke
+    window.ipcRenderer!.invoke = async <T = unknown>(channel: string, payload?: unknown): Promise<T> => {
+      if (channel === 'dictionary:prompt-terms') {
+        env.invokeCalls.push({ channel, payload })
+        return [{ phrase: 'Client2API', aliases: ['client to api'] }] as T
+      }
+      return originalInvoke(channel, payload)
+    }
+
+    recorder = await loadRecorderModule('dictionary-terms')
+    await recorder.startRecording('Dictate')
+
+    const startAudioMessage = env.sentPayloads
+      .filter((payload): payload is string => typeof payload === 'string')
+      .map((payload) => JSON.parse(payload))
+      .find((message) => message.type === 'start_audio')
+
+    assert.deepEqual(startAudioMessage.parameters, {
+      llm: testLlmConfig,
+      dictionary_terms: [{ phrase: 'Client2API', aliases: ['client to api'] }],
+    })
+  } finally {
+    recorder?.disposeRecorder()
+    env.restore()
+  }
+})
+
 test('RightAlt + RightShift 有选区时仍启动语音翻译并粘贴结果', async () => {
   const env = createTestEnvironment({
     selectedTextResult: { success: true, text: '你好' },

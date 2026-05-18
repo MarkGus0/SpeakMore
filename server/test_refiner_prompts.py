@@ -132,6 +132,42 @@ class RefinerPromptTest(unittest.TestCase):
         self.assertEqual(user_message, "目标语言：en\n\n待翻译的语音转写文本：\n把这个翻译成英文")
         self.assertNotIn("Translate to en", user_message)
 
+    def test_build_dictionary_context_formats_enabled_terms(self):
+        context = refiner.build_dictionary_context([
+            {"phrase": "Client2API", "aliases": ["client to api", "client 2 api"]},
+            {"phrase": "Claude Code", "aliases": ["cloud code"]},
+        ])
+
+        self.assertIn("用户个人词表", context)
+        self.assertIn("client to api、client 2 api 应写作 Client2API", context)
+        self.assertIn("cloud code 应写作 Claude Code", context)
+
+    def test_build_refiner_user_message_injects_dictionary_terms_for_transcript(self):
+        message = refiner.build_refiner_user_message(
+            raw_text="我在使用 client to api",
+            mode="transcript",
+            context=None,
+            parameters={
+                "dictionary_terms": [
+                    {"phrase": "Client2API", "aliases": ["client to api"]},
+                ],
+            },
+        )
+
+        self.assertIn("用户个人词表", message)
+        self.assertIn("client to api 应写作 Client2API", message)
+        self.assertIn("Transcription to refine", message)
+        self.assertIn("我在使用 client to api", message)
+
+    def test_build_dictionary_context_limits_terms(self):
+        terms = [{"phrase": f"词{i}", "aliases": [f"alias{i}"]} for i in range(120)]
+
+        context = refiner.build_dictionary_context(terms)
+
+        self.assertIn("alias0 应写作 词0", context)
+        self.assertIn("alias99 应写作 词99", context)
+        self.assertNotIn("alias100 应写作 词100", context)
+
     def test_ask_anything_user_message_keeps_selected_text_context(self):
         fake_client = FakeClient()
 

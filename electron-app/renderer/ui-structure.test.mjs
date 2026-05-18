@@ -629,6 +629,117 @@ test('P1 历史页面与历史 store 统一走主进程 JSON 数据源', async (
   assert.match(historyPage, /clipboard:write-text/);
 });
 
+test('P1 词典数据统一走主进程 JSON 数据源', async () => {
+  const main = await readProjectFile('../main.js');
+
+  assert.match(main, /DICTIONARY_FILE_NAME\s*=\s*['"]dictionary\.json['"]/);
+  assert.match(main, /DICTIONARY_CANDIDATES_FILE_NAME\s*=\s*['"]dictionary-candidates\.json['"]/);
+  assert.match(main, /function\s+readDictionaryEntries\(/);
+  assert.match(main, /function\s+writeDictionaryEntries\(/);
+  assert.match(main, /function\s+readDictionaryCandidates\(/);
+  assert.match(main, /function\s+writeDictionaryCandidates\(/);
+  assert.match(main, /ipcMain\.handle\(['"]dictionary:list['"]/);
+  assert.match(main, /ipcMain\.handle\(['"]dictionary:create['"]/);
+  assert.match(main, /ipcMain\.handle\(['"]dictionary:update['"]/);
+  assert.match(main, /ipcMain\.handle\(['"]dictionary:delete['"]/);
+  assert.match(main, /ipcMain\.handle\(['"]dictionary:candidates-list['"]/);
+  assert.match(main, /ipcMain\.handle\(['"]dictionary:candidate-promote['"]/);
+  assert.match(main, /ipcMain\.handle\(['"]dictionary:candidate-ignore['"]/);
+  assert.match(main, /ipcMain\.handle\(['"]dictionary:prompt-terms['"]/);
+});
+
+test('P1 主进程在粘贴成功后启动词典自动学习观察', async () => {
+  const main = await readProjectFile('../main.js');
+
+  assert.match(main, /createTextObservationSessionManager/);
+  assert.match(main, /function\s+learnDictionaryCorrection\(/);
+  assert.match(main, /learnDictionaryCandidate\(readDictionaryCandidates\(\),\s*candidate/);
+  assert.match(main, /textObservationManager\.start\(\{[\s\S]*pastedText/);
+  assert.match(main, /readFocusedInfo\(\)/);
+});
+
+test('P1 Windows 文本观察 helper 通过 stdio 接入主进程', async () => {
+  const main = await readProjectFile('../main.js');
+  const project = await readProjectFile('../windows-text-observer/WindowsTextObserver.csproj');
+  const program = await readProjectFile('../windows-text-observer/Program.cs');
+  const observer = await readProjectFile('../windows-text-observer/TextObserver.cs');
+
+  assert.match(project, /net8\.0-windows/);
+  assert.match(program, /observe-start/);
+  assert.match(program, /observe-stop/);
+  assert.match(observer, /TextPattern\.TextChangedEvent/);
+  assert.match(observer, /DocumentRange\.GetText\(4000\)/);
+  assert.match(main, /function\s+textObserverExecutablePath\(/);
+  assert.match(main, /function\s+ensureTextObserverProcess\(/);
+  assert.match(main, /sendTextObserverMessage\(\{[\s\S]*type:\s*['"]observe-start['"]/);
+  assert.match(main, /sendTextObserverMessage\(\{[\s\S]*type:\s*['"]observe-stop['"]/);
+  assert.match(main, /handleObservedText\(message\)/);
+});
+
+test('P1 词典页面接入导航和主进程 IPC', async () => {
+  const navigation = await readProjectFile('src/navigation.ts');
+  const sidebar = await readProjectFile('src/components/Sidebar.tsx');
+  const appShell = await readProjectFile('src/components/AppShell.tsx');
+  const dictionaryPage = await readProjectFile('src/pages/Dictionary.tsx');
+  const dictionaryStore = await readProjectFile('src/services/dictionaryStore.ts');
+
+  assert.match(navigation, /'dictionary'/);
+  assert.match(navigation, /词典/);
+  assert.match(sidebar, /AutoAwesomeIcon|MenuBookIcon|LibraryBooksIcon/);
+  assert.match(appShell, /Dictionary/);
+  assert.match(dictionaryPage, /自动添加/);
+  assert.match(dictionaryPage, /手动添加/);
+  assert.match(dictionaryPage, /候选/);
+  assert.match(dictionaryPage, /启用/);
+  assert.match(dictionaryStore, /dictionary:list/);
+  assert.match(dictionaryStore, /dictionary:create/);
+  assert.match(dictionaryStore, /dictionary:update/);
+  assert.match(dictionaryStore, /dictionary:delete/);
+  assert.match(dictionaryStore, /dictionary:candidates-list/);
+  assert.match(dictionaryStore, /dictionary:candidate-promote/);
+  assert.match(dictionaryStore, /dictionary:candidate-ignore/);
+  assert.match(dictionaryStore, /dictionary:prompt-terms/);
+  assert.doesNotMatch(dictionaryStore, /localStorage/);
+});
+
+test('P1 模型管理 IPC 只转发到后端，不在 Electron 主进程管理模型文件', async () => {
+  const main = await readProjectFile('../main.js');
+
+  for (const channel of ['model:list', 'model:download', 'model:cancel-download', 'model:delete', 'model:select']) {
+    assert.match(main, new RegExp(`ipcMain\\.handle\\(['"]${channel.replaceAll(':', '\\:')}['"]`));
+  }
+  assert.match(main, /VOICE_SERVER_MODELS_URL/);
+  assert.match(main, /callModelBackend/);
+  assert.doesNotMatch(main, /snapshot_download/);
+  assert.doesNotMatch(main, /models--Systran--faster-whisper/);
+});
+
+test('P1 模型页面接入导航并通过模型服务读取主进程 IPC', async () => {
+  const navigation = await readProjectFile('src/navigation.ts');
+  const sidebar = await readProjectFile('src/components/Sidebar.tsx');
+  const appShell = await readProjectFile('src/components/AppShell.tsx');
+  const modelStore = await readProjectFile('src/services/modelStore.ts');
+  const modelsPage = await readProjectFile('src/pages/Models.tsx');
+
+  assert.match(navigation, /'models'/);
+  assert.match(navigation, /模型/);
+  assert.match(sidebar, /MemoryIcon|StorageIcon|HubIcon/);
+  assert.match(appShell, /Models/);
+  assert.match(modelStore, /model:list/);
+  assert.match(modelStore, /model:download/);
+  assert.match(modelStore, /model:cancel-download/);
+  assert.match(modelStore, /model:delete/);
+  assert.match(modelStore, /model:select/);
+  assert.doesNotMatch(modelStore, /localStorage/);
+  assert.match(modelsPage, /转录模型/);
+  assert.match(modelsPage, /已下载的模型/);
+  assert.match(modelsPage, /可供下载/);
+  assert.match(modelsPage, /设为当前/);
+  assert.match(modelsPage, /取消下载/);
+  assert.match(modelsPage, /删除/);
+  assert.match(modelsPage, /所有语言/);
+});
+
 test('P1 设置页与设置 store 统一走主进程 JSON 数据源', async () => {
   const settingsStore = await readProjectFile('src/services/settingsStore.ts');
   const settingsPage = await readProjectFile('src/pages/Settings.tsx');

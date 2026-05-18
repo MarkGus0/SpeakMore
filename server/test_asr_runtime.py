@@ -53,6 +53,45 @@ class AsrRuntimeTest(unittest.TestCase):
         self.assertIs(model, fake_model)
         self.assertEqual(build.call_args_list, [call(bad_source), call(good_source)])
 
+    def test_reload_whisper_model_replaces_singleton_after_success(self):
+        old_model = object()
+        new_model = object()
+        asr._model = old_model
+        source = asr.WhisperModelSource(
+            kind=asr.DOWNLOAD_SOURCE,
+            model_ref="small",
+            download_root="C:/models",
+            model_id="small",
+        )
+
+        with patch("asr.get_candidate_whisper_model_sources", return_value=[source]), patch(
+            "asr.build_whisper_model",
+            return_value=new_model,
+        ):
+            result = asr.reload_whisper_model("small")
+
+        self.assertIs(result, new_model)
+        self.assertIs(asr._model, new_model)
+
+    def test_reload_whisper_model_keeps_old_singleton_after_failure(self):
+        old_model = object()
+        asr._model = old_model
+        source = asr.WhisperModelSource(
+            kind=asr.DOWNLOAD_SOURCE,
+            model_ref="small",
+            download_root="C:/models",
+            model_id="small",
+        )
+
+        with patch("asr.get_candidate_whisper_model_sources", return_value=[source]), patch(
+            "asr.build_whisper_model",
+            side_effect=RuntimeError("boom"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                asr.reload_whisper_model("small")
+
+        self.assertIs(asr._model, old_model)
+
 
 if __name__ == "__main__":
     unittest.main()

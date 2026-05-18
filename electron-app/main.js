@@ -38,6 +38,14 @@ const {
   calculateHistoryStatsForDashboard,
   upsertHistoryItemWithStats,
 } = require('./history-stats-store');
+const {
+  normalizeDictionaryEntry,
+  normalizeDictionaryCandidate,
+  upsertDictionaryEntry,
+  buildPromptDictionaryTerms,
+  learnDictionaryCandidate,
+} = require('./dictionary-store');
+const { createTextObservationSessionManager } = require('./text-observation-session');
 
 let mainWindow = null;
 let floatingBar = null;
@@ -57,12 +65,15 @@ let pendingInteractiveCardPayload = null;
 let floatingPanelVisible = false;
 let floatingPanelType = null;
 let lastVoiceState = null;
+let textObserverProcess = null;
+let textObserverStdoutBuffer = '';
 
 const DEFAULT_LANGUAGE = 'zh-CN';
 const VOICE_SERVER_URL = 'http://127.0.0.1:8000';
 const VOICE_SERVER_HEALTH_URL = `${VOICE_SERVER_URL}/health`;
 const VOICE_SERVER_READY_URL = `${VOICE_SERVER_URL}/ready`;
 const VOICE_SERVER_VOICE_FLOW_URL = `${VOICE_SERVER_URL}/ai/voice_flow`;
+const VOICE_SERVER_MODELS_URL = `${VOICE_SERVER_URL}/models`;
 const FLOATING_BAR_COMPLETED_HIDE_DELAY_MS = 1000;
 const FLOATING_BAR_SIZE = { width: 400, height: 360 };
 const FLOATING_PANEL_SIZE = { width: 440, height: 220 };
@@ -72,6 +83,8 @@ const LOCAL_DATA_DIR_NAME = 'local-data';
 const SETTINGS_FILE_NAME = 'settings.json';
 const HISTORY_FILE_NAME = 'history.json';
 const HISTORY_STATS_FILE_NAME = 'history-stats.json';
+const DICTIONARY_FILE_NAME = 'dictionary.json';
+const DICTIONARY_CANDIDATES_FILE_NAME = 'dictionary-candidates.json';
 const DEFAULT_TRANSLATION_TARGET_LANGUAGE = 'en';
 const SUPPORTED_TRANSLATION_TARGET_LANGUAGES = new Set([DEFAULT_TRANSLATION_TARGET_LANGUAGE]);
 const DEFAULT_LLM_PROVIDER_ID = 'deepseek';
@@ -378,6 +391,106 @@ function readHistoryStats() {
 function writeHistoryStats(stats) {
   return writeJsonFile(HISTORY_STATS_FILE_NAME, normalizeHistoryStats(stats));
 }
+
+function readDictionaryEntries() {
+  const value = readJsonFile(DICTIONARY_FILE_NAME, []);
+  if (!Array.isArray(value)) return [];
+  return value.map(normalizeDictionaryEntry).filter((entry) => entry.phrase);
+}
+
+function writeDictionaryEntries(entries) {
+  return writeJsonFile(
+    DICTIONARY_FILE_NAME,
+    entries.map(normalizeDictionaryEntry).filter((entry) => entry.phrase),
+  );
+}
+
+function readDictionaryCandidates() {
+  const value = readJsonFile(DICTIONARY_CANDIDATES_FILE_NAME, []);
+  if (!Array.isArray(value)) return [];
+  return value.map(normalizeDictionaryCandidate).filter((candidate) => candidate.wrong && candidate.correct);
+}
+
+function writeDictionaryCandidates(candidates) {
+  return writeJsonFile(
+    DICTIONARY_CANDIDATES_FILE_NAME,
+    candidates.map(normalizeDictionaryCandidate).filter((candidate) => candidate.wrong && candidate.correct),
+  );
+}
+
+function readPromptDictionaryTerms() {
+  return buildPromptDictionaryTerms(readDictionaryEntries());
+}
+
+function learnDictionaryCorrection(candidate) {
+  const result = learnDictionaryCandidate(readDictionaryCandidates(), candidate);
+  writeDictionaryCandidates(result.candidates);
+  if (result.promotedEntry) {
+    writeDictionaryEntries(upsertDictionaryEntry(readDictionaryEntries(), result.promotedEntry));
+  }
+  return result;
+}
+
+function textObserverExecutablePath() {
+  return path.join(__dirname, 'windows-text-observer', 'bin', 'Debug', 'net8.0-windows', 'WindowsTextObserver.exe');
+}
+
+function handleTextObserverLine(line) {
+  try {
+    const message = JSON.parse(line);
+    if (message.type === 'observed-text') {
+      void textObservationManager.handleObservedText(message);
+    }
+  } catch (error) {
+    console.error('解析文本观察 helper 消息失败', error);
+  }
+}
+
+function ensureTextObserverProcess() {
+  if (process.platform !== 'win32') return null;
+  if (textObserverProcess && !textObserverProcess.killed) return textObserverProcess;
+
+  const exePath = textObserverExecutablePath();
+  if (!fs.existsSync(exePath)) return null;
+
+  textObserverProcess = spawn(exePath, [], { windowsHide: true });
+  textObserverStdoutBuffer = '';
+  textObserverProcess.stdout.setEncoding('utf8');
+  textObserverProcess.stdout.on('data', (chunk) => {
+    textObserverStdoutBuffer += chunk;
+    const lines = textObserverStdoutBuffer.split(/\r?\n/);
+    textObserverStdoutBuffer = lines.pop() || '';
+    lines.filter(Boolean).forEach(handleTextObserverLine);
+  });
+  textObserverProcess.on('exit', () => {
+    textObserverProcess = null;
+    textObserverStdoutBuffer = '';
+  });
+  return textObserverProcess;
+}
+
+function sendTextObserverMessage(message) {
+  const child = ensureTextObserverProcess();
+  if (!child || !child.stdin.writable) return false;
+  child.stdin.write(`${JSON.stringify(message)}\n`);
+  return true;
+}
+
+const textObservationManager = createTextObservationSessionManager({
+  startNativeObservation: async (session) => {
+    const sent = sendTextObserverMessage({
+      type: 'observe-start',
+      audioId: session.audioId,
+      pastedText: session.pastedText,
+      timeoutMs: session.timeoutMs,
+    });
+    return sent ? { success: true } : { success: false, code: 'native_observer_unavailable' };
+  },
+  stopNativeObservation: async (session) => {
+    sendTextObserverMessage({ type: 'observe-stop', audioId: session.audioId });
+  },
+  learnCorrection: async (candidate) => learnDictionaryCorrection(candidate),
+});
 
 function debugShortcut(event, payload = {}) {
   if (!SHORTCUT_DEBUG_ENABLED) return;
@@ -923,6 +1036,34 @@ async function checkVoiceServerReady() {
   return probeVoiceServer(VOICE_SERVER_READY_URL);
 }
 
+async function callModelBackend(pathname = '', options = {}) {
+  const url = `${VOICE_SERVER_MODELS_URL}${pathname}`;
+  try {
+    const response = await fetch(url, {
+      method: options.method || 'GET',
+      headers: { 'Content-Type': 'application/json' },
+      body: options.body ? JSON.stringify(options.body) : undefined,
+    });
+    const payload = await readJsonSafely(response);
+    if (!response.ok) {
+      return {
+        success: false,
+        code: response.status === 0 ? 'backend_unavailable' : 'model_request_failed',
+        detail: payload?.detail || resolveVoiceServerProbeDetail(url, response.status, payload),
+        data: payload,
+      };
+    }
+    return { success: true, data: payload };
+  } catch (error) {
+    return {
+      success: false,
+      code: 'backend_unavailable',
+      detail: error instanceof Error ? error.message : String(error),
+      data: null,
+    };
+  }
+}
+
 function normalizeVoiceMode(mode) {
   const normalized = String(mode || 'transcript').toLowerCase();
   if (normalized === 'dictate' || normalized === 'dictation') return 'transcript';
@@ -1325,11 +1466,79 @@ function registerIpcHandlers() {
   ipcMain.handle('settings:get', () => readLocalSettings());
   ipcMain.handle('settings:update', (_, payload = {}) => writeLocalSettings({ ...readLocalSettings(), ...payload }));
 
+  ipcMain.handle('dictionary:list', () => readDictionaryEntries());
+  ipcMain.handle('dictionary:create', (_, payload = {}) => {
+    const entries = upsertDictionaryEntry(readDictionaryEntries(), {
+      ...payload,
+      source: payload.source === 'auto' ? 'auto' : 'manual',
+      status: payload.status === 'disabled' ? 'disabled' : 'active',
+    });
+    writeDictionaryEntries(entries);
+    const phrase = normalizeDictionaryEntry(payload).phrase.toLowerCase();
+    const created = entries.find((entry) => entry.phrase.toLowerCase() === phrase) || entries[0] || null;
+    return { success: Boolean(created), data: created };
+  });
+  ipcMain.handle('dictionary:update', (_, payload = {}) => {
+    const entries = readDictionaryEntries();
+    const target = entries.find((entry) => entry.id === payload.id);
+    if (!target) return { success: false, code: 'dictionary_entry_not_found' };
+
+    const updated = normalizeDictionaryEntry({
+      ...target,
+      ...payload,
+      id: target.id,
+      createdAt: target.createdAt,
+      updatedAt: new Date().toISOString(),
+    });
+    writeDictionaryEntries(entries.map((entry) => (entry.id === target.id ? updated : entry)));
+    return { success: true, data: updated };
+  });
+  ipcMain.handle('dictionary:delete', (_, id) => {
+    writeDictionaryEntries(readDictionaryEntries().filter((entry) => entry.id !== id));
+    return { success: true };
+  });
+  ipcMain.handle('dictionary:candidates-list', () => readDictionaryCandidates());
+  ipcMain.handle('dictionary:candidate-promote', (_, id) => {
+    const now = new Date().toISOString();
+    const candidates = readDictionaryCandidates();
+    const candidate = candidates.find((item) => item.id === id);
+    if (!candidate) return { success: false, code: 'dictionary_candidate_not_found' };
+
+    const entries = upsertDictionaryEntry(readDictionaryEntries(), {
+      phrase: candidate.correct,
+      aliases: [candidate.wrong],
+      source: 'auto',
+      status: 'active',
+      hitCount: candidate.count,
+      lastLearnedAt: now,
+    }, now);
+    const nextCandidates = candidates.map((item) => (
+      item.id === id ? normalizeDictionaryCandidate({ ...item, status: 'promoted', lastSeenAt: now }) : item
+    ));
+    writeDictionaryEntries(entries);
+    writeDictionaryCandidates(nextCandidates);
+    const promoted = entries.find((entry) => entry.phrase.toLowerCase() === candidate.correct.toLowerCase()) || entries[0] || null;
+    return { success: Boolean(promoted), data: promoted };
+  });
+  ipcMain.handle('dictionary:candidate-ignore', (_, id) => {
+    writeDictionaryCandidates(readDictionaryCandidates().map((item) => (
+      item.id === id ? normalizeDictionaryCandidate({ ...item, status: 'ignored' }) : item
+    )));
+    return { success: true };
+  });
+  ipcMain.handle('dictionary:prompt-terms', () => readPromptDictionaryTerms());
+  ipcMain.handle('model:list', () => callModelBackend());
+  ipcMain.handle('model:download', (_, modelId) => callModelBackend(`/${encodeURIComponent(String(modelId))}/download`, { method: 'POST' }));
+  ipcMain.handle('model:cancel-download', (_, modelId) => callModelBackend(`/${encodeURIComponent(String(modelId))}/cancel`, { method: 'POST' }));
+  ipcMain.handle('model:delete', (_, modelId) => callModelBackend(`/${encodeURIComponent(String(modelId))}`, { method: 'DELETE' }));
+  ipcMain.handle('model:select', (_, modelId) => callModelBackend(`/${encodeURIComponent(String(modelId))}/select`, { method: 'POST' }));
+
   ipcMain.handle('keyboard:start-keyboard-listener', () => true);
   ipcMain.handle('keyboard:stop-keyboard-listener', () => true);
-  ipcMain.handle('keyboard:type-transcript', (_, text) => {
-    if (!text) return false;
-    clipboard.writeText(String(text));
+  ipcMain.handle('keyboard:type-transcript', async (_, text) => {
+    const pastedText = String(text || '');
+    if (!pastedText) return false;
+    clipboard.writeText(pastedText);
     const ps = spawn('powershell.exe', [
       '-NoProfile', '-Command',
       'Add-Type -AssemblyName System.Windows.Forms; Start-Sleep -Milliseconds 100; [System.Windows.Forms.SendKeys]::SendWait("^v")',
@@ -1342,10 +1551,18 @@ function registerIpcHandlers() {
         TMP: process.env.TMP,
       },
     });
-    return new Promise((resolve) => {
+    const pasteSucceeded = await new Promise((resolve) => {
       ps.on('exit', () => resolve(true));
       ps.on('error', () => resolve(false));
     });
+    if (pasteSucceeded && pastedText.trim()) {
+      await textObservationManager.start({
+        audioId: crypto.randomUUID(),
+        pastedText,
+        focusInfo: readFocusedInfo(),
+      });
+    }
+    return pasteSucceeded;
   });
   ipcMain.handle('keyboard:set-watcher-interval', () => true);
   ipcMain.handle('keyboard-input:reload-keyboard-shortcuts', () => true);

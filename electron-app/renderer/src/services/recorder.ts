@@ -1,4 +1,5 @@
 import { ipcClient } from './ipc'
+import { loadPromptDictionaryTerms } from './dictionaryStore'
 import { hideFloatingPanel, showFreeAskResult } from './floatingPanel'
 import { getCurrentLlmConfig, getSelectedAudioDeviceId, getTranslationTargetLanguage } from './settingsStore'
 import type { ShortcutIntent } from './shortcutGuard'
@@ -166,8 +167,12 @@ async function startRecordingFromIntent(intent: ShortcutIntent) {
 }
 
 async function getStartAudioParameters(mode: VoiceMode, selectedText = ''): Promise<Record<string, unknown>> {
-  const llm = await getCurrentLlmConfig()
-  const baseParameters = { llm }
+  const [dictionaryTerms, llm] = await Promise.all([
+    loadPromptDictionaryTerms(),
+    getCurrentLlmConfig(),
+  ])
+  const dictionaryParameters = dictionaryTerms.length ? { dictionary_terms: dictionaryTerms } : {}
+  const baseParameters = { llm, ...dictionaryParameters }
 
   if (mode === 'Ask') {
     return selectedText ? { ...baseParameters, selected_text: selectedText } : baseParameters

@@ -6,6 +6,8 @@ electron-app/renderer/node_modules/
 dist/
 build/
 electron-app/renderer/dist/
+electron-app/windows-text-observer/bin/
+electron-app/windows-text-observer/obj/
 
 # 本地环境与密钥
 .env
@@ -34,6 +36,11 @@ __pycache__/
 # 本地文档与 AI 上下文
 docs/
 .worktrees/
+.tmp-dotnet/
+.tmp-dotnet-install/
+.tmp-dotnet-home/
+.tmp-nuget-packages/
+.tmp-appdata/
 
 # 系统与编辑器文件
 .DS_Store
