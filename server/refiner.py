@@ -31,18 +31,19 @@ def normalize_request_llm_config(parameters: dict | None) -> dict | None:
 
     provider_id = str(llm.get("provider_id", "")).strip()
     base_url = str(llm.get("base_url", "")).strip().rstrip("/")
+    api_key = str(llm.get("api_key", "")).strip()
     model = str(llm.get("model", "")).strip()
     auth_type = "anthropic" if llm.get("auth_type") == "anthropic" else "bearer"
 
     if not provider_id or not base_url or not model:
         return None
-    if provider_id != "custom" and not str(llm.get("api_key", "")).strip():
+    if provider_id != "custom" and not api_key:
         return None
 
     return {
         "provider_id": provider_id,
         "base_url": base_url,
-        "api_key": str(llm.get("api_key", "")),
+        "api_key": api_key,
         "model": model,
         "auth_type": auth_type,
     }
