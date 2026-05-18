@@ -66,6 +66,21 @@ class RefinerProvidersTest(unittest.TestCase):
         call = created_clients[0].chat.completions.calls[0]
         self.assertEqual(call["model"], "gpt-5.4")
 
+    def test_request_llm_config_trims_api_key_before_provider_call(self):
+        config = refiner.normalize_request_llm_config({
+            "llm": {
+                "provider_id": "openai",
+                "base_url": "https://api.openai.com/v1/",
+                "api_key": " sk-openai \n",
+                "model": " gpt-5.4 ",
+                "auth_type": "bearer",
+            },
+        })
+
+        self.assertEqual(config["api_key"], "sk-openai")
+        self.assertEqual(config["base_url"], "https://api.openai.com/v1")
+        self.assertEqual(config["model"], "gpt-5.4")
+
     def test_refine_text_uses_anthropic_messages_api(self):
         fake_response = SimpleNamespace(
             raise_for_status=lambda: None,

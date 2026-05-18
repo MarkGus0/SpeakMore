@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Box, Typography, Select, MenuItem, Switch, Button, TextField } from '@mui/material'
 import { ipcClient } from '../services/ipc'
 import {
@@ -43,6 +43,7 @@ type AudioDevice = { deviceId: string; label?: string }
 export default function Settings() {
   const [settings, setSettings] = useState<LocalSettings>(defaultSettings)
   const [devices, setDevices] = useState<AudioDevice[]>([])
+  const settingsUpdateSeq = useRef(0)
 
   useEffect(() => {
     loadSettings().then(setSettings).catch(() => undefined)
@@ -54,8 +55,11 @@ export default function Settings() {
   }, [])
 
   const updateSettings = async (next: LocalSettings) => {
+    const seq = settingsUpdateSeq.current + 1
+    settingsUpdateSeq.current = seq
     setSettings(next)
-    setSettings(await saveSettings(next))
+    const saved = await saveSettings(next)
+    if (settingsUpdateSeq.current === seq) setSettings(saved)
   }
 
   const currentProvider = settings.llm.providers.find((provider) => provider.id === settings.llm.providerId)
