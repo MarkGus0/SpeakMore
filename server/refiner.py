@@ -1,6 +1,7 @@
 """Refiner 模块 - 使用 DeepSeek API 对 ASR 转写结果进行润色"""
 
 import os
+import httpx
 from openai import AsyncOpenAI
 from runtime_config import load_server_env
 
@@ -8,6 +9,7 @@ load_server_env()
 
 _client = None
 MAX_DICTIONARY_TERMS = 100
+DEFAULT_LLM_MODEL = "deepseek-chat"
 
 
 def _get_client() -> AsyncOpenAI:
@@ -18,6 +20,84 @@ def _get_client() -> AsyncOpenAI:
             base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"),
         )
     return _client
+
+
+def normalize_request_llm_config(parameters: dict | None) -> dict | None:
+    if not isinstance(parameters, dict):
+        return None
+
+    llm = parameters.get("llm")
+    if not isinstance(llm, dict):
+        return None
+
+    provider_id = str(llm.get("provider_id", "")).strip()
+    base_url = str(llm.get("base_url", "")).strip().rstrip("/")
+    model = str(llm.get("model", "")).strip()
+    auth_type = "anthropic" if llm.get("auth_type") == "anthropic" else "bearer"
+
+    if not provider_id or not base_url or not model:
+        return None
+    if provider_id != "custom" and not str(llm.get("api_key", "")).strip():
+        return None
+
+    return {
+        "provider_id": provider_id,
+        "base_url": base_url,
+        "api_key": str(llm.get("api_key", "")),
+        "model": model,
+        "auth_type": auth_type,
+    }
+
+
+def create_openai_compatible_client(config: dict) -> AsyncOpenAI:
+    return AsyncOpenAI(
+        api_key=config["api_key"] or "not-needed",
+        base_url=config["base_url"],
+    )
+
+
+async def request_anthropic_completion(config: dict, system_prompt: str, user_message: str) -> str:
+    url = f"{config['base_url']}/messages"
+    headers = {
+        "content-type": "application/json",
+        "x-api-key": config["api_key"],
+        "anthropic-version": "2023-06-01",
+    }
+    payload = {
+        "model": config["model"],
+        "system": system_prompt,
+        "messages": [{"role": "user", "content": user_message}],
+        "temperature": 0.3,
+        "max_tokens": 2048,
+    }
+
+    async with httpx.AsyncClient(timeout=60) as client:
+        response = await client.post(url=url, headers=headers, json=payload)
+        response.raise_for_status()
+        data = response.json()
+
+    content = data.get("content", [])
+    if isinstance(content, list):
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text":
+                return str(item.get("text", "")).strip()
+    if isinstance(content, str):
+        return content.strip()
+    return ""
+
+
+async def request_openai_compatible_completion(config: dict, system_prompt: str, user_message: str) -> str:
+    client = create_openai_compatible_client(config)
+    response = await client.chat.completions.create(
+        model=config["model"],
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message},
+        ],
+        temperature=0.3,
+        max_tokens=2048,
+    )
+    return response.choices[0].message.content.strip()
 
 
 # 根据 Typeless 逆向出的模式对应不同 prompt
@@ -232,7 +312,6 @@ async def refine_text(
     if not raw_text or not raw_text.strip():
         return ""
 
-    client = _get_client()
     system_prompt = SYSTEM_PROMPTS.get(mode, SYSTEM_PROMPTS["transcript"])
 
     # 词典属于用户偏好上下文，只影响术语纠错，不改变任务边界。
@@ -244,8 +323,15 @@ async def refine_text(
     )
 
     try:
+        llm_config = normalize_request_llm_config(parameters)
+        if llm_config:
+            if llm_config["auth_type"] == "anthropic":
+                return await request_anthropic_completion(llm_config, system_prompt, user_message)
+            return await request_openai_compatible_completion(llm_config, system_prompt, user_message)
+
+        client = _get_client()
         response = await client.chat.completions.create(
-            model="deepseek-chat",
+            model=DEFAULT_LLM_MODEL,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message},
@@ -255,6 +341,7 @@ async def refine_text(
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
-        print(f"[Refiner] DeepSeek API 调用失败: {e}")
+        provider_id = normalize_request_llm_config(parameters or {}) or {"provider_id": "deepseek"}
+        print(f"[Refiner] {provider_id['provider_id']} API 调用失败: {e}")
         # fallback: 返回原始文本
         return raw_text

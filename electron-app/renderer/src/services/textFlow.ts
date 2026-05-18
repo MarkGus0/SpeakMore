@@ -1,4 +1,5 @@
 import { VOICE_SERVER_TEXT_FLOW_URL } from './voiceServer'
+import { getCurrentLlmConfig } from './settingsStore'
 import type { VoiceFlowMode } from './voiceTypes'
 
 type TextFlowPayload = {
@@ -34,10 +35,17 @@ function getErrorDetail(payload: unknown, fallback: string) {
 }
 
 export async function requestTextFlow(payload: TextFlowPayload): Promise<string> {
+  const llm = await getCurrentLlmConfig()
   const response = await fetch(VOICE_SERVER_TEXT_FLOW_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      ...payload,
+      parameters: {
+        ...(payload.parameters ?? {}),
+        llm,
+      },
+    }),
   })
   const data = await parseJsonSafely(response)
 

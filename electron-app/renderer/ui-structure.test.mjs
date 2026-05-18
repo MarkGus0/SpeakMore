@@ -720,7 +720,11 @@ test('P1 设置页与设置 store 统一走主进程 JSON 数据源', async () =
   assert.match(settingsStore, /settings:update/);
   assert.doesNotMatch(settingsStore, /localStorage/);
   assert.doesNotMatch(settingsStore, /deepseekApiKey/);
+  assert.match(settingsStore, /DEFAULT_LLM_PROVIDERS/);
+  assert.match(settingsStore, /getCurrentLlmConfig/);
   assert.match(main, /DEFAULT_TRANSLATION_TARGET_LANGUAGE\s*=\s*['"]en['"]/);
+  assert.match(main, /DEFAULT_LLM_PROVIDERS/);
+  assert.match(main, /buildCurrentLlmRequestConfig/);
   assert.match(main, /translationTargetLanguage:\s*DEFAULT_TRANSLATION_TARGET_LANGUAGE/);
   assert.match(settingsPage, /permission:update-auto-launch/);
   assert.match(settingsPage, /navigator\.mediaDevices\.enumerateDevices/);
@@ -738,9 +742,19 @@ test('P1 设置页与设置 store 统一走主进程 JSON 数据源', async () =
   assert.match(settingsPage, /检查更新/);
   assert.doesNotMatch(settingsPage, /disabled>/);
   assert.match(settingsPage, /大模型/);
-  assert.match(settingsPage, /DeepSeek API Key/);
+  assert.match(settingsPage, /提供商/);
+  assert.match(settingsPage, /API Key/);
+  assert.match(settingsPage, /模型/);
+  assert.match(settingsPage, /Base URL/);
+  assert.match(settingsStore, /DeepSeek/);
+  assert.match(settingsStore, /OpenAI/);
+  assert.match(settingsStore, /OpenRouter/);
+  assert.match(settingsStore, /Anthropic/);
+  assert.match(settingsStore, /Groq/);
+  assert.match(settingsStore, /Cerebras/);
+  assert.match(settingsStore, /Custom/);
   assert.match(settingsPage, /type="password"/);
-  assert.match(settingsPage, /placeholder="请输入 DeepSeek API Key"/);
+  assert.match(settingsPage, /placeholder="请输入 API Key"/);
 });
 
 test('P1 设置页不再暴露悬浮条开关，语言固定为简体中文', async () => {

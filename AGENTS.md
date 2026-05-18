@@ -10,7 +10,7 @@
 
 ## 目录职责
 
-- `server/`：本地 FastAPI 后端，负责音频上传、WebSocket 语音流、音频转码、ASR 转写和 DeepSeek 文本处理。
+- `server/`：本地 FastAPI 后端，负责音频上传、WebSocket 语音流、音频转码、ASR 转写和大模型文本处理。
 - `electron-app/`：Electron 主进程、preload、本地兼容层、托盘、窗口、快捷键、自动粘贴、本地数据和 Windows 音频会话控制。
 - `electron-app/renderer/`：Vite + React + MUI + TypeScript 前端，包含首页、历史记录、设置、诊断、录音状态机、悬浮胶囊和悬浮面板静态页面。
 - `docs/ai/context/`：AI 上下文、设计、计划、验证和决策记录。新增内容只创建新文件，不覆盖、重命名或删除历史文件。
@@ -68,13 +68,15 @@
 - 词典页用于管理手动词条、自动添加词条和候选词条，应提供搜索、新增、启用/禁用、删除和候选确认入口。
 - 首页“最近结果”只展示非自由提问的最近一次最终转录/最终结果文字；实时状态只在悬浮胶囊展示。
 - 首页“最近结果”、历史记录条目和自由提问悬浮结果都应提供复制入口；复制动作统一走 `clipboard:write-text` IPC，空结果不能复制占位符。
-- 设置页目前包含固定快捷键展示、麦克风选择、界面语言、翻译目标语言、DeepSeek API Key 输入框、开机启动和版本信息；翻译目标语言 MVP 只支持英文 `en`。
+- 设置页目前包含固定快捷键展示、麦克风选择、界面语言、翻译目标语言、大模型 provider/API Key/模型配置、开机启动和版本信息；翻译目标语言 MVP 只支持英文 `en`。
 - 诊断页应检查后端 `/health`、`/ready`、麦克风、系统信息和 IPC 自动粘贴能力。
 - 不要用历史阶段标签扩大范围做整套页面重构、账户体系、云同步、自动更新或复杂快捷键编辑器；需要做这些功能时先单独设计。
 
 ## 数据与配置
 
-- DeepSeek 配置由后端 `server/.env` 读取；不要把真实密钥写入仓库。
+- 大模型配置优先由设置页写入 Electron 主进程 `settings.json`，并随语音或文本请求通过 `parameters.llm` 传给后端；后端 `server/.env` 的 DeepSeek 配置只作为兼容回退。
+- 当前支持的网络 provider 为 `DeepSeek`、`OpenAI`、`Z.AI`、`OpenRouter`、`Anthropic`、`Groq`、`Cerebras` 和 `Custom`；`Custom` 允许编辑兼容 OpenAI 的 Base URL。
+- 不要把真实 API Key 写入仓库。Electron 本地 `settings.json` 是本机明文配置，不应作为同步或提交内容。
 - `server/.env.example` 是环境变量模板，真实 `server/.env` 不提交。
 - 历史记录和设置统一走 Electron 主进程 JSON 数据源，renderer 不应把这类业务数据写入 `localStorage`。
 - 词典正式词条和自动学习候选统一走 Electron 主进程 JSON 数据源，renderer 不应把词典数据写入 `localStorage`。
@@ -85,7 +87,7 @@
 
 ## 已知限制
 
-- 设置页的 `DeepSeek API Key` 输入框当前没有写回 `server/.env`，真实运行仍以后端环境变量为准。
+- 大模型 provider 默认模型只是首次配置建议，可能随服务商策略变化；如果调用失败，优先让用户在设置页修改模型名或 API Key，不要写死单一模型假设。
 - 当前可信选区读取依赖 Windows UI Automation；目标应用不支持 UIA 选区时会按无选区处理。剪贴板读取不参与模式判断。
 - 当前 `ask_anything` 只调用 DeepSeek 文本模型，没有联网搜索、天气查询或工具调用链路；实时信息问题必须明确能力边界。
 - 当前没有单独的选区文本翻译快捷键；`Right Alt` 固定为听写，`Right Alt + Right Shift` 固定为语音翻译粘贴。尚未开放英文以外的目标语言。
