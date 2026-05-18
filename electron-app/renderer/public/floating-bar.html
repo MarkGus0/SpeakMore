@@ -419,6 +419,14 @@ function renderVoiceState(state) {
   else if (status === 'error') setVisualTone('error');
   else setVisualTone('idle');
 
+  if (status === 'cancelled') {
+    if (particleSphere) particleSphere.cancel();
+  } else if (status === 'completed') {
+    if (particleSphere) particleSphere.complete();
+  } else if (status === 'error') {
+    if (particleSphere) particleSphere.fail();
+  }
+
   if (displayText) {
     setHintText(displayText);
     return;
@@ -433,13 +441,10 @@ function renderVoiceState(state) {
   else if (status === 'stopping' || status === 'transcribing') setHintText(getProcessingText(mode));
   else if (status === 'cancelled') {
     setHintText('当前转录已取消');
-    if (particleSphere) particleSphere.cancel();
   } else if (status === 'completed') {
     setHintText('已完成');
-    if (particleSphere) particleSphere.complete();
   } else if (status === 'error') {
     setHintText(errorMessage || '发生错误');
-    if (particleSphere) particleSphere.fail();
   } else {
     setHintText(IDLE_TEXT);
   }
