@@ -43,7 +43,9 @@ const {
   normalizeDictionaryCandidate,
   upsertDictionaryEntry,
   buildPromptDictionaryTerms,
+  learnDictionaryCandidate,
 } = require('./dictionary-store');
+const { createTextObservationSessionManager } = require('./text-observation-session');
 
 let mainWindow = null;
 let floatingBar = null;
@@ -263,6 +265,21 @@ function writeDictionaryCandidates(candidates) {
 function readPromptDictionaryTerms() {
   return buildPromptDictionaryTerms(readDictionaryEntries());
 }
+
+function learnDictionaryCorrection(candidate) {
+  const result = learnDictionaryCandidate(readDictionaryCandidates(), candidate);
+  writeDictionaryCandidates(result.candidates);
+  if (result.promotedEntry) {
+    writeDictionaryEntries(upsertDictionaryEntry(readDictionaryEntries(), result.promotedEntry));
+  }
+  return result;
+}
+
+const textObservationManager = createTextObservationSessionManager({
+  startNativeObservation: async () => ({ success: false, code: 'native_observer_not_started' }),
+  stopNativeObservation: async () => {},
+  learnCorrection: async (candidate) => learnDictionaryCorrection(candidate),
+});
 
 function debugShortcut(event, payload = {}) {
   if (!SHORTCUT_DEBUG_ENABLED) return;
@@ -1273,9 +1290,10 @@ function registerIpcHandlers() {
 
   ipcMain.handle('keyboard:start-keyboard-listener', () => true);
   ipcMain.handle('keyboard:stop-keyboard-listener', () => true);
-  ipcMain.handle('keyboard:type-transcript', (_, text) => {
-    if (!text) return false;
-    clipboard.writeText(String(text));
+  ipcMain.handle('keyboard:type-transcript', async (_, text) => {
+    const pastedText = String(text || '');
+    if (!pastedText) return false;
+    clipboard.writeText(pastedText);
     const ps = spawn('powershell.exe', [
       '-NoProfile', '-Command',
       'Add-Type -AssemblyName System.Windows.Forms; Start-Sleep -Milliseconds 100; [System.Windows.Forms.SendKeys]::SendWait("^v")',
@@ -1288,10 +1306,18 @@ function registerIpcHandlers() {
         TMP: process.env.TMP,
       },
     });
-    return new Promise((resolve) => {
+    const pasteSucceeded = await new Promise((resolve) => {
       ps.on('exit', () => resolve(true));
       ps.on('error', () => resolve(false));
     });
+    if (pasteSucceeded && pastedText.trim()) {
+      await textObservationManager.start({
+        audioId: crypto.randomUUID(),
+        pastedText,
+        focusInfo: readFocusedInfo(),
+      });
+    }
+    return pasteSucceeded;
   });
   ipcMain.handle('keyboard:set-watcher-interval', () => true);
   ipcMain.handle('keyboard-input:reload-keyboard-shortcuts', () => true);

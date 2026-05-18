@@ -648,6 +648,16 @@ test('P1 词典数据统一走主进程 JSON 数据源', async () => {
   assert.match(main, /ipcMain\.handle\(['"]dictionary:prompt-terms['"]/);
 });
 
+test('P1 主进程在粘贴成功后启动词典自动学习观察', async () => {
+  const main = await readProjectFile('../main.js');
+
+  assert.match(main, /createTextObservationSessionManager/);
+  assert.match(main, /function\s+learnDictionaryCorrection\(/);
+  assert.match(main, /learnDictionaryCandidate\(readDictionaryCandidates\(\),\s*candidate/);
+  assert.match(main, /textObservationManager\.start\(\{[\s\S]*pastedText/);
+  assert.match(main, /readFocusedInfo\(\)/);
+});
+
 test('P1 词典页面接入导航和主进程 IPC', async () => {
   const navigation = await readProjectFile('src/navigation.ts');
   const sidebar = await readProjectFile('src/components/Sidebar.tsx');
