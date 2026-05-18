@@ -23,9 +23,11 @@
 - 后端关键接口为 `GET /health`、`GET /ready`、`POST /ai/voice_flow` 和 `WebSocket /ws/rt_voice_flow`。
 - `/health` 表示后端进程存活；`/ready` 表示 ASR 模型预热完成，语音链路可接收请求。
 - `electron-app/main.js` 加载 `electron-app/renderer/dist/index.html`、`floating-bar.html` 和 `floating-panel.html`。
+- Windows 文本观察 helper 位于 `electron-app/windows-text-observer/`，只服务本轮粘贴后的短时自动学习，不参与基础录音链路。
 - 前端修改后必须在 `electron-app/renderer/` 下运行 `npm run build`，再重启 Electron 验证。
 - 主窗口关闭按钮只隐藏窗口到后台，托盘“退出”或真实应用退出才结束 Electron。
 - 历史、设置、统计、日志和录音相关本地数据由 Electron 主进程写入 `app.getPath('userData')/local-data/`。
+- 词典和自动学习候选也属于本地数据，由 Electron 主进程写入 `app.getPath('userData')/local-data/`，renderer 只能通过 IPC 访问。
 
 ## 语音链路约束
 
@@ -57,11 +59,13 @@
 - 模型扫描顺序固定为 `WHISPER_MODEL_DIR` → `%LOCALAPPDATA%\Typeless\models\faster-whisper` → `%USERPROFILE%\.cache\huggingface\hub` → 首次下载到 `%LOCALAPPDATA%\Typeless\models\faster-whisper`。
 - 开发态 `uvicorn reload` 必须显式由环境变量 `UVICORN_RELOAD` 开启，不要在代码里默认写死 `reload=True`。
 - 录音期间静音后台声音时，保持“短按开始、再次短按结束”的交互；Windows 上按音频会话静音，结束后只恢复本轮被 SpeakMore 主动静音的会话。
+- 自动学习只能围绕 SpeakMore 本轮粘贴结果短时观察当前焦点控件，不允许做无差别全局文本采集；目标应用不支持 UIA 文本读取时，本轮学习应降级为不可用。
 
 ## 前端与用户体验约束
 
 - 用户可见品牌为 `SpeakMore`。
-- 主窗口页面为：首页、历史记录、设置、诊断。
+- 主窗口页面为：首页、历史记录、词典、设置、诊断。
+- 词典页用于管理手动词条、自动添加词条和候选词条，应提供搜索、新增、启用/禁用、删除和候选确认入口。
 - 首页“最近结果”只展示非自由提问的最近一次最终转录/最终结果文字；实时状态只在悬浮胶囊展示。
 - 首页“最近结果”、历史记录条目和自由提问悬浮结果都应提供复制入口；复制动作统一走 `clipboard:write-text` IPC，空结果不能复制占位符。
 - 设置页目前包含固定快捷键展示、麦克风选择、界面语言、翻译目标语言、DeepSeek API Key 输入框、开机启动和版本信息；翻译目标语言 MVP 只支持英文 `en`。
@@ -73,9 +77,11 @@
 - DeepSeek 配置由后端 `server/.env` 读取；不要把真实密钥写入仓库。
 - `server/.env.example` 是环境变量模板，真实 `server/.env` 不提交。
 - 历史记录和设置统一走 Electron 主进程 JSON 数据源，renderer 不应把这类业务数据写入 `localStorage`。
+- 词典正式词条和自动学习候选统一走 Electron 主进程 JSON 数据源，renderer 不应把词典数据写入 `localStorage`。
 - 本地设置包含 `translationTargetLanguage`，当前只允许 `en`，由主进程和 renderer 双侧归一化。
 - 听写历史保存由 `AppShell` 这类全局常驻层订阅语音会话完成事件，不要放在首页、历史页等可切换页面组件里。
 - 首页累计统计来自独立 `history-stats.json`，不得从最近 200 条 `history.json` 反推；历史列表裁剪不能影响累计听写时长、累计字数、平均速度和节省时间。
+- 后端 `refiner.py` 不直接读取 Electron 本地词典文件；润色所需词条由 Electron 随语音请求参数传入，且只传启用词条。
 
 ## 已知限制
 

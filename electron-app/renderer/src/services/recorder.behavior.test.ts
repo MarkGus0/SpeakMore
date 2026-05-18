@@ -457,10 +457,10 @@ test('启动录音时会把启用词典词条传给后端', async () => {
 
   try {
     const originalInvoke = window.ipcRenderer!.invoke
-    window.ipcRenderer!.invoke = async (channel: string, payload?: unknown) => {
+    window.ipcRenderer!.invoke = async <T = unknown>(channel: string, payload?: unknown): Promise<T> => {
       if (channel === 'dictionary:prompt-terms') {
         env.invokeCalls.push({ channel, payload })
-        return [{ phrase: 'Client2API', aliases: ['client to api'] }]
+        return [{ phrase: 'Client2API', aliases: ['client to api'] }] as T
       }
       return originalInvoke(channel, payload)
     }
