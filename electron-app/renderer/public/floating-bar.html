@@ -40,8 +40,8 @@ html, body {
 }
 #particle-sphere-container {
   position: relative;
-  width: 140px;
-  height: 140px;
+  width: 120px;
+  height: 120px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -181,8 +181,8 @@ class ParticleSphere {
   }
 
   resize() {
-    const width = this.canvas.clientWidth || 140;
-    const height = this.canvas.clientHeight || 140;
+    const width = this.canvas.clientWidth || 120;
+    const height = this.canvas.clientHeight || 120;
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
@@ -276,7 +276,8 @@ class ParticleSphere {
 
       if (this.state === 'recording') {
         const responsiveLevel = Math.sqrt(this.audioLevel);
-        noise = Math.sin(time * 3 + i * 0.1) * (0.1 + responsiveLevel * 0.75);
+        const recordingPulse = 0.08 + responsiveLevel * 1.15;
+        noise = Math.sin(time * 3 + i * 0.1) * recordingPulse;
       } else if (this.state === 'processing') {
         noise = Math.sin(time * 5 + i * 0.2) * 0.3;
       } else if (this.state === 'completed') {
@@ -325,8 +326,7 @@ class ParticleSphere {
 }
 
 function renderFallback() {
-  particleContainer.style.border = '1px solid rgba(255,255,255,0.12)';
-  particleContainer.style.borderRadius = '50%';
+  particleContainer.style.display = 'none';
 }
 
 function initializeParticleSphere() {

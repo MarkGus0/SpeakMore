@@ -1277,6 +1277,7 @@ function createMainWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       session: session.fromPartition('persist:no-proxy-session'),
+      backgroundThrottling: false,
     },
   });
 
