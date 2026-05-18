@@ -24,10 +24,12 @@ async function loadSettingsStore(seed: string) {
   return import(new URL(`./settingsStore.ts?case=${seed}-${Date.now()}`, import.meta.url).href)
 }
 
-function installSettingsResponse(settings: unknown) {
+function installSettingsResponse(settings: unknown, calls: string[] = []) {
   const windowLike = globalThis as WindowWithIpc
   windowLike.ipcRenderer = {
     invoke: async (channel: string) => {
+      calls.push(channel)
+      if (channel === 'settings:reload-llm-backend') return { success: true } as never
       if (channel === 'settings:get') return settings as never
       if (channel === 'settings:update') return settings as never
       return {} as never
@@ -106,4 +108,15 @@ test('getCurrentLlmConfig 支持 Custom provider 的 Base URL 和空 API Key', a
     model: 'qwen3',
     auth_type: 'bearer',
   })
+})
+
+test('reloadLlmBackendConfig 通过主进程触发后端配置重载', async () => {
+  const calls: string[] = []
+  installSettingsResponse({}, calls)
+  const settingsStore = await loadSettingsStore('reload-llm-backend')
+
+  const result = await settingsStore.reloadLlmBackendConfig()
+
+  assert.deepEqual(result, { success: true })
+  assert.equal(calls.includes('settings:reload-llm-backend'), true)
 })

@@ -8,19 +8,25 @@ import {
   formatAverageSpeed,
   formatDurationMinutes,
   formatSavedMinutes,
+  listVoiceHistory,
   loadVoiceStats,
   type VoiceStats,
   VOICE_HISTORY_UPDATED_EVENT,
 } from '../services/historyStore'
+import {
+  prependRecentDashboardResult,
+  selectRecentDashboardResults,
+  type RecentDashboardResult,
+} from '../services/recentDashboardResults'
 import { cardSx, subtlePanelSx } from '../uiTokens'
 
 export default function Dashboard() {
-  const [recentResult, setRecentResult] = useState('')
+  const [recentResults, setRecentResults] = useState<RecentDashboardResult[]>([])
   const [stats, setStats] = useState<VoiceStats>(emptyVoiceStats)
 
-  const handleCopyRecentResult = () => {
-    if (!recentResult) return
-    ipcClient.invoke('clipboard:write-text', recentResult).catch(() => navigator.clipboard.writeText(recentResult))
+  const handleCopyRecentResult = (text: string) => {
+    if (!text) return
+    ipcClient.invoke('clipboard:write-text', text).catch(() => navigator.clipboard.writeText(text))
   }
 
   useEffect(() => {
@@ -28,9 +34,24 @@ export default function Dashboard() {
       if (voiceSession.status === 'completed' && voiceSession.mode !== 'Ask') {
         const { refinedText, rawText } = voiceSession
         const result = refinedText || rawText
-        if (result) setRecentResult(result)
+        const id = voiceSession.audioId || `live-${Date.now()}`
+        if (result) {
+          setRecentResults((current) => prependRecentDashboardResult(current, { id, text: result }))
+        }
       }
     })
+  }, [])
+
+  useEffect(() => {
+    const refreshRecentResults = () => {
+      listVoiceHistory()
+        .then((items) => setRecentResults(selectRecentDashboardResults(items)))
+        .catch(() => undefined)
+    }
+
+    refreshRecentResults()
+    window.addEventListener(VOICE_HISTORY_UPDATED_EVENT, refreshRecentResults)
+    return () => window.removeEventListener(VOICE_HISTORY_UPDATED_EVENT, refreshRecentResults)
   }, [])
 
   useEffect(() => {
@@ -93,17 +114,34 @@ export default function Dashboard() {
         <Box sx={{ ...cardSx, p: 2, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <Typography sx={{ fontSize: 16, fontWeight: 500 }}>最近结果</Typography>
-            <IconButton
-              size="small"
-              aria-label="复制最近结果"
-              disabled={!recentResult}
-              onClick={handleCopyRecentResult}
-            >
-              <ContentCopyIcon sx={{ fontSize: 16 }} />
-            </IconButton>
           </Box>
-          <Box sx={{ bgcolor: 'rgba(119,119,119,0.03)', borderRadius: '12px', p: 1.5, minHeight: 64 }}>
-            <Typography sx={{ fontSize: 15, whiteSpace: 'pre-wrap' }}>{recentResult || '-'}</Typography>
+          <Box sx={{ bgcolor: 'rgba(119,119,119,0.03)', borderRadius: '12px', minHeight: 64, overflow: 'hidden' }}>
+            {recentResults.length > 0 ? recentResults.map((item, index) => (
+              <Box
+                key={item.id}
+                sx={{
+                  display: 'grid',
+                  gridTemplateColumns: 'minmax(0, 1fr) auto',
+                  alignItems: 'start',
+                  gap: 1,
+                  p: 1.5,
+                  borderBottom: index === recentResults.length - 1 ? 'none' : '1px solid rgba(119,119,119,0.08)',
+                }}
+              >
+                <Typography sx={{ fontSize: 15, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{item.text}</Typography>
+                <IconButton
+                  size="small"
+                  aria-label={`复制最近结果 ${index + 1}`}
+                  onClick={() => handleCopyRecentResult(item.text)}
+                >
+                  <ContentCopyIcon sx={{ fontSize: 16 }} />
+                </IconButton>
+              </Box>
+            )) : (
+              <Box sx={{ p: 1.5 }}>
+                <Typography sx={{ fontSize: 15, whiteSpace: 'pre-wrap' }}>-</Typography>
+              </Box>
+            )}
           </Box>
         </Box>
       </Box>

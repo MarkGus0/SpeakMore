@@ -3,7 +3,7 @@
 import os
 import httpx
 from openai import AsyncOpenAI
-from runtime_config import load_server_env
+from runtime_config import load_server_env, reload_server_env
 
 load_server_env()
 
@@ -20,6 +20,12 @@ def _get_client() -> AsyncOpenAI:
             base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"),
         )
     return _client
+
+
+def reload_refiner_runtime_config() -> None:
+    global _client
+    reload_server_env()
+    _client = None
 
 
 def normalize_request_llm_config(parameters: dict | None) -> dict | None:

@@ -27,6 +27,12 @@ export type LlmRequestConfig = {
   auth_type: LlmAuthType
 }
 
+export type BackendReloadResult = {
+  success: boolean
+  detail?: string
+  code?: string
+}
+
 export const DEFAULT_LLM_PROVIDERS: LlmProvider[] = [
   {
     id: 'deepseek',
@@ -202,6 +208,18 @@ export async function saveSettings(settings: LocalSettings): Promise<LocalSettin
     return normalizeSettings(await ipcClient.invoke<LocalSettings>('settings:update', settings))
   } catch {
     return normalizeSettings(settings)
+  }
+}
+
+export async function reloadLlmBackendConfig(): Promise<BackendReloadResult> {
+  try {
+    return await ipcClient.invoke<BackendReloadResult>('settings:reload-llm-backend')
+  } catch (error) {
+    return {
+      success: false,
+      code: 'backend_unavailable',
+      detail: error instanceof Error ? error.message : String(error),
+    }
   }
 }
 

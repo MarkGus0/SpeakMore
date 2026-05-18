@@ -74,6 +74,7 @@ const VOICE_SERVER_HEALTH_URL = `${VOICE_SERVER_URL}/health`;
 const VOICE_SERVER_READY_URL = `${VOICE_SERVER_URL}/ready`;
 const VOICE_SERVER_VOICE_FLOW_URL = `${VOICE_SERVER_URL}/ai/voice_flow`;
 const VOICE_SERVER_MODELS_URL = `${VOICE_SERVER_URL}/models`;
+const VOICE_SERVER_CONFIG_RELOAD_URL = `${VOICE_SERVER_URL}/config/reload`;
 const FLOATING_BAR_COMPLETED_HIDE_DELAY_MS = 1000;
 const FLOATING_BAR_SIZE = { width: 400, height: 360 };
 const FLOATING_PANEL_SIZE = { width: 440, height: 220 };
@@ -1066,6 +1067,29 @@ async function callModelBackend(pathname = '', options = {}) {
   }
 }
 
+async function reloadVoiceServerConfig() {
+  try {
+    const response = await fetch(VOICE_SERVER_CONFIG_RELOAD_URL, { method: 'POST' });
+    const payload = await readJsonSafely(response);
+    if (!response.ok) {
+      return {
+        success: false,
+        code: 'config_reload_failed',
+        detail: payload?.detail || resolveVoiceServerProbeDetail(VOICE_SERVER_CONFIG_RELOAD_URL, response.status, payload),
+        data: payload,
+      };
+    }
+    return { success: true, detail: payload?.detail || '大模型配置已重载', data: payload };
+  } catch (error) {
+    return {
+      success: false,
+      code: 'backend_unavailable',
+      detail: error instanceof Error ? error.message : String(error),
+      data: null,
+    };
+  }
+}
+
 function normalizeVoiceMode(mode) {
   const normalized = String(mode || 'transcript').toLowerCase();
   if (normalized === 'dictate' || normalized === 'dictation') return 'transcript';
@@ -1467,6 +1491,7 @@ function registerIpcHandlers() {
 
   ipcMain.handle('settings:get', () => readLocalSettings());
   ipcMain.handle('settings:update', (_, payload = {}) => writeLocalSettings({ ...readLocalSettings(), ...payload }));
+  ipcMain.handle('settings:reload-llm-backend', async () => reloadVoiceServerConfig());
 
   ipcMain.handle('dictionary:list', () => readDictionaryEntries());
   ipcMain.handle('dictionary:create', (_, payload = {}) => {

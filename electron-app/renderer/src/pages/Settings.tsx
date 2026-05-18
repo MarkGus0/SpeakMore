@@ -4,6 +4,7 @@ import { ipcClient } from '../services/ipc'
 import {
   defaultSettings,
   loadSettings,
+  reloadLlmBackendConfig,
   saveSettings,
   type LlmProvider,
   type LocalSettings,
@@ -42,11 +43,20 @@ type AudioDevice = { deviceId: string; label?: string }
 
 export default function Settings() {
   const [settings, setSettings] = useState<LocalSettings>(defaultSettings)
+  const [llmDraft, setLlmDraft] = useState<LocalSettings['llm']>(defaultSettings.llm)
+  const [isLlmEditing, setIsLlmEditing] = useState(false)
+  const [isSavingLlm, setIsSavingLlm] = useState(false)
+  const [llmSaveMessage, setLlmSaveMessage] = useState('')
   const [devices, setDevices] = useState<AudioDevice[]>([])
   const settingsUpdateSeq = useRef(0)
 
   useEffect(() => {
-    loadSettings().then(setSettings).catch(() => undefined)
+    loadSettings()
+      .then((loadedSettings) => {
+        setSettings(loadedSettings)
+        setLlmDraft(loadedSettings.llm)
+      })
+      .catch(() => undefined)
     navigator.mediaDevices.enumerateDevices()
       .then((items) => setDevices(items
         .filter((device) => device.kind === 'audioinput')
@@ -62,23 +72,20 @@ export default function Settings() {
     if (settingsUpdateSeq.current === seq) setSettings(saved)
   }
 
-  const currentProvider = settings.llm.providers.find((provider) => provider.id === settings.llm.providerId)
-    ?? settings.llm.providers[0]
-
-  const updateLlm = (llm: LocalSettings['llm']) => {
-    void updateSettings({ ...settings, llm })
-  }
+  const llmView = isLlmEditing ? llmDraft : settings.llm
+  const currentProvider = llmView.providers.find((provider) => provider.id === llmView.providerId)
+    ?? llmView.providers[0]
 
   const updateProvider = (providerId: string) => {
-    if (!settings.llm.providers.some((provider) => provider.id === providerId)) return
-    updateLlm({ ...settings.llm, providerId })
+    if (!llmDraft.providers.some((provider) => provider.id === providerId)) return
+    setLlmDraft({ ...llmDraft, providerId })
   }
 
   const updateCurrentProvider = (updater: (provider: LlmProvider) => LlmProvider) => {
     if (!currentProvider) return
-    updateLlm({
-      ...settings.llm,
-      providers: settings.llm.providers.map((provider) => (
+    setLlmDraft({
+      ...llmDraft,
+      providers: llmDraft.providers.map((provider) => (
         provider.id === currentProvider.id ? updater(provider) : provider
       )),
     })
@@ -86,18 +93,46 @@ export default function Settings() {
 
   const updateCurrentApiKey = (apiKey: string) => {
     if (!currentProvider) return
-    updateLlm({
-      ...settings.llm,
-      apiKeys: { ...settings.llm.apiKeys, [currentProvider.id]: apiKey },
+    setLlmDraft({
+      ...llmDraft,
+      apiKeys: { ...llmDraft.apiKeys, [currentProvider.id]: apiKey },
     })
   }
 
   const updateCurrentModel = (model: string) => {
     if (!currentProvider) return
-    updateLlm({
-      ...settings.llm,
-      models: { ...settings.llm.models, [currentProvider.id]: model },
+    setLlmDraft({
+      ...llmDraft,
+      models: { ...llmDraft.models, [currentProvider.id]: model },
     })
+  }
+
+  const beginLlmEdit = () => {
+    setLlmDraft(settings.llm)
+    setLlmSaveMessage('')
+    setIsLlmEditing(true)
+  }
+
+  const cancelLlmEdit = () => {
+    setLlmDraft(settings.llm)
+    setLlmSaveMessage('')
+    setIsLlmEditing(false)
+  }
+
+  const saveLlmSettings = async () => {
+    setIsSavingLlm(true)
+    setLlmSaveMessage('')
+    const saved = await saveSettings({ ...settings, llm: llmDraft })
+    setSettings(saved)
+    setLlmDraft(saved.llm)
+    const reloadResult = await reloadLlmBackendConfig()
+    if (reloadResult.success) {
+      setIsLlmEditing(false)
+      setLlmSaveMessage('已保存')
+    } else {
+      setLlmSaveMessage(`后端重载失败：${reloadResult.detail || reloadResult.code || '未知错误'}`)
+    }
+    setIsSavingLlm(false)
   }
 
   return (
@@ -166,16 +201,32 @@ export default function Settings() {
       </Box>
 
       {/* 大模型 */}
-      <Typography sx={sectionTitle}>大模型</Typography>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 3, mb: 1 }}>
+        <Typography sx={{ fontSize: 16, fontWeight: 500 }}>大模型</Typography>
+        {isLlmEditing ? (
+          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+            <Button variant="outlined" size="small" onClick={cancelLlmEdit} disabled={isSavingLlm}>取消</Button>
+            <Button variant="contained" size="small" onClick={() => void saveLlmSettings()} disabled={isSavingLlm}>保存</Button>
+          </Box>
+        ) : (
+          <Button variant="outlined" size="small" onClick={beginLlmEdit}>修改</Button>
+        )}
+      </Box>
+      {llmSaveMessage && (
+        <Typography sx={{ fontSize: 12, color: llmSaveMessage.startsWith('后端') ? 'error.main' : 'success.main', mb: 1 }}>
+          {llmSaveMessage}
+        </Typography>
+      )}
       <Box sx={rowSx}>
         <Typography>提供商</Typography>
         <Select
           size="small"
-          value={settings.llm.providerId}
+          value={llmView.providerId}
           onChange={(event) => updateProvider(String(event.target.value))}
+          disabled={!isLlmEditing || isSavingLlm}
           sx={{ minWidth: 240 }}
         >
-          {settings.llm.providers.map((provider) => (
+          {llmView.providers.map((provider) => (
             <MenuItem key={provider.id} value={provider.id}>{provider.label}</MenuItem>
           ))}
         </Select>
@@ -189,7 +240,8 @@ export default function Settings() {
             label="Base URL"
             placeholder="请输入兼容 OpenAI 的 Base URL"
             value={currentProvider.baseUrl}
-            onChange={(event) => updateCurrentProvider((provider) => ({ ...provider, baseUrl: event.target.value.trim() }))}
+            onChange={(event) => updateCurrentProvider((provider) => ({ ...provider, baseUrl: event.target.value }))}
+            disabled={!isLlmEditing || isSavingLlm}
             sx={{ maxWidth: 420 }}
           />
         </Box>
@@ -202,8 +254,9 @@ export default function Settings() {
           type="password"
           label="API Key"
           placeholder="请输入 API Key"
-          value={currentProvider ? settings.llm.apiKeys[currentProvider.id] ?? '' : ''}
+          value={currentProvider ? llmView.apiKeys[currentProvider.id] ?? '' : ''}
           onChange={(event) => updateCurrentApiKey(event.target.value)}
+          disabled={!isLlmEditing || isSavingLlm}
           sx={{ maxWidth: 420 }}
         />
       </Box>
@@ -214,8 +267,9 @@ export default function Settings() {
           size="small"
           label="模型"
           placeholder="请输入模型名称"
-          value={currentProvider ? settings.llm.models[currentProvider.id] ?? currentProvider.defaultModel : ''}
-          onChange={(event) => updateCurrentModel(event.target.value.trim())}
+          value={currentProvider ? llmView.models[currentProvider.id] ?? currentProvider.defaultModel : ''}
+          onChange={(event) => updateCurrentModel(event.target.value)}
+          disabled={!isLlmEditing || isSavingLlm}
           sx={{ maxWidth: 420 }}
         />
       </Box>
@@ -231,18 +285,6 @@ export default function Settings() {
             })
           }}
         />
-      </Box>
-
-      {/* 关于 */}
-      <Box sx={{ ...rowSx, mt: 3 }}>
-        <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>版本 0.1（本地版）</Typography>
-        <Button
-          variant="outlined"
-          size="small"
-          onClick={() => undefined}
-        >
-          检查更新
-        </Button>
       </Box>
     </Box>
   )
