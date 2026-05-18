@@ -702,6 +702,44 @@ test('P1 词典页面接入导航和主进程 IPC', async () => {
   assert.doesNotMatch(dictionaryStore, /localStorage/);
 });
 
+test('P1 模型管理 IPC 只转发到后端，不在 Electron 主进程管理模型文件', async () => {
+  const main = await readProjectFile('../main.js');
+
+  for (const channel of ['model:list', 'model:download', 'model:cancel-download', 'model:delete', 'model:select']) {
+    assert.match(main, new RegExp(`ipcMain\\.handle\\(['"]${channel.replaceAll(':', '\\:')}['"]`));
+  }
+  assert.match(main, /VOICE_SERVER_MODELS_URL/);
+  assert.match(main, /callModelBackend/);
+  assert.doesNotMatch(main, /snapshot_download/);
+  assert.doesNotMatch(main, /models--Systran--faster-whisper/);
+});
+
+test('P1 模型页面接入导航并通过模型服务读取主进程 IPC', async () => {
+  const navigation = await readProjectFile('src/navigation.ts');
+  const sidebar = await readProjectFile('src/components/Sidebar.tsx');
+  const appShell = await readProjectFile('src/components/AppShell.tsx');
+  const modelStore = await readProjectFile('src/services/modelStore.ts');
+  const modelsPage = await readProjectFile('src/pages/Models.tsx');
+
+  assert.match(navigation, /'models'/);
+  assert.match(navigation, /模型/);
+  assert.match(sidebar, /MemoryIcon|StorageIcon|HubIcon/);
+  assert.match(appShell, /Models/);
+  assert.match(modelStore, /model:list/);
+  assert.match(modelStore, /model:download/);
+  assert.match(modelStore, /model:cancel-download/);
+  assert.match(modelStore, /model:delete/);
+  assert.match(modelStore, /model:select/);
+  assert.doesNotMatch(modelStore, /localStorage/);
+  assert.match(modelsPage, /转录模型/);
+  assert.match(modelsPage, /已下载的模型/);
+  assert.match(modelsPage, /可供下载/);
+  assert.match(modelsPage, /设为当前/);
+  assert.match(modelsPage, /取消下载/);
+  assert.match(modelsPage, /删除/);
+  assert.match(modelsPage, /所有语言/);
+});
+
 test('P1 设置页与设置 store 统一走主进程 JSON 数据源', async () => {
   const settingsStore = await readProjectFile('src/services/settingsStore.ts');
   const settingsPage = await readProjectFile('src/pages/Settings.tsx');

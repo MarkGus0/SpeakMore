@@ -14,6 +14,7 @@ from asr import (
     resolve_whisper_model_source,
 )
 from main import should_enable_reload
+from model_manager import get_managed_models_root, repo_cache_dir_name, write_selected_model_id
 
 BASE_REPO_DIR = "models--Systran--faster-whisper-base"
 
@@ -185,7 +186,34 @@ class AsrConfigTest(unittest.TestCase):
             ),
         )
 
-    def test_resolve_whisper_model_source_rejects_non_base_model_name(self):
+    def test_resolve_whisper_model_source_uses_selected_model(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            local_app_data = Path(temp_dir) / "LocalAppData"
+            user_profile = Path(temp_dir) / "UserProfile"
+            with patch.dict(
+                os.environ,
+                {
+                    "WHISPER_MODEL": "",
+                    "WHISPER_MODEL_DIR": "",
+                    "LOCALAPPDATA": str(local_app_data),
+                    "USERPROFILE": str(user_profile),
+                },
+                clear=False,
+            ):
+                write_selected_model_id("small")
+                snapshot = get_managed_models_root() / "faster-whisper" / repo_cache_dir_name("Systran/faster-whisper-small") / "snapshots" / "abc"
+                snapshot.mkdir(parents=True)
+                (snapshot / "model.bin").write_bytes(b"model")
+                (snapshot / "config.json").write_text("{}", encoding="utf-8")
+
+                source = resolve_whisper_model_source()
+
+        self.assertEqual(
+            source,
+            WhisperModelSource(kind=MANAGED_CACHE_SOURCE, model_ref=str(snapshot), download_root=None, model_id="small"),
+        )
+
+    def test_legacy_whisper_model_env_no_longer_blocks_supported_model_selection(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             with patch.dict(
                 os.environ,
@@ -197,8 +225,9 @@ class AsrConfigTest(unittest.TestCase):
                 },
                 clear=False,
             ):
-                with self.assertRaisesRegex(ValueError, "仅支持 faster-whisper 模型 base"):
-                    resolve_whisper_model_source()
+                source = resolve_whisper_model_source()
+
+        self.assertEqual(source.model_id, "small")
 
     def test_should_enable_reload_defaults_to_false(self):
         with patch.dict(os.environ, {}, clear=False):

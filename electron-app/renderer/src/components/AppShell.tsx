@@ -4,6 +4,7 @@ import Sidebar from './Sidebar'
 import Dashboard from '../pages/Dashboard'
 import History from '../pages/History'
 import Dictionary from '../pages/Dictionary'
+import Models from '../pages/Models'
 import Settings from '../pages/Settings'
 import Diagnostics from '../pages/Diagnostics'
 import { type Page } from '../navigation'
@@ -129,6 +130,7 @@ export default function AppShell() {
     home: <Dashboard />,
     history: <History />,
     dictionary: <Dictionary />,
+    models: <Models />,
     settings: <Settings />,
     diagnostics: <Diagnostics />,
   }), [])
