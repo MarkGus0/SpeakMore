@@ -3,6 +3,7 @@ import { Box } from '@mui/material'
 import Sidebar from './Sidebar'
 import Dashboard from '../pages/Dashboard'
 import History from '../pages/History'
+import Dictionary from '../pages/Dictionary'
 import Settings from '../pages/Settings'
 import Diagnostics from '../pages/Diagnostics'
 import { type Page } from '../navigation'
@@ -127,6 +128,7 @@ export default function AppShell() {
   const content = useMemo(() => ({
     home: <Dashboard />,
     history: <History />,
+    dictionary: <Dictionary />,
     settings: <Settings />,
     diagnostics: <Diagnostics />,
   }), [])

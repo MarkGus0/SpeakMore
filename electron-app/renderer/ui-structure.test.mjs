@@ -648,6 +648,32 @@ test('P1 词典数据统一走主进程 JSON 数据源', async () => {
   assert.match(main, /ipcMain\.handle\(['"]dictionary:prompt-terms['"]/);
 });
 
+test('P1 词典页面接入导航和主进程 IPC', async () => {
+  const navigation = await readProjectFile('src/navigation.ts');
+  const sidebar = await readProjectFile('src/components/Sidebar.tsx');
+  const appShell = await readProjectFile('src/components/AppShell.tsx');
+  const dictionaryPage = await readProjectFile('src/pages/Dictionary.tsx');
+  const dictionaryStore = await readProjectFile('src/services/dictionaryStore.ts');
+
+  assert.match(navigation, /'dictionary'/);
+  assert.match(navigation, /词典/);
+  assert.match(sidebar, /AutoAwesomeIcon|MenuBookIcon|LibraryBooksIcon/);
+  assert.match(appShell, /Dictionary/);
+  assert.match(dictionaryPage, /自动添加/);
+  assert.match(dictionaryPage, /手动添加/);
+  assert.match(dictionaryPage, /候选/);
+  assert.match(dictionaryPage, /启用/);
+  assert.match(dictionaryStore, /dictionary:list/);
+  assert.match(dictionaryStore, /dictionary:create/);
+  assert.match(dictionaryStore, /dictionary:update/);
+  assert.match(dictionaryStore, /dictionary:delete/);
+  assert.match(dictionaryStore, /dictionary:candidates-list/);
+  assert.match(dictionaryStore, /dictionary:candidate-promote/);
+  assert.match(dictionaryStore, /dictionary:candidate-ignore/);
+  assert.match(dictionaryStore, /dictionary:prompt-terms/);
+  assert.doesNotMatch(dictionaryStore, /localStorage/);
+});
+
 test('P1 设置页与设置 store 统一走主进程 JSON 数据源', async () => {
   const settingsStore = await readProjectFile('src/services/settingsStore.ts');
   const settingsPage = await readProjectFile('src/pages/Settings.tsx');
