@@ -53,6 +53,10 @@ test('Electron 悬浮条加载本地 renderer 构建产物', async () => {
   assert.doesNotMatch(floatingBar, /检测到长按快捷键/);
   assert.doesNotMatch(floatingBar, /shortcut-hint/);
   assert.doesNotMatch(floatingBar, /@keyframes\s+level/);
+  assert.doesNotMatch(floatingBar, /#particle-sphere-container::before/);
+  assert.doesNotMatch(floatingBar, /#particle-sphere-container::after/);
+  assert.doesNotMatch(floatingBar, /listening-ring/);
+  assert.doesNotMatch(floatingBar, /processing-ring/);
 });
 
 test('悬浮面板复用长按提示框位置，并支持快捷键提示和自由提问结果两种模式', async () => {
