@@ -658,6 +658,24 @@ test('P1 主进程在粘贴成功后启动词典自动学习观察', async () =>
   assert.match(main, /readFocusedInfo\(\)/);
 });
 
+test('P1 Windows 文本观察 helper 通过 stdio 接入主进程', async () => {
+  const main = await readProjectFile('../main.js');
+  const project = await readProjectFile('../windows-text-observer/WindowsTextObserver.csproj');
+  const program = await readProjectFile('../windows-text-observer/Program.cs');
+  const observer = await readProjectFile('../windows-text-observer/TextObserver.cs');
+
+  assert.match(project, /net8\.0-windows/);
+  assert.match(program, /observe-start/);
+  assert.match(program, /observe-stop/);
+  assert.match(observer, /TextPattern\.TextChangedEvent/);
+  assert.match(observer, /DocumentRange\.GetText\(4000\)/);
+  assert.match(main, /function\s+textObserverExecutablePath\(/);
+  assert.match(main, /function\s+ensureTextObserverProcess\(/);
+  assert.match(main, /sendTextObserverMessage\(\{[\s\S]*type:\s*['"]observe-start['"]/);
+  assert.match(main, /sendTextObserverMessage\(\{[\s\S]*type:\s*['"]observe-stop['"]/);
+  assert.match(main, /handleObservedText\(message\)/);
+});
+
 test('P1 词典页面接入导航和主进程 IPC', async () => {
   const navigation = await readProjectFile('src/navigation.ts');
   const sidebar = await readProjectFile('src/components/Sidebar.tsx');
