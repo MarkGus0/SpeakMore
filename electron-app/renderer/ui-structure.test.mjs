@@ -622,6 +622,7 @@ test('P0 悬浮条消费 voice-state.inputLevel 并驱动粒子球听写动态',
   assert.match(floatingBar, /setInputLevel\(stateLevel\)/);
   assert.match(floatingBar, /audioLevel/);
   assert.match(floatingBar, /this\.state\s*===\s*['"]recording['"]/);
+  assert.match(floatingBar, /0\.13\s*\+\s*this\.audioLevel\s*\*\s*0\.65/);
   assert.match(floatingBar, /this\.state\s*===\s*['"]processing['"]/);
   assert.doesNotMatch(floatingBar, /renderLevels/);
   assert.doesNotMatch(floatingBar, /@keyframes\s+level/);
