@@ -34,7 +34,7 @@ let activeTask: VoiceTask | null = null
 let levelAudioContext: AudioContext | null = null
 let levelAnalyser: AnalyserNode | null = null
 let levelSource: MediaStreamAudioSourceNode | null = null
-let levelFrameId: number | null = null
+let levelTimerId: number | null = null
 let levelData: Float32Array<ArrayBuffer> | null = null
 let smoothedInputLevel = 0
 const ignoredAudioIds = new Set<string>()
@@ -505,10 +505,9 @@ function startAudioLevelMonitoring(stream: MediaStream) {
       const smoothing = normalizedLevel > smoothedInputLevel ? 0.42 : 0.18
       smoothedInputLevel += (normalizedLevel - smoothedInputLevel) * smoothing
       updateSessionInputLevel(Number(smoothedInputLevel.toFixed(4)))
-      levelFrameId = window.requestAnimationFrame(tick)
     }
 
-    levelFrameId = window.requestAnimationFrame(tick)
+    levelTimerId = window.setInterval(tick, 50)
   } catch {
     cleanupAudioLevelMonitoring()
   }
@@ -559,8 +558,8 @@ function cleanupStream() {
 }
 
 function cleanupAudioLevelMonitoring() {
-  if (levelFrameId !== null) window.cancelAnimationFrame(levelFrameId)
-  levelFrameId = null
+  if (levelTimerId !== null) window.clearInterval(levelTimerId)
+  levelTimerId = null
 
   levelSource?.disconnect()
   levelSource = null

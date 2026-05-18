@@ -23,6 +23,7 @@ test('Electron 关闭主窗口时隐藏到后台并保留语音识别链路', as
   assert.match(main, /let\s+appIsQuitting\s*=\s*false/);
   assert.match(main, /if\s*\(mainWindow\s*&&\s*!mainWindow\.isDestroyed\(\)\)[\s\S]*mainWindow\.show\(\)[\s\S]*mainWindow\.focus\(\)/);
   assert.match(main, /mainWindow\.on\(['"]close['"],\s*\(event\)\s*=>\s*\{[\s\S]*if\s*\(appIsQuitting\)\s*return[\s\S]*event\.preventDefault\(\)[\s\S]*mainWindow\.hide\(\)/);
+  assert.match(main, /backgroundThrottling:\s*false/);
   assert.match(main, /app\.on\(['"]before-quit['"],\s*\(event\)\s*=>\s*\{[\s\S]*appIsQuitting\s*=\s*true/);
 });
 
@@ -46,7 +47,7 @@ test('Electron 悬浮条加载本地 renderer 构建产物', async () => {
   assert.match(floatingBar, /particleCount\s*=\s*800/);
   assert.match(floatingBar, /setRecording\(isRecording/);
   assert.match(floatingBar, /setProcessing\(isProcessing/);
-  assert.match(floatingBar, /#particle-sphere-container\s*\{[^}]*width:\s*140px;[^}]*height:\s*140px/);
+  assert.match(floatingBar, /#particle-sphere-container\s*\{[^}]*width:\s*120px;[^}]*height:\s*120px/);
   assert.doesNotMatch(floatingBar, /id=["']bar["']/);
   assert.doesNotMatch(floatingBar, /id=["']levels["']/);
   assert.doesNotMatch(floatingBar, /-webkit-app-region:\s*drag/);
@@ -55,6 +56,8 @@ test('Electron 悬浮条加载本地 renderer 构建产物', async () => {
   assert.doesNotMatch(floatingBar, /@keyframes\s+level/);
   assert.doesNotMatch(floatingBar, /#particle-sphere-container::before/);
   assert.doesNotMatch(floatingBar, /#particle-sphere-container::after/);
+  assert.doesNotMatch(floatingBar, /borderRadius\s*=\s*['"]50%['"]/);
+  assert.doesNotMatch(floatingBar, /border\s*=\s*['"][^'"]*rgba\(255,255,255,0\.12\)/);
   assert.doesNotMatch(floatingBar, /listening-ring/);
   assert.doesNotMatch(floatingBar, /processing-ring/);
 });
@@ -399,11 +402,11 @@ test('recorder 在录音期间分析真实麦克风音量并同步 inputLevel', 
 
   assert.match(recorder, /AudioContext/);
   assert.match(recorder, /AnalyserNode/);
-  assert.match(recorder, /requestAnimationFrame/);
+  assert.match(recorder, /setInterval\(tick,\s*50\)/);
   assert.match(recorder, /inputLevel:/);
   assert.match(recorder, /setSession\(\{\s*\.\.\.session,\s*inputLevel:/);
   assert.match(recorder, /cleanupAudioLevelMonitoring/);
-  assert.match(recorder, /cancelAnimationFrame/);
+  assert.match(recorder, /clearInterval/);
   assert.match(recorder, /audioContext\.close/);
 });
 
@@ -611,9 +614,14 @@ test('P0 悬浮条提示卡依赖完整视口尺寸，避免定位容器塌陷',
 });
 
 test('P0 悬浮条消费 voice-state.inputLevel 并驱动粒子球听写动态', async () => {
+  const main = await readProjectFile('../main.js');
+  const recorder = await readProjectFile('src/services/recorder.ts');
   const voiceTypes = await readProjectFile('src/services/voiceTypes.ts');
   const floatingBar = await readProjectFile('public/floating-bar.html');
 
+  assert.doesNotMatch(main, /voice-input-level-debug/);
+  assert.doesNotMatch(main, /voice-level-debug/);
+  assert.doesNotMatch(recorder, /voice-level-debug/);
   assert.match(voiceTypes, /inputLevel:\s*number/);
   assert.match(voiceTypes, /inputLevel:\s*0/);
   assert.match(voiceTypes, /inputLevel:\s*session\.inputLevel/);
@@ -623,7 +631,8 @@ test('P0 悬浮条消费 voice-state.inputLevel 并驱动粒子球听写动态',
   assert.match(floatingBar, /audioLevel/);
   assert.match(floatingBar, /this\.state\s*===\s*['"]recording['"]/);
   assert.match(floatingBar, /responsiveLevel\s*=\s*Math\.sqrt\(this\.audioLevel\)/);
-  assert.match(floatingBar, /0\.1\s*\+\s*responsiveLevel\s*\*\s*0\.75/);
+  assert.match(floatingBar, /recordingPulse\s*=\s*0\.08\s*\+\s*responsiveLevel\s*\*\s*1\.15/);
+  assert.match(floatingBar, /noise\s*=\s*Math\.sin\(time\s*\*\s*3\s*\+\s*i\s*\*\s*0\.1\)\s*\*\s*recordingPulse/);
   assert.match(floatingBar, /this\.state\s*===\s*['"]processing['"]/);
   assert.doesNotMatch(floatingBar, /renderLevels/);
   assert.doesNotMatch(floatingBar, /@keyframes\s+level/);

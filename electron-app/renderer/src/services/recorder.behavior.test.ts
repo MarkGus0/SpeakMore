@@ -45,8 +45,8 @@ function createTestEnvironment(options: {
   const originalWebSocket = globalThis.WebSocket
   const originalMediaRecorder = globalThis.MediaRecorder
   const originalAudioContext = globalThis.AudioContext
-  const originalRequestAnimationFrame = globalThis.requestAnimationFrame
-  const originalCancelAnimationFrame = globalThis.cancelAnimationFrame
+  const originalSetInterval = globalThis.setInterval
+  const originalClearInterval = globalThis.clearInterval
   const originalFetch = globalThis.fetch
 
   const sentPayloads: Array<string | ArrayBufferLike | Blob | ArrayBufferView> = []
@@ -54,11 +54,23 @@ function createTestEnvironment(options: {
   const sendCalls: Array<{ channel: string; payload?: unknown }> = []
   const fetchCalls: Array<{ url: string; init?: RequestInit }> = []
   const sockets: FakeWebSocket[] = []
+  const intervalCallbacks = new Map<number, () => void>()
+  const clearedIntervals: number[] = []
   let restoreCalls = 0
   let trackStops = 0
+  let nextIntervalId = 1
+  let analyserSample = 0.04
 
+  const audioTrack = {
+    enabled: true,
+    muted: false,
+    readyState: 'live',
+    stop: () => { trackStops += 1 },
+  }
   const mediaStream = {
-    getTracks: () => [{ stop: () => { trackStops += 1 } }],
+    active: true,
+    getTracks: () => [audioTrack],
+    getAudioTracks: () => [audioTrack],
   } as unknown as MediaStream
 
   class FakeAnalyserNode {
@@ -66,7 +78,7 @@ function createTestEnvironment(options: {
     smoothingTimeConstant = 0
 
     getFloatTimeDomainData(target: Float32Array) {
-      target.fill(0)
+      target.fill(analyserSample)
     }
   }
 
@@ -244,13 +256,21 @@ function createTestEnvironment(options: {
     configurable: true,
     value: FakeAudioContext,
   })
-  Object.defineProperty(globalThis, 'requestAnimationFrame', {
+  Object.defineProperty(globalThis, 'setInterval', {
     configurable: true,
-    value: () => 1,
+    value: (callback: () => void) => {
+      const id = nextIntervalId
+      nextIntervalId += 1
+      intervalCallbacks.set(id, callback)
+      return id
+    },
   })
-  Object.defineProperty(globalThis, 'cancelAnimationFrame', {
+  Object.defineProperty(globalThis, 'clearInterval', {
     configurable: true,
-    value: () => undefined,
+    value: (id: number) => {
+      clearedIntervals.push(id)
+      intervalCallbacks.delete(id)
+    },
   })
   Object.defineProperty(globalThis, 'fetch', {
     configurable: true,
@@ -272,6 +292,13 @@ function createTestEnvironment(options: {
     sockets,
     getRestoreCalls: () => restoreCalls,
     getTrackStops: () => trackStops,
+    getClearedIntervals: () => clearedIntervals,
+    runLevelTick(count = 1) {
+      for (let index = 0; index < count; index += 1) {
+        Array.from(intervalCallbacks.values()).forEach((callback) => callback())
+      }
+    },
+    setAnalyserSample: (value: number) => { analyserSample = value },
     restore() {
       Object.defineProperty(globalThis, 'window', {
         configurable: true,
@@ -297,13 +324,13 @@ function createTestEnvironment(options: {
         configurable: true,
         value: originalAudioContext,
       })
-      Object.defineProperty(globalThis, 'requestAnimationFrame', {
+      Object.defineProperty(globalThis, 'setInterval', {
         configurable: true,
-        value: originalRequestAnimationFrame,
+        value: originalSetInterval,
       })
-      Object.defineProperty(globalThis, 'cancelAnimationFrame', {
+      Object.defineProperty(globalThis, 'clearInterval', {
         configurable: true,
-        value: originalCancelAnimationFrame,
+        value: originalClearInterval,
       })
       Object.defineProperty(globalThis, 'fetch', {
         configurable: true,
@@ -430,6 +457,32 @@ test('startRecording 会先通过新 IPC 检查 ready，并连接集中定义的
     assert.notEqual(settingsGetIndex, -1)
     assert.ok(readyCheckIndex < settingsGetIndex)
     assert.match(socket.url, /\/ws\/rt_voice_flow\?v=[^&]+&t=[^&]+&m=0/)
+  } finally {
+    recorder?.disposeRecorder()
+    env.restore()
+  }
+})
+
+test('录音期间通过 interval 采样同步非零 inputLevel，停止时清理定时器', async () => {
+  const env = createTestEnvironment()
+  let recorder: Awaited<ReturnType<typeof loadRecorderModule>> | null = null
+
+  try {
+    recorder = await loadRecorderModule('level-interval')
+    await recorder.startRecording('Dictate')
+    env.runLevelTick(15)
+
+    const voiceStates = env.sendCalls.filter((call) => call.channel === 'voice-state')
+    const hasNonZeroInputLevel = voiceStates.some((call) => {
+      const payload = call.payload as { inputLevel?: number }
+      return typeof payload.inputLevel === 'number' && payload.inputLevel > 0
+    })
+
+    assert.equal(hasNonZeroInputLevel, true)
+    assert.equal(env.sendCalls.some((call) => call.channel === 'voice-level-debug'), false)
+
+    recorder.stopRecording()
+    assert.equal(env.getClearedIntervals().length > 0, true)
   } finally {
     recorder?.disposeRecorder()
     env.restore()
