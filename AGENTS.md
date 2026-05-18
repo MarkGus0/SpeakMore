@@ -20,8 +20,11 @@
 ## 当前真实架构
 
 - 后端独立启动，Electron 只消费 `http://127.0.0.1:8000`，不负责自动拉起或关闭后端。
-- 后端关键接口为 `GET /health`、`GET /ready`、`POST /ai/voice_flow` 和 `WebSocket /ws/rt_voice_flow`。
-- `/health` 表示后端进程存活；`/ready` 表示 ASR 模型预热完成，语音链路可接收请求。
+- 后端关键接口为 `GET /health`、`GET /ready`、`GET /models`、`POST /models/{model_id}/download`、`POST /models/{model_id}/cancel`、`DELETE /models/{model_id}`、`POST /models/{model_id}/select`、`POST /ai/voice_flow` 和 `WebSocket /ws/rt_voice_flow`。
+- `/health` 表示后端进程存活；`/ready` 表示当前选择的 ASR 模型预热完成，语音链路可接收请求。
+- 模型管理由后端 FastAPI 负责，Electron 只通过 `model:*` IPC 转发到后端 `/models` 接口，不直接下载、删除或选择 ASR 模型。
+- 第一版模型管理只支持 `faster-whisper` 系列：`tiny`、`base`、`small`、`medium`、`large-v3`。
+- 下载非当前模型不能影响当前语音链路，只有选择模型成功后才切换 ASR 单例。
 - `electron-app/main.js` 加载 `electron-app/renderer/dist/index.html`、`floating-bar.html` 和 `floating-panel.html`。
 - Windows 文本观察 helper 位于 `electron-app/windows-text-observer/`，只服务本轮粘贴后的短时自动学习，不参与基础录音链路。
 - 前端修改后必须在 `electron-app/renderer/` 下运行 `npm run build`，再重启 Electron 验证。
@@ -55,8 +58,9 @@
 - 长按 `Right Alt` 的快捷键提示也通过 `floating-panel` IPC 和独立悬浮面板展示；提示优先级低于录音、转写、完成、取消和错误状态。
 - 悬浮胶囊和悬浮面板不要依赖本机固定坐标，应基于当前显示器 `workArea` 计算并限制在屏幕内。
 - WebSocket 语音流默认输入来自 `audio/webm;codecs=opus`；后端不能把未知音频头直接当 `.wav`，非 wav 输入必须先通过 `ffmpeg` 转码再喂 ASR。
-- ASR 后端唯一使用 `faster-whisper`，默认模型固定为 `base`；不要恢复 Handy `ggml`、SenseVoice 或其他旧模型兼容逻辑。
+- ASR 后端唯一使用 `faster-whisper`，默认选择模型为 `base`；不要恢复 Handy `ggml`、SenseVoice 或其他旧模型兼容逻辑。
 - 模型扫描顺序固定为 `WHISPER_MODEL_DIR` → `%LOCALAPPDATA%\Typeless\models\faster-whisper` → `%USERPROFILE%\.cache\huggingface\hub` → 首次下载到 `%LOCALAPPDATA%\Typeless\models\faster-whisper`。
+- `WHISPER_MODEL_DIR` 设置后视为显式模型目录覆盖，模型页必须禁用模型切换和删除。
 - 开发态 `uvicorn reload` 必须显式由环境变量 `UVICORN_RELOAD` 开启，不要在代码里默认写死 `reload=True`。
 - 录音期间静音后台声音时，保持“短按开始、再次短按结束”的交互；Windows 上按音频会话静音，结束后只恢复本轮被 SpeakMore 主动静音的会话。
 - 自动学习只能围绕 SpeakMore 本轮粘贴结果短时观察当前焦点控件，不允许做无差别全局文本采集；目标应用不支持 UIA 文本读取时，本轮学习应降级为不可用。
@@ -64,7 +68,7 @@
 ## 前端与用户体验约束
 
 - 用户可见品牌为 `SpeakMore`。
-- 主窗口页面为：首页、历史记录、词典、设置、诊断。
+- 主窗口页面为：首页、历史记录、词典、模型、设置、诊断。
 - 词典页用于管理手动词条、自动添加词条和候选词条，应提供搜索、新增、启用/禁用、删除和候选确认入口。
 - 首页“最近结果”只展示非自由提问的最近一次最终转录/最终结果文字；实时状态只在悬浮胶囊展示。
 - 首页“最近结果”、历史记录条目和自由提问悬浮结果都应提供复制入口；复制动作统一走 `clipboard:write-text` IPC，空结果不能复制占位符。

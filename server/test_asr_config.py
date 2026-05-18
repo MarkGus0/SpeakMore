@@ -15,11 +15,9 @@ from asr import (
 )
 from main import should_enable_reload
 
-BASE_REPO_DIR = "models--Systran--faster-whisper-base"
-
-
-def create_snapshot(cache_root: Path, snapshot_name: str = "test-snapshot") -> Path:
-    snapshot_dir = cache_root / BASE_REPO_DIR / "snapshots" / snapshot_name
+def create_snapshot(cache_root: Path, snapshot_name: str = "test-snapshot", model_id: str = "base") -> Path:
+    repo_dir = f"models--Systran--faster-whisper-{model_id}"
+    snapshot_dir = cache_root / repo_dir / "snapshots" / snapshot_name
     snapshot_dir.mkdir(parents=True, exist_ok=True)
     (snapshot_dir / "model.bin").write_bytes(b"model")
     (snapshot_dir / "config.json").write_text("{}", encoding="utf-8")
@@ -54,7 +52,12 @@ class AsrConfigTest(unittest.TestCase):
 
         self.assertEqual(
             source,
-            WhisperModelSource(kind=DIR_SOURCE, model_ref=str(explicit_dir), download_root=None),
+            WhisperModelSource(
+                kind=DIR_SOURCE,
+                model_ref=str(explicit_dir),
+                download_root=None,
+                model_id=DEFAULT_WHISPER_MODEL,
+            ),
         )
 
     def test_resolve_whisper_model_source_rejects_invalid_explicit_dir(self):
@@ -102,6 +105,36 @@ class AsrConfigTest(unittest.TestCase):
                 kind=MANAGED_CACHE_SOURCE,
                 model_ref=str(managed_snapshot),
                 download_root=None,
+                model_id=DEFAULT_WHISPER_MODEL,
+            ),
+        )
+
+    def test_resolve_whisper_model_source_uses_selected_small_managed_cache(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            local_app_data = Path(temp_dir) / "LocalAppData"
+            user_profile = Path(temp_dir) / "UserProfile"
+            managed_root = local_app_data / "Typeless" / "models" / "faster-whisper"
+            managed_snapshot = create_snapshot(managed_root, "managed-small", model_id="small")
+
+            with patch.dict(
+                os.environ,
+                {
+                    "WHISPER_MODEL": "",
+                    "WHISPER_MODEL_DIR": "",
+                    "LOCALAPPDATA": str(local_app_data),
+                    "USERPROFILE": str(user_profile),
+                },
+                clear=False,
+            ), patch("asr.read_selected_model_id", return_value="small"):
+                source = resolve_whisper_model_source()
+
+        self.assertEqual(
+            source,
+            WhisperModelSource(
+                kind=MANAGED_CACHE_SOURCE,
+                model_ref=str(managed_snapshot),
+                download_root=None,
+                model_id="small",
             ),
         )
 
@@ -126,7 +159,12 @@ class AsrConfigTest(unittest.TestCase):
 
         self.assertEqual(
             source,
-            WhisperModelSource(kind=HF_CACHE_SOURCE, model_ref=str(hf_snapshot), download_root=None),
+            WhisperModelSource(
+                kind=HF_CACHE_SOURCE,
+                model_ref=str(hf_snapshot),
+                download_root=None,
+                model_id=DEFAULT_WHISPER_MODEL,
+            ),
         )
 
     def test_resolve_whisper_model_source_falls_back_to_managed_download_root(self):
@@ -153,6 +191,43 @@ class AsrConfigTest(unittest.TestCase):
                 kind=DOWNLOAD_SOURCE,
                 model_ref=DEFAULT_WHISPER_MODEL,
                 download_root=str(expected_download_root),
+                model_id=DEFAULT_WHISPER_MODEL,
+            ),
+        )
+
+    def test_resolve_whisper_model_source_skips_hf_snapshot_when_stat_fails(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            local_app_data = Path(temp_dir) / "LocalAppData"
+            user_profile = Path(temp_dir) / "UserProfile"
+            hf_root = user_profile / ".cache" / "huggingface" / "hub"
+            broken_snapshot = create_snapshot(hf_root, "broken-stat")
+            expected_download_root = local_app_data / "Typeless" / "models" / "faster-whisper"
+            original_stat = Path.stat
+
+            def stat_or_fail(path, *args, **kwargs):
+                if path == broken_snapshot:
+                    raise OSError("stat 失败")
+                return original_stat(path, *args, **kwargs)
+
+            with patch.dict(
+                os.environ,
+                {
+                    "WHISPER_MODEL": DEFAULT_WHISPER_MODEL,
+                    "WHISPER_MODEL_DIR": "",
+                    "LOCALAPPDATA": str(local_app_data),
+                    "USERPROFILE": str(user_profile),
+                },
+                clear=False,
+            ), patch.object(Path, "stat", stat_or_fail):
+                source = resolve_whisper_model_source()
+
+        self.assertEqual(
+            source,
+            WhisperModelSource(
+                kind=DOWNLOAD_SOURCE,
+                model_ref=DEFAULT_WHISPER_MODEL,
+                download_root=str(expected_download_root),
+                model_id=DEFAULT_WHISPER_MODEL,
             ),
         )
 
@@ -182,23 +257,63 @@ class AsrConfigTest(unittest.TestCase):
                 kind=DOWNLOAD_SOURCE,
                 model_ref=DEFAULT_WHISPER_MODEL,
                 download_root=str(expected_download_root),
+                model_id=DEFAULT_WHISPER_MODEL,
             ),
         )
 
-    def test_resolve_whisper_model_source_rejects_non_base_model_name(self):
+    def test_resolve_whisper_model_source_accepts_supported_legacy_model_name(self):
         with tempfile.TemporaryDirectory() as temp_dir:
+            local_app_data = Path(temp_dir) / "LocalAppData"
+            expected_download_root = local_app_data / "Typeless" / "models" / "faster-whisper"
+
             with patch.dict(
                 os.environ,
                 {
                     "WHISPER_MODEL": "small",
                     "WHISPER_MODEL_DIR": "",
-                    "LOCALAPPDATA": str(Path(temp_dir) / "LocalAppData"),
+                    "LOCALAPPDATA": str(local_app_data),
                     "USERPROFILE": str(Path(temp_dir) / "UserProfile"),
                 },
                 clear=False,
             ):
-                with self.assertRaisesRegex(ValueError, "仅支持 faster-whisper 模型 base"):
-                    resolve_whisper_model_source()
+                source = resolve_whisper_model_source()
+
+        self.assertEqual(
+            source,
+            WhisperModelSource(
+                kind=DOWNLOAD_SOURCE,
+                model_ref="small",
+                download_root=str(expected_download_root),
+                model_id="small",
+            ),
+        )
+
+    def test_resolve_whisper_model_source_normalizes_invalid_legacy_model_name_to_base(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            local_app_data = Path(temp_dir) / "LocalAppData"
+            expected_download_root = local_app_data / "Typeless" / "models" / "faster-whisper"
+
+            with patch.dict(
+                os.environ,
+                {
+                    "WHISPER_MODEL": "invalid",
+                    "WHISPER_MODEL_DIR": "",
+                    "LOCALAPPDATA": str(local_app_data),
+                    "USERPROFILE": str(Path(temp_dir) / "UserProfile"),
+                },
+                clear=False,
+            ):
+                source = resolve_whisper_model_source()
+
+        self.assertEqual(
+            source,
+            WhisperModelSource(
+                kind=DOWNLOAD_SOURCE,
+                model_ref=DEFAULT_WHISPER_MODEL,
+                download_root=str(expected_download_root),
+                model_id=DEFAULT_WHISPER_MODEL,
+            ),
+        )
 
     def test_should_enable_reload_defaults_to_false(self):
         with patch.dict(os.environ, {}, clear=False):

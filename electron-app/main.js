@@ -73,6 +73,7 @@ const VOICE_SERVER_URL = 'http://127.0.0.1:8000';
 const VOICE_SERVER_HEALTH_URL = `${VOICE_SERVER_URL}/health`;
 const VOICE_SERVER_READY_URL = `${VOICE_SERVER_URL}/ready`;
 const VOICE_SERVER_VOICE_FLOW_URL = `${VOICE_SERVER_URL}/ai/voice_flow`;
+const VOICE_SERVER_MODELS_URL = `${VOICE_SERVER_URL}/models`;
 const FLOATING_BAR_COMPLETED_HIDE_DELAY_MS = 1000;
 const FLOATING_BAR_SIZE = { width: 400, height: 360 };
 const FLOATING_PANEL_SIZE = { width: 440, height: 220 };
@@ -1035,6 +1036,36 @@ async function checkVoiceServerReady() {
   return probeVoiceServer(VOICE_SERVER_READY_URL);
 }
 
+async function callModelBackend(pathname = '', options = {}) {
+  const url = `${VOICE_SERVER_MODELS_URL}${pathname}`;
+  try {
+    const response = await fetch(url, {
+      method: options.method || 'GET',
+      headers: { 'Content-Type': 'application/json' },
+      body: options.body ? JSON.stringify(options.body) : undefined,
+    });
+    const payload = await readJsonSafely(response);
+
+    if (!response.ok) {
+      return {
+        success: false,
+        code: response.status === 0 ? 'backend_unavailable' : 'model_request_failed',
+        detail: payload?.detail || resolveVoiceServerProbeDetail(url, response.status, payload),
+        data: payload,
+      };
+    }
+
+    return { success: true, data: payload };
+  } catch (error) {
+    return {
+      success: false,
+      code: 'backend_unavailable',
+      detail: error instanceof Error ? error.message : String(error),
+      data: null,
+    };
+  }
+}
+
 function normalizeVoiceMode(mode) {
   const normalized = String(mode || 'transcript').toLowerCase();
   if (normalized === 'dictate' || normalized === 'dictation') return 'transcript';
@@ -1498,6 +1529,20 @@ function registerIpcHandlers() {
     return { success: true };
   });
   ipcMain.handle('dictionary:prompt-terms', () => readPromptDictionaryTerms());
+
+  ipcMain.handle('model:list', () => callModelBackend());
+  ipcMain.handle('model:download', (_, modelId) => (
+    callModelBackend(`/${encodeURIComponent(String(modelId))}/download`, { method: 'POST' })
+  ));
+  ipcMain.handle('model:cancel-download', (_, modelId) => (
+    callModelBackend(`/${encodeURIComponent(String(modelId))}/cancel`, { method: 'POST' })
+  ));
+  ipcMain.handle('model:delete', (_, modelId) => (
+    callModelBackend(`/${encodeURIComponent(String(modelId))}`, { method: 'DELETE' })
+  ));
+  ipcMain.handle('model:select', (_, modelId) => (
+    callModelBackend(`/${encodeURIComponent(String(modelId))}/select`, { method: 'POST' })
+  ));
 
   ipcMain.handle('keyboard:start-keyboard-listener', () => true);
   ipcMain.handle('keyboard:stop-keyboard-listener', () => true);

@@ -13,7 +13,17 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, Web
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
-from asr import preload_whisper_model, transcribe_audio
+from asr import preload_whisper_model, reload_whisper_model, transcribe_audio
+from model_manager import (
+    DEFAULT_MODEL_ID,
+    cancel_download_task,
+    create_models_state,
+    delete_model_files,
+    find_cached_model_snapshot,
+    get_model_definition,
+    start_download_task,
+    write_selected_model_id,
+)
 from refiner import refine_text
 from runtime_config import (
     get_cors_allowed_origins,
@@ -473,6 +483,76 @@ def create_app(preload_model=preload_whisper_model, exit_scheduler=schedule_star
         if is_voice_service_ready(app):
             return payload
         return JSONResponse(status_code=503, content=payload)
+
+    @app.get("/models")
+    async def list_models():
+        return create_models_state()
+
+    @app.post("/models/{model_id}/download")
+    async def download_model_endpoint(model_id: str):
+        try:
+            start_download_task(model_id)
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return create_models_state()
+
+    @app.post("/models/{model_id}/cancel")
+    async def cancel_model_download_endpoint(model_id: str):
+        try:
+            cancel_download_task(model_id)
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return create_models_state()
+
+    @app.delete("/models/{model_id}")
+    async def delete_model_endpoint(model_id: str):
+        try:
+            model = get_model_definition(model_id)
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+        state = create_models_state()
+        if state["selectionLocked"]:
+            raise HTTPException(status_code=409, detail="WHISPER_MODEL_DIR 已覆盖当前模型选择")
+
+        current_model_id = state["currentModelId"]
+        deleted = delete_model_files(model["id"])
+        if current_model_id == model["id"]:
+            write_selected_model_id(DEFAULT_MODEL_ID)
+            if find_cached_model_snapshot(DEFAULT_MODEL_ID):
+                try:
+                    reload_whisper_model(DEFAULT_MODEL_ID)
+                    set_voice_service_state(app, "ready", "ASR 模型已完成预热")
+                except Exception as error:
+                    set_voice_service_state(app, "failed", str(error))
+            else:
+                set_voice_service_state(app, "failed", "当前模型已删除，请先下载 base 模型")
+
+        state = create_models_state()
+        state["deleted"] = deleted
+        return state
+
+    @app.post("/models/{model_id}/select")
+    async def select_model_endpoint(model_id: str):
+        state = create_models_state()
+        if state["selectionLocked"]:
+            raise HTTPException(status_code=409, detail="WHISPER_MODEL_DIR 已覆盖当前模型选择")
+
+        try:
+            model = get_model_definition(model_id)
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+        if not find_cached_model_snapshot(model["id"]):
+            raise HTTPException(status_code=409, detail="模型尚未下载")
+
+        try:
+            reload_whisper_model(model["id"])
+            set_voice_service_state(app, "ready", "ASR 模型已完成预热")
+        except Exception as error:
+            raise HTTPException(status_code=500, detail=str(error)) from error
+
+        return create_models_state()
 
     @app.post("/ai/voice_flow")
     async def voice_flow(
