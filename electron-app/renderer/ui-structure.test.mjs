@@ -817,6 +817,7 @@ test('P1 设置页与设置 store 统一走主进程 JSON 数据源', async () =
   const settingsStore = await readProjectFile('src/services/settingsStore.ts');
   const settingsPage = await readProjectFile('src/pages/Settings.tsx');
   const main = await readProjectFile('../main.js');
+  const translationLanguages = JSON.parse(await readProjectFile('../../shared/translation-target-languages.json'));
 
   assert.match(main, /SETTINGS_FILE_NAME\s*=\s*['"]settings\.json['"]/);
   assert.match(main, /function\s+readLocalSettings\(/);
@@ -833,7 +834,10 @@ test('P1 设置页与设置 store 统一走主进程 JSON 数据源', async () =
   assert.doesNotMatch(settingsStore, /deepseekApiKey/);
   assert.match(settingsStore, /DEFAULT_LLM_PROVIDERS/);
   assert.match(settingsStore, /getCurrentLlmConfig/);
-  assert.match(main, /DEFAULT_TRANSLATION_TARGET_LANGUAGE\s*=\s*['"]en['"]/);
+  assert.deepEqual(translationLanguages.map((language) => language.id), ['en', 'ja']);
+  assert.match(settingsStore, /TRANSLATION_TARGET_LANGUAGES/);
+  assert.match(settingsStore, /DEFAULT_TRANSLATION_TARGET_LANGUAGE/);
+  assert.match(main, /translation-target-languages\.json/);
   assert.match(main, /DEFAULT_LLM_PROVIDERS/);
   assert.match(main, /buildCurrentLlmRequestConfig/);
   assert.match(main, /translationTargetLanguage:\s*DEFAULT_TRANSLATION_TARGET_LANGUAGE/);
@@ -843,9 +847,10 @@ test('P1 设置页与设置 store 统一走主进程 JSON 数据源', async () =
   assert.match(settingsPage, /preferredLanguage/);
   assert.match(settingsPage, /translationTargetLanguage/);
   assert.match(settingsPage, /MenuItem value="zh-CN"/);
-  assert.match(settingsPage, /MenuItem value="en"/);
+  assert.match(settingsPage, /TRANSLATION_TARGET_LANGUAGES\.map/);
+  assert.match(settingsPage, /language\.displayName/);
   assert.match(settingsPage, /翻译目标语言/);
-  assert.match(settingsPage, /英文 \(en\)/);
+  assert.doesNotMatch(settingsPage, /MenuItem value="en">英文 \(en\)<\/MenuItem>/);
   assert.doesNotMatch(settingsPage, /显示悬浮条/);
   assert.doesNotMatch(settingsPage, /enableSoundEffects/);
   assert.doesNotMatch(settingsPage, /声音效果/);
@@ -883,7 +888,7 @@ test('P1 设置页不再暴露悬浮条开关，语言固定为简体中文', as
   assert.doesNotMatch(settingsPage, /显示悬浮条/);
   assert.match(settingsPage, /Select/);
   assert.match(settingsPage, /简体中文 \(zh-CN\)/);
-  assert.match(settingsPage, /英文 \(en\)/);
+  assert.match(settingsPage, /TRANSLATION_TARGET_LANGUAGES/);
   assert.doesNotMatch(appShell, /page:set-floating-bar-enabled/);
   assert.doesNotMatch(appShell, /loadSettings/);
 });

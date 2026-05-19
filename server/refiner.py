@@ -1,6 +1,9 @@
 """Refiner 模块 - 使用 DeepSeek API 对 ASR 转写结果进行润色"""
 
+import json
 import os
+from pathlib import Path
+
 import httpx
 from openai import AsyncOpenAI
 from runtime_config import load_server_env, reload_server_env
@@ -10,6 +13,50 @@ load_server_env()
 _client = None
 MAX_DICTIONARY_TERMS = 100
 DEFAULT_LLM_MODEL = "deepseek-chat"
+DEFAULT_TRANSLATION_TARGET_LANGUAGE_NAME = "English"
+FALLBACK_TRANSLATION_TARGET_LANGUAGE_NAMES = {
+    "en": "English",
+    "ja": "Japanese",
+}
+TRANSLATION_TARGET_LANGUAGES_PATH = (
+    Path(__file__).resolve().parent.parent
+    / "shared"
+    / "translation-target-languages.json"
+)
+
+
+def load_translation_target_language_names() -> dict[str, str]:
+    try:
+        with TRANSLATION_TARGET_LANGUAGES_PATH.open("r", encoding="utf-8") as file:
+            items = json.load(file)
+    except (OSError, json.JSONDecodeError):
+        return FALLBACK_TRANSLATION_TARGET_LANGUAGE_NAMES.copy()
+
+    names = FALLBACK_TRANSLATION_TARGET_LANGUAGE_NAMES.copy()
+    if not isinstance(items, list):
+        return names
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+
+        language_id = str(item.get("id", "")).strip()
+        prompt_name = str(item.get("promptName", "")).strip()
+        if language_id and prompt_name:
+            names[language_id] = prompt_name
+
+    return names
+
+
+TRANSLATION_TARGET_LANGUAGE_NAMES = load_translation_target_language_names()
+
+
+def format_target_language_for_prompt(value: object) -> str:
+    language_id = str(value or "").strip()
+    return TRANSLATION_TARGET_LANGUAGE_NAMES.get(
+        language_id,
+        TRANSLATION_TARGET_LANGUAGE_NAMES.get("en", DEFAULT_TRANSLATION_TARGET_LANGUAGE_NAME),
+    )
 
 
 class RefineFailedError(RuntimeError):
@@ -290,7 +337,7 @@ def build_refiner_user_message(
         user_message = f"Transcription to refine:\n{raw_text}"
 
     elif mode == "translation" and parameters:
-        target_lang = parameters.get("output_language", "en")
+        target_lang = format_target_language_for_prompt(parameters.get("output_language", "en"))
         user_message = f"目标语言：{target_lang}\n\n待翻译的语音转写文本：\n{raw_text}"
 
     elif mode == "ask_anything" and parameters:

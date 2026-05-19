@@ -16,6 +16,7 @@ const os = require('os');
 const crypto = require('crypto');
 const fs = require('fs');
 const { spawn } = require('child_process');
+const TRANSLATION_TARGET_LANGUAGES = require('../shared/translation-target-languages.json');
 const { createRightAltRelay } = require('./right-alt-relay');
 const {
   isSameFocusedContext,
@@ -86,8 +87,10 @@ const HISTORY_FILE_NAME = 'history.json';
 const HISTORY_STATS_FILE_NAME = 'history-stats.json';
 const DICTIONARY_FILE_NAME = 'dictionary.json';
 const DICTIONARY_CANDIDATES_FILE_NAME = 'dictionary-candidates.json';
-const DEFAULT_TRANSLATION_TARGET_LANGUAGE = 'en';
-const SUPPORTED_TRANSLATION_TARGET_LANGUAGES = new Set([DEFAULT_TRANSLATION_TARGET_LANGUAGE]);
+const DEFAULT_TRANSLATION_TARGET_LANGUAGE = TRANSLATION_TARGET_LANGUAGES[0]?.id || 'en';
+const SUPPORTED_TRANSLATION_TARGET_LANGUAGES = new Set(
+  TRANSLATION_TARGET_LANGUAGES.map((language) => language.id),
+);
 const DEFAULT_LLM_PROVIDER_ID = 'deepseek';
 const DEFAULT_LLM_PROVIDERS = [
   {

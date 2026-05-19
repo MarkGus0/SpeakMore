@@ -129,8 +129,26 @@ class RefinerPromptTest(unittest.TestCase):
         self.assertEqual(result, "translated text")
         call = fake_client.chat.completions.calls[0]
         user_message = call["messages"][1]["content"]
-        self.assertEqual(user_message, "目标语言：en\n\n待翻译的语音转写文本：\n把这个翻译成英文")
+        self.assertEqual(user_message, "目标语言：English\n\n待翻译的语音转写文本：\n把这个翻译成英文")
         self.assertNotIn("Translate to en", user_message)
+
+    def test_translation_user_message_formats_japanese_target_language(self):
+        message = refiner.build_refiner_user_message(
+            raw_text="请把这句话翻译过去",
+            mode="translation",
+            parameters={"output_language": "ja"},
+        )
+
+        self.assertEqual(message, "目标语言：Japanese\n\n待翻译的语音转写文本：\n请把这句话翻译过去")
+
+    def test_translation_user_message_falls_back_for_unknown_target_language(self):
+        message = refiner.build_refiner_user_message(
+            raw_text="你好",
+            mode="translation",
+            parameters={"output_language": "xx"},
+        )
+
+        self.assertEqual(message, "目标语言：English\n\n待翻译的语音转写文本：\n你好")
 
     def test_build_dictionary_context_formats_enabled_terms(self):
         context = refiner.build_dictionary_context([

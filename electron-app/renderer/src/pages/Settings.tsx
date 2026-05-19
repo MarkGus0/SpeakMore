@@ -6,6 +6,7 @@ import {
   loadSettings,
   reloadLlmBackendConfig,
   saveSettings,
+  TRANSLATION_TARGET_LANGUAGES,
   type LlmProvider,
   type LocalSettings,
   type TranslationTargetLanguage,
@@ -197,7 +198,11 @@ export default function Settings() {
           })}
           sx={{ minWidth: 240 }}
         >
-          <MenuItem value="en">英文 (en)</MenuItem>
+          {TRANSLATION_TARGET_LANGUAGES.map((language) => (
+            <MenuItem key={language.id} value={language.id}>
+              {language.displayName}
+            </MenuItem>
+          ))}
         </Select>
       </Box>
 

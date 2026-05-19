@@ -120,3 +120,37 @@ test('reloadLlmBackendConfig 通过主进程触发后端配置重载', async () 
   assert.deepEqual(result, { success: true })
   assert.equal(calls.includes('settings:reload-llm-backend'), true)
 })
+
+test('翻译目标语言选项来自共享元数据', async () => {
+  installSettingsResponse({})
+  const settingsStore = await loadSettingsStore('translation-language-options')
+
+  assert.deepEqual(
+    settingsStore.TRANSLATION_TARGET_LANGUAGES.map((language: { id: string; displayName: string }) => ({
+      id: language.id,
+      displayName: language.displayName,
+    })),
+    [
+      { id: 'en', displayName: '英文 (en)' },
+      { id: 'ja', displayName: '日语 (ja)' },
+    ],
+  )
+})
+
+test('loadSettings 会保留共享元数据中的日语翻译目标语言', async () => {
+  installSettingsResponse({ translationTargetLanguage: 'ja' })
+  const settingsStore = await loadSettingsStore('translation-language-ja')
+
+  const settings = await settingsStore.loadSettings()
+
+  assert.equal(settings.translationTargetLanguage, 'ja')
+})
+
+test('loadSettings 遇到未知翻译目标语言会回退默认英文', async () => {
+  installSettingsResponse({ translationTargetLanguage: 'xx' })
+  const settingsStore = await loadSettingsStore('translation-language-unknown')
+
+  const settings = await settingsStore.loadSettings()
+
+  assert.equal(settings.translationTargetLanguage, 'en')
+})
