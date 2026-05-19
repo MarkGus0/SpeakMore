@@ -1,7 +1,21 @@
 import { ipcClient } from './ipc'
+import translationTargetLanguages from '../../../../shared/translation-target-languages.json'
 
-export type TranslationTargetLanguage = 'en'
+export type TranslationTargetLanguage = string
 export type LlmAuthType = 'bearer' | 'anthropic'
+
+export type TranslationTargetLanguageConfig = {
+  id: string
+  label: string
+  displayName: string
+  promptName: string
+}
+
+export const TRANSLATION_TARGET_LANGUAGES: TranslationTargetLanguageConfig[] = translationTargetLanguages
+export const DEFAULT_TRANSLATION_TARGET_LANGUAGE: TranslationTargetLanguage =
+  TRANSLATION_TARGET_LANGUAGES[0]?.id ?? 'en'
+
+const translationTargetLanguageIds = new Set(TRANSLATION_TARGET_LANGUAGES.map((language) => language.id))
 
 export type LlmProvider = {
   id: string
@@ -119,14 +133,18 @@ export type LocalSettings = {
 
 export const defaultSettings: LocalSettings = {
   preferredLanguage: 'zh-CN',
-  translationTargetLanguage: 'en',
+  translationTargetLanguage: DEFAULT_TRANSLATION_TARGET_LANGUAGE,
   launchAtSystemStartup: false,
   selectedAudioDeviceId: 'default',
   llm: createDefaultLlmSettings(),
 }
 
 function normalizeTranslationTargetLanguage(value: unknown): TranslationTargetLanguage {
-  return value === 'en' ? 'en' : defaultSettings.translationTargetLanguage
+  if (typeof value !== 'string') return DEFAULT_TRANSLATION_TARGET_LANGUAGE
+  const languageId = value.trim()
+  return translationTargetLanguageIds.has(languageId)
+    ? languageId
+    : DEFAULT_TRANSLATION_TARGET_LANGUAGE
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
