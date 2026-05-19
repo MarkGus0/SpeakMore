@@ -15,6 +15,7 @@ from model_manager import (
     clear_download_status_for_tests,
     create_models_state,
     delete_model_files,
+    download_model,
     find_cached_model_snapshot,
     get_download_status,
     get_managed_models_root,
@@ -396,14 +397,37 @@ class ModelManagerStateTest(unittest.TestCase):
         self.assertEqual(status["downloadProgress"], 0)
         self.assertEqual(status["downloadError"], "")
 
+    def test_download_model_updates_progress_from_huggingface_tqdm(self):
+        async def run_case():
+            with tempfile.TemporaryDirectory() as temp_dir:
+                local_app_data = Path(temp_dir) / "LocalAppData"
+
+                def fake_snapshot_download(repo_id, cache_dir, local_files_only, **kwargs):
+                    del repo_id, cache_dir, local_files_only
+                    progress = kwargs.get("tqdm_class")
+                    if progress is not None:
+                        bar = progress(total=100)
+                        bar.update(25)
+                        bar.update(15)
+                        bar.close()
+                    status = get_download_status("medium")
+                    self.assertTrue(status["isDownloading"])
+                    self.assertEqual(status["downloadProgress"], 40)
+
+                with patch.dict(os.environ, {"LOCALAPPDATA": str(local_app_data)}, clear=False):
+                    with patch("huggingface_hub.snapshot_download", side_effect=fake_snapshot_download):
+                        await download_model("medium")
+
+        asyncio.run(run_case())
+
     def test_cancel_download_cleans_cache_when_background_download_finishes(self):
         async def run_case():
             with tempfile.TemporaryDirectory() as temp_dir:
                 local_app_data = Path(temp_dir) / "LocalAppData"
                 entered = threading.Event()
 
-                def fake_snapshot_download(repo_id, cache_dir, local_files_only):
-                    del repo_id, local_files_only
+                def fake_snapshot_download(repo_id, cache_dir, local_files_only, **kwargs):
+                    del repo_id, local_files_only, kwargs
                     entered.set()
                     time.sleep(0.1)
                     model = get_model_definition("tiny")
