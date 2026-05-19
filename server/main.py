@@ -154,6 +154,18 @@ def normalize_ws_text_message(raw_text: str) -> tuple[dict | None, dict | None]:
     return data, None
 
 
+def normalize_json_object_field(raw_value: str | None) -> dict:
+    if not raw_value:
+        return {}
+
+    try:
+        parsed = json.loads(raw_value)
+    except json.JSONDecodeError:
+        return {}
+
+    return parsed if isinstance(parsed, dict) else {}
+
+
 def get_ws_completion_message_type(mode: str, parameters: dict) -> str:
     if parameters.get("selected_text"):
         return "refine_selected_text"
@@ -246,8 +258,8 @@ async def handle_voice_flow_request(
         tmp_path = tmp.name
 
     try:
-        context = json.loads(audio_context) if audio_context else {}
-        params = json.loads(parameters) if parameters else {}
+        context = normalize_json_object_field(audio_context)
+        params = normalize_json_object_field(parameters)
         raw_text = await transcribe_audio_with_wav_conversion(tmp_path, suffix)
 
         if not raw_text or not raw_text.strip():

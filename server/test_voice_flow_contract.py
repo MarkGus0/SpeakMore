@@ -94,6 +94,72 @@ class VoiceFlowContractTest(unittest.TestCase):
         self.assertEqual(payload["detail"], "boom")
         self.assertEqual(payload["code"], "voice_flow_failed")
 
+    def test_voice_flow_normalizes_non_object_json_fields(self):
+        app = self.create_ready_app()
+
+        with patch("main.transcribe_audio_with_wav_conversion", return_value="hello"), patch(
+            "main.refine_text",
+            return_value="hello refined",
+        ) as refine_text, TestClient(app) as client:
+            self.wait_until_ready(client)
+            response = client.post(
+                "/ai/voice_flow",
+                data={
+                    "audio_id": "audio-1",
+                    "mode": "transcript",
+                    "audio_context": "[]",
+                    "audio_metadata": "{}",
+                    "parameters": '"bad-parameters"',
+                    "is_retry": "false",
+                    "device_name": "mic",
+                    "user_over_time": "12",
+                    "send_time": "123456",
+                },
+                files={"audio_file": ("sample.wav", b"RIFF0000", "audio/wav")},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["refine_text"], "hello refined")
+        refine_text.assert_called_once_with(
+            raw_text="hello",
+            mode="transcript",
+            context={},
+            parameters={},
+        )
+
+    def test_voice_flow_normalizes_invalid_json_fields(self):
+        app = self.create_ready_app()
+
+        with patch("main.transcribe_audio_with_wav_conversion", return_value="hello"), patch(
+            "main.refine_text",
+            return_value="hello refined",
+        ) as refine_text, TestClient(app) as client:
+            self.wait_until_ready(client)
+            response = client.post(
+                "/ai/voice_flow",
+                data={
+                    "audio_id": "audio-1",
+                    "mode": "transcript",
+                    "audio_context": "{bad-json",
+                    "audio_metadata": "{}",
+                    "parameters": "{bad-json",
+                    "is_retry": "false",
+                    "device_name": "mic",
+                    "user_over_time": "12",
+                    "send_time": "123456",
+                },
+                files={"audio_file": ("sample.wav", b"RIFF0000", "audio/wav")},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["refine_text"], "hello refined")
+        refine_text.assert_called_once_with(
+            raw_text="hello",
+            mode="transcript",
+            context={},
+            parameters={},
+        )
+
     def test_text_flow_translation_uses_text_and_output_language(self):
         app = self.create_ready_app()
 
