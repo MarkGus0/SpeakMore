@@ -38,6 +38,7 @@ function createTestEnvironment(options: {
   focusStillActive?: boolean
   fetchResponseText?: string
   pasteShouldFail?: boolean
+  translationTargetLanguage?: string
 } = {}) {
   const originalWindow = globalThis.window
   const originalNavigator = globalThis.navigator
@@ -210,6 +211,7 @@ function createTestEnvironment(options: {
       if (channel === 'settings:get') {
         return {
           selectedAudioDeviceId: 'default',
+          translationTargetLanguage: options.translationTargetLanguage ?? 'en',
           showFloatingBar: true,
           launchAtSystemStartup: false,
           llm: {
@@ -512,6 +514,26 @@ test('翻译模式启动时会把设置里的目标语言传给后端', async ()
         output_language: 'en',
       },
     })
+  } finally {
+    recorder?.disposeRecorder()
+    env.restore()
+  }
+})
+
+test('翻译模式启动时会把日语目标语言传给后端', async () => {
+  const env = createTestEnvironment({ translationTargetLanguage: 'ja' })
+  let recorder: Awaited<ReturnType<typeof loadRecorderModule>> | null = null
+
+  try {
+    recorder = await loadRecorderModule('translate-target-language-ja')
+    await recorder.startRecording('Translate')
+
+    const startAudioMessage = env.sentPayloads
+      .filter((payload): payload is string => typeof payload === 'string')
+      .map((payload) => JSON.parse(payload))
+      .find((message) => message.type === 'start_audio')
+
+    assert.equal(startAudioMessage.parameters.output_language, 'ja')
   } finally {
     recorder?.disposeRecorder()
     env.restore()
