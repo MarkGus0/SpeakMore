@@ -164,7 +164,13 @@ function ModelCard({
         ) : null}
       </Box>
       {model.isDownloading ? (
-        <LinearProgress variant="determinate" value={model.downloadProgress} sx={{ mt: 1.5 }} />
+        <Box sx={{ mt: 1.5 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.75 }}>
+            <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>下载中</Typography>
+            <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>{model.downloadProgress}%</Typography>
+          </Box>
+          <LinearProgress variant="determinate" value={model.downloadProgress} />
+        </Box>
       ) : null}
       {model.downloadError ? <Alert severity="warning" sx={{ mt: 1.5 }}>{model.downloadError}</Alert> : null}
     </Box>

@@ -213,6 +213,29 @@ def update_download_progress(model_id, downloaded, total):
     return normalized_model_id
 
 
+def create_download_progress_tqdm_class(model_id):
+    normalized_model_id = get_model_definition(model_id)["id"]
+
+    from huggingface_hub.utils import tqdm as base_tqdm
+
+    class ModelDownloadProgressTqdm(base_tqdm):
+        def __init__(self, *args, **kwargs):
+            kwargs["disable"] = True
+            self._download_progress_current = int(kwargs.get("initial") or 0)
+            super().__init__(*args, **kwargs)
+            if self.total:
+                update_download_progress(normalized_model_id, self._download_progress_current, self.total)
+
+        def update(self, n=1):
+            self._download_progress_current += n
+            result = super().update(n)
+            if self.total:
+                update_download_progress(normalized_model_id, self._download_progress_current, self.total)
+            return result
+
+    return ModelDownloadProgressTqdm
+
+
 def mark_download_finished(model_id):
     normalized_model_id = get_model_definition(model_id)["id"]
     with _DOWNLOAD_STATUS_LOCK:
@@ -302,6 +325,7 @@ async def download_model(model_id):
             repo_id=model["repoId"],
             cache_dir=str(get_managed_whisper_cache_root()),
             local_files_only=False,
+            tqdm_class=create_download_progress_tqdm_class(model["id"]),
         )
         with _DOWNLOAD_STATUS_LOCK:
             was_cancelled = model["id"] in _DOWNLOAD_CANCELLED
