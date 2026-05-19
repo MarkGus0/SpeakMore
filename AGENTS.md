@@ -54,7 +54,7 @@
 - 如果同一轮键态里同时存在 `Space` 和 `RightShift`，优先按翻译意图处理，避免自由提问抢占翻译。
 - `focused-context:get-selection-snapshot` 使用 Windows UI Automation 读取 confirmed 选区；`focused-context:get-selected-text` 的剪贴板读取只保留为旧兼容能力，必须尽量恢复原剪贴板。
 - 自由提问未来如需回答实时问题，必须在后端增加意图分类和工具路由；不要只靠 prompt 假装具备联网、天气或网页检索能力。
-- 翻译录音启动时，renderer 必须从本地设置读取 `translationTargetLanguage`，并通过 WebSocket `start_audio.parameters.output_language` 传给后端；当前 MVP 固定值为 `en`。
+- 翻译录音启动时，renderer 必须从本地设置读取 `translationTargetLanguage`，并通过 WebSocket `start_audio.parameters.output_language` 传给后端；当前支持 `en` 和 `ja`，语言集合以共享翻译目标语言元数据为准。
 - 长按 `Right Alt` 的快捷键提示也通过 `floating-panel` IPC 和独立悬浮面板展示；提示优先级低于录音、转写、完成、取消和错误状态。
 - 悬浮胶囊和悬浮面板不要依赖本机固定坐标，应基于当前显示器 `workArea` 计算并限制在屏幕内。
 - WebSocket 语音流默认输入来自 `audio/webm;codecs=opus`；后端不能把未知音频头直接当 `.wav`，非 wav 输入必须先通过 `ffmpeg` 转码再喂 ASR。
@@ -72,7 +72,7 @@
 - 词典页用于管理手动词条、自动添加词条和候选词条，应提供搜索、新增、启用/禁用、删除和候选确认入口。
 - 首页“最近结果”展示非自由提问的最近三次最终转录/最终结果文字；实时状态只在悬浮胶囊展示。
 - 首页“最近结果”、历史记录条目和自由提问悬浮结果都应提供复制入口；复制动作统一走 `clipboard:write-text` IPC，空结果不能复制占位符。
-- 设置页目前包含固定快捷键展示、麦克风选择、界面语言、翻译目标语言、大模型 provider/API Key/模型配置、开机启动和版本信息；大模型配置必须通过“修改”进入编辑态，点击“保存”后写入本地设置并触发后端配置重载；翻译目标语言 MVP 只支持英文 `en`。
+- 设置页目前包含固定快捷键展示、麦克风选择、界面语言、翻译目标语言、大模型 provider/API Key/模型配置、开机启动和版本信息；大模型配置必须通过“修改”进入编辑态，点击“保存”后写入本地设置并触发后端配置重载；翻译目标语言当前支持英文 `en` 和日语 `ja`。
 - 诊断页应检查后端 `/health`、`/ready`、麦克风、系统信息和 IPC 自动粘贴能力。
 - 不要用历史阶段标签扩大范围做整套页面重构、账户体系、云同步、自动更新或复杂快捷键编辑器；需要做这些功能时先单独设计。
 
@@ -85,7 +85,7 @@
 - `server/.env.example` 是环境变量模板，真实 `server/.env` 不提交。
 - 历史记录和设置统一走 Electron 主进程 JSON 数据源，renderer 不应把这类业务数据写入 `localStorage`。
 - 词典正式词条和自动学习候选统一走 Electron 主进程 JSON 数据源，renderer 不应把词典数据写入 `localStorage`。
-- 本地设置包含 `translationTargetLanguage`，当前只允许 `en`，由主进程和 renderer 双侧归一化。
+- 本地设置包含 `translationTargetLanguage`，只允许共享翻译目标语言元数据中的语言代码，由主进程和 renderer 双侧归一化。
 - 听写历史保存由 `AppShell` 这类全局常驻层订阅语音会话完成事件，不要放在首页、历史页等可切换页面组件里。
 - 首页累计统计来自独立 `history-stats.json`，不得从最近 200 条 `history.json` 反推；历史列表裁剪不能影响累计听写时长、累计字数、平均速度和节省时间。
 - 后端 `refiner.py` 不直接读取 Electron 本地词典文件；润色所需词条由 Electron 随语音请求参数传入，且只传启用词条。
@@ -95,7 +95,7 @@
 - 大模型 provider 默认模型只是首次配置建议，可能随服务商策略变化；如果调用失败，优先让用户在设置页修改模型名或 API Key，不要写死单一模型假设。
 - 当前可信选区读取依赖 Windows UI Automation；目标应用不支持 UIA 选区时会按无选区处理。剪贴板读取不参与模式判断。
 - 当前 `ask_anything` 只调用 DeepSeek 文本模型，没有联网搜索、天气查询或工具调用链路；实时信息问题必须明确能力边界。
-- 当前没有单独的选区文本翻译快捷键；`Right Alt` 固定为听写，`Right Alt + Right Shift` 固定为语音翻译粘贴。尚未开放英文以外的目标语言。
+- 当前没有单独的选区文本翻译快捷键；`Right Alt` 固定为听写，`Right Alt + Right Shift` 固定为语音翻译粘贴。翻译目标语言当前支持 `en` 和 `ja`。
 - 首页“最近结果”的真实 UI 以 `electron-app/renderer/src/pages/Dashboard.tsx` 为准，修改前先读当前实现和测试，不要只依赖历史上下文。
 
 ## 验证命令
