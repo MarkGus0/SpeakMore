@@ -3,6 +3,7 @@ import { Box, TextField, Typography, Button, IconButton } from '@mui/material'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import { listVoiceHistory, clearVoiceHistory, VOICE_HISTORY_UPDATED_EVENT } from '../services/historyStore'
 import { ipcClient } from '../services/ipc'
+import { pageSx, pageTitleSx } from '../uiTokens'
 
 export default function History() {
   const [query, setQuery] = useState('')
@@ -35,8 +36,8 @@ export default function History() {
   }
 
   return (
-    <Box sx={{ maxWidth: 800, mx: 'auto', p: 3, display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <Typography sx={{ fontSize: 24, fontWeight: 500, mb: 2 }}>历史记录</Typography>
+    <Box sx={{ ...pageSx, maxWidth: 800, display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <Typography sx={{ ...pageTitleSx, mb: 2 }}>历史记录</Typography>
       <TextField
         placeholder="搜索历史记录..."
         size="small"

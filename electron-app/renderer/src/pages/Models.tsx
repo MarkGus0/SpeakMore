@@ -14,6 +14,7 @@ import {
   type ModelInfo,
   type ModelsState,
 } from '../services/modelStore'
+import { pageSx, pageTitleSx } from '../uiTokens'
 
 type LanguageFilter = 'all' | 'zh' | 'en'
 
@@ -56,7 +57,7 @@ function ScoreBar({ label, value }: { label: string; value: number }) {
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
       <Typography sx={{ width: 44, fontSize: 12, color: 'text.secondary' }}>{label}</Typography>
       <Box sx={scoreBarSx}>
-        <Box sx={{ width: `${Math.round(value * 100)}%`, height: '100%', bgcolor: '#44bedf' }} />
+        <Box sx={{ width: `${Math.round(value * 100)}%`, height: '100%', bgcolor: '#3f3f3f' }} />
       </Box>
     </Box>
   )
@@ -88,7 +89,7 @@ function ModelCard({
         <Box sx={{ minWidth: 0 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
             <Typography sx={{ fontSize: 18, fontWeight: 600 }}>{model.name}</Typography>
-            {model.isCurrent ? <Chip size="small" label="当前使用" color="info" /> : null}
+            {model.isCurrent ? <Chip size="small" label="当前使用" sx={{ bgcolor: '#1f1f1f', color: '#fff' }} /> : null}
             {model.isDownloaded && !model.isCurrent ? <Chip size="small" label="已下载" /> : null}
           </Box>
           <Typography sx={{ mt: 0.5, color: 'text.secondary', fontSize: 14 }}>
@@ -205,10 +206,10 @@ export default function Models() {
   const available = filteredModels.filter((model) => !model.isDownloaded && !model.isDownloading)
 
   return (
-    <Box sx={{ maxWidth: 920, mx: 'auto', p: 3, minHeight: '100%' }}>
+    <Box sx={{ ...pageSx, maxWidth: 920, minHeight: '100%' }}>
       <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 2, mb: 3 }}>
         <Box sx={{ minWidth: 0 }}>
-          <Typography sx={{ fontSize: 24, fontWeight: 600 }}>转录模型</Typography>
+          <Typography sx={pageTitleSx}>转录模型</Typography>
           <Typography sx={{ mt: 0.5, color: 'text.secondary', fontSize: 14 }}>
             选择转录模型或下载其他模型。不同模型提供不同的准确度、速度和资源占用。
           </Typography>

@@ -18,7 +18,7 @@ import {
   selectRecentDashboardResults,
   type RecentDashboardResult,
 } from '../services/recentDashboardResults'
-import { cardSx, subtlePanelSx } from '../uiTokens'
+import { cardSx, pageSx, pageTitleSx, subtlePanelSx } from '../uiTokens'
 
 export default function Dashboard() {
   const [recentResults, setRecentResults] = useState<RecentDashboardResult[]>([])
@@ -65,9 +65,9 @@ export default function Dashboard() {
   }, [])
 
   return (
-    <Box sx={{ maxWidth: 980, mx: 'auto', p: 3, display: 'flex', flexDirection: 'column', gap: 3 }}>
+    <Box sx={{ ...pageSx, maxWidth: 980, display: 'flex', flexDirection: 'column', gap: 3 }}>
       <Box>
-        <Typography sx={{ fontSize: 24, fontWeight: 500 }}>首页</Typography>
+        <Typography sx={pageTitleSx}>首页</Typography>
         <Typography sx={{ fontSize: 14, color: '#5d5d5d', mt: 0.5 }}>
           请短按{' '}
           <Box component="kbd" sx={{ bgcolor: 'rgba(119,119,119,0.08)', borderRadius: '5px', px: '5px', py: '2px', fontWeight: 500 }}>

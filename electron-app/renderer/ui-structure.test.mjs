@@ -999,3 +999,58 @@ test('首页壳层和用户可见文案符合 SpeakMore 中文化要求', async 
   assert.match(main, /title:\s*['"]SpeakMore['"]/);
   assert.match(main, /tray\.setToolTip\(['"]SpeakMore['"]\)/);
 });
+
+test('主页面一级标题复用设置页的左上基准和字号', async () => {
+  const uiTokens = await readProjectFile('src/uiTokens.ts');
+  const pageFiles = [
+    'src/pages/Dashboard.tsx',
+    'src/pages/History.tsx',
+    'src/pages/Dictionary.tsx',
+    'src/pages/Models.tsx',
+    'src/pages/Diagnostics.tsx',
+    'src/pages/Settings.tsx',
+  ];
+
+  assert.match(uiTokens, /export\s+const\s+pageSx\s*=\s*\{/);
+  assert.match(uiTokens, /p:\s*3/);
+  assert.doesNotMatch(uiTokens, /mx:\s*['"]auto['"]/);
+  assert.match(uiTokens, /export\s+const\s+pageTitleSx\s*=\s*\{/);
+  assert.match(uiTokens, /fontSize:\s*24/);
+  assert.match(uiTokens, /fontWeight:\s*500/);
+
+  for (const pageFile of pageFiles) {
+    const page = await readProjectFile(pageFile);
+    assert.match(page, /pageSx/);
+    assert.match(page, /pageTitleSx/);
+    assert.doesNotMatch(page, /mx:\s*['"]auto['"]/);
+  }
+});
+
+test('除悬浮粒子外主前端页面不使用蓝色状态色', async () => {
+  const files = [
+    'src/theme.ts',
+    'src/pages/Dashboard.tsx',
+    'src/pages/History.tsx',
+    'src/pages/Dictionary.tsx',
+    'src/pages/Models.tsx',
+    'src/pages/Diagnostics.tsx',
+    'src/pages/Settings.tsx',
+    'src/uiTokens.ts',
+    'public/floating-panel.html',
+  ];
+  const forbiddenPatterns = [
+    /#44bedf/i,
+    /color=["']info["']/,
+    /rgba\(125,\s*211,\s*252/i,
+    /rgba\(56,\s*189,\s*248/i,
+    /\bgreen\b/i,
+    /#b7791f/i,
+  ];
+
+  for (const file of files) {
+    const content = await readProjectFile(file);
+    for (const pattern of forbiddenPatterns) {
+      assert.doesNotMatch(content, pattern, `${file} 不应包含 ${pattern}`);
+    }
+  }
+});
