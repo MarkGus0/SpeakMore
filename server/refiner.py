@@ -12,6 +12,10 @@ MAX_DICTIONARY_TERMS = 100
 DEFAULT_LLM_MODEL = "deepseek-chat"
 
 
+class RefineFailedError(RuntimeError):
+    pass
+
+
 def _get_client() -> AsyncOpenAI:
     global _client
     if _client is None:
@@ -350,5 +354,6 @@ async def refine_text(
     except Exception as e:
         provider_id = normalize_request_llm_config(parameters or {}) or {"provider_id": "deepseek"}
         print(f"[Refiner] {provider_id['provider_id']} API 调用失败: {e}")
-        # fallback: 返回原始文本
-        return raw_text
+        if mode == "transcript":
+            return raw_text
+        raise RefineFailedError(str(e)) from e

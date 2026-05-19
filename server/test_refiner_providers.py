@@ -148,6 +148,38 @@ class RefinerProvidersTest(unittest.TestCase):
         self.assertEqual(result, "provider result")
         self.assertEqual(fake_client.chat.completions.calls[0]["model"], "deepseek-chat")
 
+    def test_translation_raises_when_provider_call_fails(self):
+        fake_client = FakeClient(api_key="env", base_url="env")
+        fake_client.chat.completions.create = AsyncMock(side_effect=RuntimeError("provider down"))
+
+        with patch("refiner._get_client", return_value=fake_client):
+            with self.assertRaisesRegex(refiner.RefineFailedError, "provider down"):
+                asyncio.run(refiner.refine_text(
+                    raw_text="你好",
+                    mode="translation",
+                    parameters={"output_language": "en"},
+                ))
+
+    def test_ask_anything_raises_when_provider_call_fails(self):
+        fake_client = FakeClient(api_key="env", base_url="env")
+        fake_client.chat.completions.create = AsyncMock(side_effect=RuntimeError("provider down"))
+
+        with patch("refiner._get_client", return_value=fake_client):
+            with self.assertRaisesRegex(refiner.RefineFailedError, "provider down"):
+                asyncio.run(refiner.refine_text(
+                    raw_text="解释一下",
+                    mode="ask_anything",
+                ))
+
+    def test_transcript_still_falls_back_to_raw_text_when_provider_call_fails(self):
+        fake_client = FakeClient(api_key="env", base_url="env")
+        fake_client.chat.completions.create = AsyncMock(side_effect=RuntimeError("provider down"))
+
+        with patch("refiner._get_client", return_value=fake_client):
+            result = asyncio.run(refiner.refine_text(raw_text="hello", mode="transcript"))
+
+        self.assertEqual(result, "hello")
+
 
 if __name__ == "__main__":
     unittest.main()

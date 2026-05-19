@@ -82,7 +82,7 @@ class AsrRuntimeTest(unittest.TestCase):
             events.append(f"write:{model_id}")
             return model_id
 
-        with patch("asr.read_selected_model_id", return_value="base"), patch(
+        with patch(
             "asr.write_selected_model_id",
             side_effect=write_model_id,
         ) as write_selection, patch(
@@ -109,7 +109,7 @@ class AsrRuntimeTest(unittest.TestCase):
         asr._model = old_model
         source = asr.WhisperModelSource(kind=asr.DOWNLOAD_SOURCE, model_ref="small", download_root="C:/models")
 
-        with patch("asr.read_selected_model_id", return_value="base"), patch(
+        with patch(
             "asr.write_selected_model_id",
         ) as write_selection, patch(
             "asr.get_candidate_whisper_model_sources",

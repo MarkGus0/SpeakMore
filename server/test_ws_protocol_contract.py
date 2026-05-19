@@ -156,6 +156,37 @@ class WsProtocolContractTest(unittest.TestCase):
         self.assertEqual(websocket.sent_messages[-1]["K"], "transcription_error")
         self.assertEqual(websocket.sent_messages[-1]["V"]["detail"], "boom")
 
+    def test_transcription_failure_clears_audio_chunks_before_next_end_audio(self):
+        websocket = FakeWebSocket([
+            {
+                "type": "websocket.receive",
+                "text": json.dumps({
+                    "type": "start_audio",
+                    "audio_id": "audio-1",
+                    "mode": "transcript",
+                    "audio_context": {},
+                    "parameters": {},
+                }),
+            },
+            {"type": "websocket.receive", "bytes": b"RIFF\x24\x80\x00\x00"},
+            {"type": "websocket.receive", "text": json.dumps({"type": "end_audio"})},
+            {"type": "websocket.receive", "text": json.dumps({"type": "end_audio"})},
+        ])
+
+        calls = []
+
+        async def fail_transcription(*args, **kwargs):
+            calls.append((args, kwargs))
+            raise RuntimeError("boom")
+
+        with patch("main.transcribe_audio_with_wav_conversion", side_effect=fail_transcription):
+            asyncio.run(ws_voice_flow(websocket))
+
+        self.assertEqual(len(calls), 1)
+        message_types = [message["K"] for message in websocket.sent_messages]
+        self.assertEqual(message_types.count("transcription_error"), 1)
+        self.assertEqual(message_types.count("audio_session_ending"), 2)
+
     def test_refine_failure_emits_audio_processing_error(self):
         websocket = FakeWebSocket([
             {
@@ -208,6 +239,49 @@ class WsProtocolContractTest(unittest.TestCase):
 
         process_mode = next(message for message in websocket.sent_messages if message["K"] == "process_mode")
         self.assertEqual(process_mode["V"]["parameters"], {"selected_text": "被选中的代码"})
+
+    def test_invalid_json_message_emits_error_without_crashing(self):
+        websocket = FakeWebSocket([
+            {"type": "websocket.receive", "text": "not-json"},
+            {"type": "websocket.receive", "text": json.dumps({"type": "ping"})},
+        ])
+
+        asyncio.run(ws_voice_flow(websocket))
+
+        self.assertEqual(websocket.sent_messages[0]["K"], "error")
+        self.assertEqual(websocket.sent_messages[0]["V"]["code"], "invalid_json")
+        self.assertEqual(websocket.sent_messages[1]["K"], "pong")
+
+    def test_start_audio_ignores_non_object_parameters(self):
+        websocket = FakeWebSocket([
+            {
+                "type": "websocket.receive",
+                "text": json.dumps({
+                    "type": "start_audio",
+                    "audio_id": "audio-1",
+                    "mode": "transcript",
+                    "audio_context": "bad-context",
+                    "parameters": "bad-parameters",
+                }),
+            },
+            {"type": "websocket.receive", "bytes": b"RIFF\x24\x80\x00\x00"},
+            {"type": "websocket.receive", "text": json.dumps({"type": "end_audio"})},
+        ])
+
+        with patch("main.transcribe_audio_with_wav_conversion", return_value="hello"), patch(
+            "main.refine_text",
+            return_value="hello refined",
+        ) as refine_text:
+            asyncio.run(ws_voice_flow(websocket))
+
+        process_mode = next(message for message in websocket.sent_messages if message["K"] == "process_mode")
+        self.assertEqual(process_mode["V"]["parameters"], {})
+        refine_text.assert_called_once_with(
+            raw_text="hello",
+            mode="transcript",
+            context={},
+            parameters={},
+        )
 
 
 if __name__ == "__main__":

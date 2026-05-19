@@ -117,6 +117,22 @@ class VoiceFlowContractTest(unittest.TestCase):
             parameters={"output_language": "en"},
         )
 
+    def test_text_flow_translation_returns_error_when_refine_fails(self):
+        app = self.create_ready_app()
+
+        with patch("main.refine_text", side_effect=RuntimeError("provider down")), TestClient(app) as client:
+            self.wait_until_ready(client)
+            response = client.post(
+                "/ai/text_flow",
+                json={"mode": "translation", "text": "你好", "parameters": {"output_language": "en"}},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "ERROR")
+        self.assertEqual(payload["data"]["code"], "text_flow_failed")
+        self.assertIn("provider down", payload["data"]["detail"])
+
     def test_text_flow_requires_ready_backend(self):
         release = threading.Event()
 

@@ -22,7 +22,6 @@ from model_manager import (
     find_cached_model_snapshot,
     get_model_definition,
     start_download_task,
-    write_selected_model_id,
 )
 from refiner import refine_text, reload_refiner_runtime_config
 from runtime_config import (
@@ -107,7 +106,7 @@ async def send_ws_error_message(
 
 def create_process_mode_payload(audio_id: str, mode: str, parameters: dict | None = None) -> dict:
     payload = {"audio_id": audio_id, "mode": mode}
-    if parameters:
+    if parameters is not None:
         payload["parameters"] = parameters
     return payload
 
@@ -137,6 +136,22 @@ def normalize_selected_text(payload: dict) -> str:
         if isinstance(value, str):
             return value
     return ""
+
+
+def normalize_ws_object(value) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
+def normalize_ws_text_message(raw_text: str) -> tuple[dict | None, dict | None]:
+    try:
+        data = json.loads(raw_text)
+    except json.JSONDecodeError as error:
+        return None, {"code": "invalid_json", "detail": str(error)}
+
+    if not isinstance(data, dict):
+        return None, {"code": "invalid_message", "detail": "WebSocket 消息必须是 JSON 对象"}
+
+    return data, None
 
 
 def get_ws_completion_message_type(mode: str, parameters: dict) -> str:
@@ -191,6 +206,33 @@ async def preload_voice_service(app: FastAPI, preload_model, exit_scheduler) -> 
         exit_scheduler(1)
 
 
+def create_flow_success_payload(refined_text: str, raw_text: str = "") -> dict:
+    return {
+        "status": "OK",
+        "data": {
+            "refine_text": refined_text,
+            "delivery": "inline",
+            "user_prompt": raw_text,
+            "web_metadata": None,
+            "external_action": None,
+        },
+    }
+
+
+def create_flow_error_payload(detail: str, code: str, raw_text: str = "") -> dict:
+    return {
+        "status": "ERROR",
+        "data": {
+            "refine_text": f"错误: {detail}",
+            "delivery": "inline",
+            "user_prompt": raw_text,
+            "detail": detail,
+            "code": code,
+            "important_notification": None,
+        },
+    }
+
+
 async def handle_voice_flow_request(
     audio_file: UploadFile,
     mode: str,
@@ -209,7 +251,7 @@ async def handle_voice_flow_request(
         raw_text = await transcribe_audio_with_wav_conversion(tmp_path, suffix)
 
         if not raw_text or not raw_text.strip():
-            return {"status": "OK", "data": {"refine_text": "", "delivery": "inline"}}
+            return create_flow_success_payload(refined_text="", raw_text="")
 
         refined = await refine_text(
             raw_text=raw_text,
@@ -218,28 +260,9 @@ async def handle_voice_flow_request(
             parameters=params,
         )
 
-        return {
-            "status": "OK",
-            "data": {
-                "refine_text": refined,
-                "delivery": "inline",
-                "user_prompt": raw_text,
-                "web_metadata": None,
-                "external_action": None,
-            },
-        }
+        return create_flow_success_payload(refined_text=refined, raw_text=raw_text)
     except Exception as error:
-        return {
-            "status": "ERROR",
-            "data": {
-                "refine_text": f"错误: {error}",
-                "delivery": "inline",
-                "user_prompt": "",
-                "detail": str(error),
-                "code": "voice_flow_failed",
-                "important_notification": None,
-            },
-        }
+        return create_flow_error_payload(detail=str(error), code="voice_flow_failed")
     finally:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
@@ -256,7 +279,7 @@ async def handle_text_flow_request(
     params = parameters if isinstance(parameters, dict) else {}
 
     if not raw_text:
-        return {"status": "OK", "data": {"refine_text": "", "delivery": "inline"}}
+        return create_flow_success_payload(refined_text="", raw_text="")
 
     try:
         refined = await refine_text(
@@ -266,28 +289,9 @@ async def handle_text_flow_request(
             parameters=params,
         )
 
-        return {
-            "status": "OK",
-            "data": {
-                "refine_text": refined,
-                "delivery": "inline",
-                "user_prompt": raw_text,
-                "web_metadata": None,
-                "external_action": None,
-            },
-        }
+        return create_flow_success_payload(refined_text=refined, raw_text=raw_text)
     except Exception as error:
-        return {
-            "status": "ERROR",
-            "data": {
-                "refine_text": f"错误: {error}",
-                "delivery": "inline",
-                "user_prompt": raw_text,
-                "detail": str(error),
-                "code": "text_flow_failed",
-                "important_notification": None,
-            },
-        }
+        return create_flow_error_payload(detail=str(error), code="text_flow_failed", raw_text=raw_text)
 
 
 async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = None):
@@ -317,7 +321,11 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
             if "text" not in message or not message["text"]:
                 continue
 
-            data = json.loads(message["text"])
+            data, parse_error = normalize_ws_text_message(message["text"])
+            if parse_error:
+                await send_ws_message(websocket, "error", parse_error)
+                continue
+
             msg_type = data.get("type", "")
 
             if app_instance is not None and not is_voice_service_ready(app_instance) and msg_type != "ping":
@@ -330,9 +338,9 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
 
             if msg_type == "start_audio":
                 audio_id = data.get("audio_id", str(uuid.uuid4()))
-                mode = data.get("mode", "transcript")
-                context = data.get("audio_context", {})
-                parameters = data.get("parameters", {})
+                mode = data.get("mode", "transcript") if isinstance(data.get("mode"), str) else "transcript"
+                context = normalize_ws_object(data.get("audio_context", {}))
+                parameters = normalize_ws_object(data.get("parameters", {}))
                 audio_chunks = []
 
                 await send_ws_message(websocket, "session_started", {"audio_id": audio_id})
@@ -346,77 +354,79 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
 
             if msg_type == "end_audio":
                 await send_ws_message(websocket, "audio_session_ending", {"audio_id": audio_id})
-                if audio_chunks:
-                    audio_data = b"".join(audio_chunks)
-                    suffix = detect_realtime_audio_suffix(audio_data)
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-                        tmp.write(audio_data)
-                        tmp_path = tmp.name
+                if not audio_chunks:
+                    continue
 
+                current_chunks = audio_chunks
+                audio_chunks = []
+                audio_data = b"".join(current_chunks)
+                suffix = detect_realtime_audio_suffix(audio_data)
+                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                    tmp.write(audio_data)
+                    tmp_path = tmp.name
+
+                try:
                     try:
+                        raw_text = await transcribe_audio_with_wav_conversion(tmp_path, suffix)
+                    except Exception as error:
+                        await send_ws_error_message(
+                            websocket,
+                            "transcription_error",
+                            audio_id,
+                            str(error),
+                            "transcription_failed",
+                        )
+                        continue
+
+                    if raw_text:
+                        await send_ws_message(
+                            websocket,
+                            "transcription",
+                            {"text": raw_text, "audio_id": audio_id, "chunk_index": 0},
+                        )
                         try:
-                            raw_text = await transcribe_audio_with_wav_conversion(tmp_path, suffix)
+                            refined = await refine_text(
+                                raw_text=raw_text,
+                                mode=mode,
+                                context=context,
+                                parameters=parameters,
+                            )
                         except Exception as error:
                             await send_ws_error_message(
                                 websocket,
-                                "transcription_error",
+                                get_ws_refine_error_message_type(mode, parameters),
                                 audio_id,
                                 str(error),
-                                "transcription_failed",
+                                "audio_processing_failed",
                             )
                             continue
 
-                        if raw_text:
-                            await send_ws_message(
-                                websocket,
-                                "transcription",
-                                {"text": raw_text, "audio_id": audio_id, "chunk_index": 0},
-                            )
-                            try:
-                                refined = await refine_text(
-                                    raw_text=raw_text,
-                                    mode=mode,
-                                    context=context,
-                                    parameters=parameters,
-                                )
-                            except Exception as error:
-                                await send_ws_error_message(
-                                    websocket,
-                                    get_ws_refine_error_message_type(mode, parameters),
-                                    audio_id,
-                                    str(error),
-                                    "audio_processing_failed",
-                                )
-                                continue
-
-                            await send_ws_message(
-                                websocket,
-                                get_ws_completion_message_type(mode, parameters),
-                                {
-                                    "audio_id": audio_id,
-                                    "refined_text": refined,
-                                    "refine_text": refined,
-                                    "delivery": "inline",
-                                    "user_prompt": raw_text,
-                                    "web_metadata": None,
-                                    "external_action": None,
-                                },
-                            )
-                        else:
-                            await send_ws_message(
-                                websocket,
-                                get_ws_completion_message_type(mode, parameters),
-                                {
-                                    "audio_id": audio_id,
-                                    "refined_text": "",
-                                    "refine_text": "",
-                                    "delivery": "inline",
-                                },
-                            )
-                    finally:
-                        os.unlink(tmp_path)
-
-                audio_chunks = []
+                        await send_ws_message(
+                            websocket,
+                            get_ws_completion_message_type(mode, parameters),
+                            {
+                                "audio_id": audio_id,
+                                "refined_text": refined,
+                                "refine_text": refined,
+                                "delivery": "inline",
+                                "user_prompt": raw_text,
+                                "web_metadata": None,
+                                "external_action": None,
+                            },
+                        )
+                    else:
+                        await send_ws_message(
+                            websocket,
+                            get_ws_completion_message_type(mode, parameters),
+                            {
+                                "audio_id": audio_id,
+                                "refined_text": "",
+                                "refine_text": "",
+                                "delivery": "inline",
+                            },
+                        )
+                finally:
+                    os.unlink(tmp_path)
                 continue
 
             if msg_type == "replace_audio_context":
@@ -429,8 +439,8 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
 
             if msg_type == "set_mode_config":
                 mode = normalize_mode_update(data, mode)
-                next_parameters = data.get("parameters")
-                if isinstance(next_parameters, dict):
+                next_parameters = normalize_ws_object(data.get("parameters", {}))
+                if next_parameters:
                     parameters = {**parameters, **next_parameters}
                 await send_ws_message(
                     websocket,
@@ -521,18 +531,19 @@ def create_app(preload_model=preload_whisper_model, exit_scheduler=schedule_star
             raise HTTPException(status_code=409, detail="WHISPER_MODEL_DIR 已覆盖当前模型选择")
 
         current_model_id = state["currentModelId"]
-        deleted = delete_model_files(model["id"])
         if current_model_id == model["id"]:
-            write_selected_model_id(DEFAULT_MODEL_ID)
-            if find_cached_model_snapshot(DEFAULT_MODEL_ID):
-                try:
-                    reload_whisper_model(DEFAULT_MODEL_ID)
-                    set_voice_service_state(app, "ready", "ASR 模型已完成预热")
-                except Exception as error:
-                    set_voice_service_state(app, "failed", str(error))
-            else:
-                set_voice_service_state(app, "failed", "当前模型已删除，请先下载 base 模型")
+            if model["id"] == DEFAULT_MODEL_ID:
+                raise HTTPException(status_code=409, detail="不能删除当前使用的回退模型")
+            if not find_cached_model_snapshot(DEFAULT_MODEL_ID):
+                raise HTTPException(status_code=409, detail="base 模型未下载，不能删除当前模型")
+            try:
+                reload_whisper_model(DEFAULT_MODEL_ID)
+                set_voice_service_state(app, "ready", "ASR 模型已完成预热")
+            except Exception as error:
+                set_voice_service_state(app, "failed", str(error))
+                raise HTTPException(status_code=500, detail=str(error)) from error
 
+        deleted = delete_model_files(model["id"])
         state = create_models_state()
         state["deleted"] = deleted
         return state

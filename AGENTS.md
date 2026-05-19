@@ -25,6 +25,8 @@
 - 模型管理由后端 FastAPI 负责，Electron 只通过 `model:*` IPC 转发到后端 `/models` 接口，不直接下载、删除或选择 ASR 模型。
 - 第一版模型管理只支持 `faster-whisper` 系列：`tiny`、`base`、`small`、`medium`、`large-v3`。
 - 下载非当前模型不能影响当前语音链路，只有选择模型成功后才切换 ASR 单例。
+- 删除当前使用的非 base ASR 模型前，后端必须先成功切换到已下载的 `base`；不能删除当前正在使用的 `base` 模型。
+- 模型下载取消语义为“取消本次下载结果”：底层下载线程可能继续完成，完成后若已取消则清理该模型缓存。
 - `electron-app/main.js` 加载 `electron-app/renderer/dist/index.html`、`floating-bar.html` 和 `floating-panel.html`。
 - Windows 文本观察 helper 位于 `electron-app/windows-text-observer/`，只服务本轮粘贴后的短时自动学习，不参与基础录音链路。
 - 前端修改后必须在 `electron-app/renderer/` 下运行 `npm run build`，再重启 Electron 验证。
@@ -58,9 +60,12 @@
 - 长按 `Right Alt` 的快捷键提示也通过 `floating-panel` IPC 和独立悬浮面板展示；提示优先级低于录音、转写、完成、取消和错误状态。
 - 悬浮胶囊和悬浮面板不要依赖本机固定坐标，应基于当前显示器 `workArea` 计算并限制在屏幕内。
 - WebSocket 语音流默认输入来自 `audio/webm;codecs=opus`；后端不能把未知音频头直接当 `.wav`，非 wav 输入必须先通过 `ffmpeg` 转码再喂 ASR。
+- WebSocket 协议入口必须防御非法 JSON 和非对象参数；`parameters`、`audio_context` 等输入进入业务逻辑前必须归一化为对象。
+- WebSocket 单轮音频处理失败也必须清空本轮音频块，不能让下一次 `end_audio` 重复处理旧音频。
 - ASR 后端唯一使用 `faster-whisper`，默认选择模型为 `base`；不要恢复 Handy `ggml`、SenseVoice 或其他旧模型兼容逻辑。
 - 模型扫描顺序固定为 `WHISPER_MODEL_DIR` → `%LOCALAPPDATA%\Typeless\models\faster-whisper` → `%USERPROFILE%\.cache\huggingface\hub` → 首次下载到 `%LOCALAPPDATA%\Typeless\models\faster-whisper`。
 - `WHISPER_MODEL_DIR` 设置后视为显式模型目录覆盖，模型页必须禁用模型切换和删除。
+- `WHISPER_MODEL` 设置后视为显式模型 ID 覆盖，模型页当前状态必须与 ASR 运行模型一致，并禁用模型切换和删除。
 - 开发态 `uvicorn reload` 必须显式由环境变量 `UVICORN_RELOAD` 开启，不要在代码里默认写死 `reload=True`。
 - 录音期间静音后台声音时，保持“短按开始、再次短按结束”的交互；Windows 上按音频会话静音，结束后只恢复本轮被 SpeakMore 主动静音的会话。
 - 自动学习只能围绕 SpeakMore 本轮粘贴结果短时观察当前焦点控件，不允许做无差别全局文本采集；目标应用不支持 UIA 文本读取时，本轮学习应降级为不可用。
@@ -89,6 +94,7 @@
 - 听写历史保存由 `AppShell` 这类全局常驻层订阅语音会话完成事件，不要放在首页、历史页等可切换页面组件里。
 - 首页累计统计来自独立 `history-stats.json`，不得从最近 200 条 `history.json` 反推；历史列表裁剪不能影响累计听写时长、累计字数、平均速度和节省时间。
 - 后端 `refiner.py` 不直接读取 Electron 本地词典文件；润色所需词条由 Electron 随语音请求参数传入，且只传启用词条。
+- 大模型调用失败时，听写模式可以降级返回 ASR 原文；翻译和自由提问不能把原文伪装成成功结果，必须走错误返回。
 
 ## 已知限制
 
