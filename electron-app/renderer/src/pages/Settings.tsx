@@ -10,6 +10,7 @@ import {
   type LocalSettings,
   type TranslationTargetLanguage,
 } from '../services/settingsStore'
+import { pageSx, pageTitleSx } from '../uiTokens'
 
 const keybindChip = {
   borderRadius: '6px',
@@ -136,8 +137,8 @@ export default function Settings() {
   }
 
   return (
-    <Box sx={{ maxWidth: 680, p: 3 }}>
-      <Typography sx={{ fontSize: 24, fontWeight: 500, mb: 2 }}>设置</Typography>
+    <Box sx={{ ...pageSx, maxWidth: 680 }}>
+      <Typography sx={{ ...pageTitleSx, mb: 2 }}>设置</Typography>
 
       {/* 快捷键 */}
       <Typography sx={sectionTitle}>快捷键</Typography>

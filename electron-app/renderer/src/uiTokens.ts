@@ -9,6 +9,15 @@ export const subtlePanelSx = {
   borderRadius: '16px',
 }
 
+export const pageSx = {
+  p: 3,
+}
+
+export const pageTitleSx = {
+  fontSize: 24,
+  fontWeight: 500,
+}
+
 export const overlayCardSx = {
   bgcolor: '#fff',
   borderRadius: '12px',

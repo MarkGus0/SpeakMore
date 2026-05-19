@@ -19,7 +19,10 @@ export const theme = createTheme({
       main: '#1d1a1a',
     },
     info: {
-      main: '#44bedf',
+      main: '#5f5f5f',
+    },
+    error: {
+      main: '#c62828',
     },
   },
   shape: {

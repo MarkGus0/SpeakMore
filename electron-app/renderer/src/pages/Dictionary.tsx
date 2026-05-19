@@ -14,6 +14,7 @@ import {
   type DictionaryCandidate,
   type DictionaryEntry,
 } from '../services/dictionaryStore'
+import { pageSx, pageTitleSx } from '../uiTokens'
 
 const filters = [
   { label: '全部', value: 'all' },
@@ -118,9 +119,9 @@ export default function Dictionary() {
   }
 
   return (
-    <Box sx={{ maxWidth: 920, mx: 'auto', p: 3, display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
+    <Box sx={{ ...pageSx, maxWidth: 920, display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, mb: 2 }}>
-        <Typography sx={{ fontSize: 24, fontWeight: 500 }}>词典</Typography>
+        <Typography sx={pageTitleSx}>词典</Typography>
         <Button variant="contained" onClick={handleCreateEntry} disabled={!phrase.trim()}>新增词条</Button>
       </Box>
 

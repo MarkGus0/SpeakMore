@@ -4,10 +4,11 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import BugReportIcon from '@mui/icons-material/BugReport'
 import { runDiagnostics, type DiagnosticItem } from '../services/diagnostics'
+import { pageSx, pageTitleSx } from '../uiTokens'
 
 const iconByStatus = {
-  ok: <CheckCircleIcon sx={{ color: 'green' }} />,
-  warning: <WarningAmberIcon sx={{ color: '#b7791f' }} />,
+  ok: <CheckCircleIcon sx={{ color: '#3f3f3f' }} />,
+  warning: <WarningAmberIcon sx={{ color: '#6f6f6f' }} />,
   error: <BugReportIcon sx={{ color: '#c62828' }} />,
 }
 
@@ -25,8 +26,8 @@ export default function Diagnostics() {
   }
 
   return (
-    <Box sx={{ maxWidth: 800, mx: 'auto', p: 3, display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <Typography sx={{ fontSize: 24, fontWeight: 500, mb: 2 }}>诊断</Typography>
+    <Box sx={{ ...pageSx, maxWidth: 800, display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <Typography sx={{ ...pageTitleSx, mb: 2 }}>诊断</Typography>
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: '12px', flex: 1 }}>
         {items.length === 0 ? (
           <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
