@@ -12,6 +12,7 @@ AVAILABLE_MODEL_IDS = ("tiny", "base", "small", "medium", "large-v3")
 _SELECTION_FILE_NAME = "model-selection.json"
 _DOWNLOAD_STATUS = {}
 _DOWNLOAD_TASKS = {}
+_DOWNLOAD_CANCELLED = set()
 _DOWNLOAD_STATUS_LOCK = threading.Lock()
 
 _MODEL_CATALOG = (
@@ -127,6 +128,20 @@ def write_selected_model_id(model_id):
     return normalized_model_id
 
 
+def read_explicit_model_id():
+    configured_model = os.environ.get("WHISPER_MODEL", "").strip()
+    return normalize_model_id(configured_model) if configured_model else ""
+
+
+def get_runtime_model_id():
+    explicit_model_id = read_explicit_model_id()
+    return explicit_model_id or read_selected_model_id()
+
+
+def is_model_selection_locked():
+    return bool(os.environ.get("WHISPER_MODEL_DIR", "").strip() or read_explicit_model_id())
+
+
 def is_valid_model_snapshot(path: Path):
     return path.is_dir() and (path / "model.bin").is_file() and (path / "config.json").is_file()
 
@@ -227,11 +242,13 @@ def clear_download_status_for_tests():
     with _DOWNLOAD_STATUS_LOCK:
         _DOWNLOAD_STATUS.clear()
         _DOWNLOAD_TASKS.clear()
+        _DOWNLOAD_CANCELLED.clear()
 
 
 def create_models_state():
     explicit_model_dir = os.environ.get("WHISPER_MODEL_DIR") or ""
-    current_model_id = read_selected_model_id()
+    explicit_model_id = read_explicit_model_id()
+    current_model_id = explicit_model_id or read_selected_model_id()
     models = []
 
     for model in get_model_catalog():
@@ -253,7 +270,8 @@ def create_models_state():
         "currentModelId": current_model_id,
         "models": models,
         "explicitModelDir": explicit_model_dir,
-        "selectionLocked": bool(explicit_model_dir),
+        "explicitModelId": explicit_model_id,
+        "selectionLocked": is_model_selection_locked(),
     }
 
 
@@ -285,6 +303,12 @@ async def download_model(model_id):
             cache_dir=str(get_managed_whisper_cache_root()),
             local_files_only=False,
         )
+        with _DOWNLOAD_STATUS_LOCK:
+            was_cancelled = model["id"] in _DOWNLOAD_CANCELLED
+            _DOWNLOAD_CANCELLED.discard(model["id"])
+        if was_cancelled:
+            delete_model_files(model["id"])
+            return
         mark_download_finished(model["id"])
     except asyncio.CancelledError:
         mark_download_finished(model["id"])
@@ -313,6 +337,8 @@ def start_download_task(model_id):
     if existing_task and not existing_task.done():
         return False
 
+    with _DOWNLOAD_STATUS_LOCK:
+        _DOWNLOAD_CANCELLED.discard(model["id"])
     mark_download_started(model["id"])
     task = asyncio.create_task(download_model(model["id"]))
     task.add_done_callback(_consume_download_task_result)
@@ -326,6 +352,7 @@ def cancel_download_task(model_id):
     if not task or task.done():
         return False
 
-    task.cancel()
+    with _DOWNLOAD_STATUS_LOCK:
+        _DOWNLOAD_CANCELLED.add(model["id"])
     mark_download_finished(model["id"])
     return True

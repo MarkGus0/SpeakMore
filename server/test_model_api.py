@@ -12,6 +12,7 @@ from model_manager import (
     find_cached_model_snapshot,
     get_managed_models_root,
     repo_cache_dir_name,
+    write_selected_model_id,
 )
 
 
@@ -65,16 +66,45 @@ class ModelApiTest(unittest.TestCase):
             with patch.dict(os.environ, {"LOCALAPPDATA": str(Path(temp_dir) / "LocalAppData"), "WHISPER_MODEL_DIR": ""}, clear=False):
                 create_snapshot("small", "Systran/faster-whisper-small")
                 create_snapshot("base", "Systran/faster-whisper-base")
+                write_selected_model_id("small")
                 app = main.create_app(preload_model=lambda: None, exit_scheduler=lambda _code: None)
-                with patch("main.reload_whisper_model", return_value=object()):
+                with patch("main.reload_whisper_model", side_effect=lambda model_id: write_selected_model_id(model_id)):
                     with TestClient(app) as client:
-                        client.post("/models/small/select")
                         response = client.delete("/models/small")
                         state = client.get("/models").json()
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(state["currentModelId"], "base")
-        self.assertIsNone(find_cached_model_snapshot("small"))
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(state["currentModelId"], "base")
+                self.assertIsNone(find_cached_model_snapshot("small"))
+
+    def test_delete_current_model_keeps_selection_and_cache_when_fallback_reload_fails(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch.dict(os.environ, {"LOCALAPPDATA": str(Path(temp_dir) / "LocalAppData"), "WHISPER_MODEL_DIR": ""}, clear=False):
+                create_snapshot("small", "Systran/faster-whisper-small")
+                create_snapshot("base", "Systran/faster-whisper-base")
+                write_selected_model_id("small")
+                app = main.create_app(preload_model=lambda: None, exit_scheduler=lambda _code: None)
+                with patch("main.reload_whisper_model", side_effect=RuntimeError("load failed")):
+                    with TestClient(app) as client:
+                        response = client.delete("/models/small")
+                        state = client.get("/models").json()
+
+                self.assertEqual(response.status_code, 500)
+                self.assertEqual(state["currentModelId"], "small")
+                self.assertIsNotNone(find_cached_model_snapshot("small"))
+
+    def test_delete_current_base_model_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch.dict(os.environ, {"LOCALAPPDATA": str(Path(temp_dir) / "LocalAppData"), "WHISPER_MODEL_DIR": ""}, clear=False):
+                create_snapshot("base", "Systran/faster-whisper-base")
+                app = main.create_app(preload_model=lambda: None, exit_scheduler=lambda _code: None)
+                with TestClient(app) as client:
+                    response = client.delete("/models/base")
+                    state = client.get("/models").json()
+
+                self.assertEqual(response.status_code, 409)
+                self.assertEqual(state["currentModelId"], "base")
+                self.assertIsNotNone(find_cached_model_snapshot("base"))
 
     def test_download_and_cancel_delegate_to_model_manager(self):
         with tempfile.TemporaryDirectory() as temp_dir:

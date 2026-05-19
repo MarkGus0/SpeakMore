@@ -1,6 +1,9 @@
+import asyncio
 import json
 import os
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -8,6 +11,7 @@ from unittest.mock import patch
 from model_manager import (
     AVAILABLE_MODEL_IDS,
     DEFAULT_MODEL_ID,
+    cancel_download_task,
     clear_download_status_for_tests,
     create_models_state,
     delete_model_files,
@@ -284,6 +288,30 @@ class ModelManagerStateTest(unittest.TestCase):
         self.assertTrue(state["selectionLocked"])
         self.assertEqual(state["explicitModelDir"], str(explicit_dir))
 
+    def test_models_state_locks_selection_when_whisper_model_env_is_set(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            local_app_data = Path(temp_dir) / "LocalAppData"
+            with patch.dict(
+                os.environ,
+                {
+                    "LOCALAPPDATA": str(local_app_data),
+                    "WHISPER_MODEL": "base",
+                    "WHISPER_MODEL_DIR": "",
+                },
+                clear=False,
+            ):
+                write_selected_model_id("small")
+
+                state = create_models_state()
+
+        self.assertEqual(state["currentModelId"], "base")
+        self.assertEqual(state["explicitModelId"], "base")
+        self.assertTrue(state["selectionLocked"])
+        base = next(model for model in state["models"] if model["id"] == "base")
+        small = next(model for model in state["models"] if model["id"] == "small")
+        self.assertTrue(base["isCurrent"])
+        self.assertFalse(small["isCurrent"])
+
     def test_model_definition_rejects_unknown_model(self):
         with self.assertRaisesRegex(ValueError, "未知模型: unknown"):
             get_model_definition("unknown")
@@ -367,3 +395,35 @@ class ModelManagerStateTest(unittest.TestCase):
         self.assertTrue(status["isDownloading"])
         self.assertEqual(status["downloadProgress"], 0)
         self.assertEqual(status["downloadError"], "")
+
+    def test_cancel_download_cleans_cache_when_background_download_finishes(self):
+        async def run_case():
+            with tempfile.TemporaryDirectory() as temp_dir:
+                local_app_data = Path(temp_dir) / "LocalAppData"
+                entered = threading.Event()
+
+                def fake_snapshot_download(repo_id, cache_dir, local_files_only):
+                    del repo_id, local_files_only
+                    entered.set()
+                    time.sleep(0.1)
+                    model = get_model_definition("tiny")
+                    snapshot = Path(cache_dir) / repo_cache_dir_name(model["repoId"]) / "snapshots" / "abc"
+                    snapshot.mkdir(parents=True)
+                    (snapshot / "model.bin").write_bytes(b"model")
+                    (snapshot / "config.json").write_text("{}", encoding="utf-8")
+
+                with patch.dict(os.environ, {"LOCALAPPDATA": str(local_app_data)}, clear=False):
+                    with patch("huggingface_hub.snapshot_download", side_effect=fake_snapshot_download):
+                        self.assertTrue(start_download_task("tiny"))
+                        while not entered.is_set():
+                            await asyncio.sleep(0.01)
+                        self.assertTrue(cancel_download_task("tiny"))
+                        await asyncio.sleep(0.2)
+
+                    self.assertIsNone(find_cached_model_snapshot("tiny"))
+                    self.assertEqual(
+                        get_download_status("tiny"),
+                        {"isDownloading": False, "downloadProgress": 0, "downloadError": ""},
+                    )
+
+        asyncio.run(run_case())

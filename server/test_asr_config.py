@@ -125,7 +125,7 @@ class AsrConfigTest(unittest.TestCase):
                     "USERPROFILE": str(user_profile),
                 },
                 clear=False,
-            ), patch("asr.read_selected_model_id", return_value="small"):
+            ), patch("asr.get_runtime_model_id", return_value="small"):
                 source = resolve_whisper_model_source()
 
         self.assertEqual(
@@ -287,6 +287,24 @@ class AsrConfigTest(unittest.TestCase):
                 model_id="small",
             ),
         )
+
+    def test_asr_uses_model_manager_runtime_model_id_when_env_model_is_set(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            local_app_data = Path(temp_dir) / "LocalAppData"
+            with patch.dict(
+                os.environ,
+                {
+                    "WHISPER_MODEL": "small",
+                    "WHISPER_MODEL_DIR": "",
+                    "LOCALAPPDATA": str(local_app_data),
+                    "USERPROFILE": str(Path(temp_dir) / "UserProfile"),
+                },
+                clear=False,
+            ):
+                source = resolve_whisper_model_source()
+
+        self.assertEqual(source.model_id, "small")
+        self.assertEqual(source.model_ref, "small")
 
     def test_resolve_whisper_model_source_normalizes_invalid_legacy_model_name_to_base(self):
         with tempfile.TemporaryDirectory() as temp_dir:

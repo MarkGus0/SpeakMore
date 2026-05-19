@@ -11,8 +11,8 @@ from model_manager import (
     DEFAULT_MODEL_ID,
     find_cached_model_snapshot,
     get_managed_whisper_cache_root,
+    get_runtime_model_id,
     normalize_model_id,
-    read_selected_model_id,
     write_selected_model_id,
 )
 
@@ -39,10 +39,7 @@ _model_lock = threading.Lock()
 
 
 def get_whisper_model_name() -> str:
-    configured_model = os.getenv("WHISPER_MODEL", "").strip()
-    if configured_model:
-        return normalize_model_id(configured_model)
-    return normalize_model_id(read_selected_model_id())
+    return normalize_model_id(get_runtime_model_id())
 
 
 def get_hf_cache_root() -> Path:
