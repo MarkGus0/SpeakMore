@@ -76,7 +76,9 @@ function upsertDictionaryEntry(entries, entry, now = new Date().toISOString()) {
       ...item,
       ...normalized,
       id: item.id,
-      aliases: uniqueAliases([...item.aliases, ...normalized.aliases], normalized.phrase),
+      phrase: item.phrase,
+      source: item.source === 'manual' ? 'manual' : normalized.source,
+      aliases: uniqueAliases([...item.aliases, ...normalized.aliases], item.phrase),
       hitCount: Math.max(item.hitCount, normalized.hitCount),
       createdAt: item.createdAt,
       updatedAt: now,
@@ -116,6 +118,10 @@ function learnDictionaryCandidate(candidates, correction, now = new Date().toISO
 
   if (index === -1) {
     return { candidates: [normalized, ...normalizedCandidates], promotedEntry };
+  }
+
+  if (normalizedCandidates[index].status === 'ignored') {
+    return { candidates: normalizedCandidates, promotedEntry };
   }
 
   const updated = normalizeDictionaryCandidate({

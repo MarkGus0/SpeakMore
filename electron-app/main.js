@@ -46,6 +46,10 @@ const {
   buildPromptDictionaryTerms,
   learnDictionaryCandidate,
 } = require('./dictionary-store');
+const {
+  createDictionaryEntryResult,
+  updateDictionaryEntryResult,
+} = require('./dictionary-actions');
 const { createTextObservationSessionManager } = require('./text-observation-session');
 
 let mainWindow = null;
@@ -1499,30 +1503,14 @@ function registerIpcHandlers() {
 
   ipcMain.handle('dictionary:list', () => readDictionaryEntries());
   ipcMain.handle('dictionary:create', (_, payload = {}) => {
-    const entries = upsertDictionaryEntry(readDictionaryEntries(), {
-      ...payload,
-      source: payload.source === 'auto' ? 'auto' : 'manual',
-      status: payload.status === 'disabled' ? 'disabled' : 'active',
-    });
-    writeDictionaryEntries(entries);
-    const phrase = normalizeDictionaryEntry(payload).phrase.toLowerCase();
-    const created = entries.find((entry) => entry.phrase.toLowerCase() === phrase) || entries[0] || null;
-    return { success: Boolean(created), data: created };
+    const result = createDictionaryEntryResult(readDictionaryEntries(), payload);
+    if (result.success) writeDictionaryEntries(result.entries);
+    return { success: result.success, code: result.code, data: result.data };
   });
   ipcMain.handle('dictionary:update', (_, payload = {}) => {
-    const entries = readDictionaryEntries();
-    const target = entries.find((entry) => entry.id === payload.id);
-    if (!target) return { success: false, code: 'dictionary_entry_not_found' };
-
-    const updated = normalizeDictionaryEntry({
-      ...target,
-      ...payload,
-      id: target.id,
-      createdAt: target.createdAt,
-      updatedAt: new Date().toISOString(),
-    });
-    writeDictionaryEntries(entries.map((entry) => (entry.id === target.id ? updated : entry)));
-    return { success: true, data: updated };
+    const result = updateDictionaryEntryResult(readDictionaryEntries(), payload);
+    if (result.success) writeDictionaryEntries(result.entries);
+    return { success: result.success, code: result.code, data: result.data };
   });
   ipcMain.handle('dictionary:delete', (_, id) => {
     writeDictionaryEntries(readDictionaryEntries().filter((entry) => entry.id !== id));

@@ -72,7 +72,54 @@ test('upsertDictionaryEntry 合并同名词条和别名', () => {
 
   assert.equal(entries.length, 1);
   assert.equal(entries[0].id, 'dict_existing');
-  assert.equal(entries[0].phrase, 'client2api');
+  assert.equal(entries[0].phrase, 'Client2API');
+  assert.deepEqual(entries[0].aliases, ['client to api', 'client 2 api']);
+  assert.equal(entries[0].hitCount, 3);
+});
+
+test('learnDictionaryCandidate 不会重新累计已忽略候选', () => {
+  const result = learnDictionaryCandidate([
+    {
+      id: 'candidate_ignored',
+      wrong: 'client to api',
+      correct: 'Client2API',
+      count: 2,
+      status: 'ignored',
+      firstSeenAt: '2026-05-18T00:00:00.000Z',
+      lastSeenAt: '2026-05-18T00:01:00.000Z',
+    },
+  ], { wrong: 'client to api', correct: 'Client2API' }, '2026-05-18T00:02:00.000Z');
+
+  assert.equal(result.candidates.length, 1);
+  assert.equal(result.candidates[0].status, 'ignored');
+  assert.equal(result.candidates[0].count, 2);
+  assert.equal(result.promotedEntry, null);
+});
+
+test('upsertDictionaryEntry 合并同名词条时保留已有正确写法和手动来源', () => {
+  const entries = upsertDictionaryEntry([
+    {
+      id: 'dict_existing',
+      phrase: 'Client2API',
+      aliases: ['client to api'],
+      source: 'manual',
+      status: 'active',
+      hitCount: 1,
+      createdAt: '2026-05-18T00:00:00.000Z',
+      updatedAt: '2026-05-18T00:00:00.000Z',
+      lastLearnedAt: '',
+    },
+  ], {
+    phrase: 'client2api',
+    aliases: ['client 2 api'],
+    source: 'auto',
+    hitCount: 3,
+  }, '2026-05-18T00:03:00.000Z');
+
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].id, 'dict_existing');
+  assert.equal(entries[0].phrase, 'Client2API');
+  assert.equal(entries[0].source, 'manual');
   assert.deepEqual(entries[0].aliases, ['client to api', 'client 2 api']);
   assert.equal(entries[0].hitCount, 3);
 });

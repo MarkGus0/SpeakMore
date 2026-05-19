@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Box, Button, Chip, IconButton, Switch, TextField, Typography } from '@mui/material'
+import { Alert, Box, Button, Chip, IconButton, Switch, TextField, Typography } from '@mui/material'
 import CheckIcon from '@mui/icons-material/Check'
 import CloseIcon from '@mui/icons-material/Close'
 import DeleteIcon from '@mui/icons-material/Delete'
@@ -14,6 +14,7 @@ import {
   type DictionaryCandidate,
   type DictionaryEntry,
 } from '../services/dictionaryStore'
+import { splitDictionaryAliases } from '../services/dictionaryForm'
 import { pageSx, pageTitleSx } from '../uiTokens'
 
 const filters = [
@@ -57,6 +58,7 @@ export default function Dictionary() {
   const [query, setQuery] = useState('')
   const [phrase, setPhrase] = useState('')
   const [aliases, setAliases] = useState('')
+  const [saveError, setSaveError] = useState('')
 
   const refreshDictionary = async () => {
     const [nextEntries, nextCandidates] = await Promise.all([
@@ -84,12 +86,19 @@ export default function Dictionary() {
     const nextPhrase = phrase.trim()
     if (!nextPhrase) return
 
-    await createDictionaryEntry({
+    setSaveError('')
+    const created = await createDictionaryEntry({
       phrase: nextPhrase,
-      aliases: aliases.split(/[,\n]/).map((item) => item.trim()).filter(Boolean),
+      aliases: splitDictionaryAliases(aliases),
       source: 'manual',
       status: 'active',
     })
+
+    if (!created) {
+      setSaveError('保存失败，请检查词条内容')
+      return
+    }
+
     setPhrase('')
     setAliases('')
     await refreshDictionary()
@@ -120,17 +129,17 @@ export default function Dictionary() {
 
   return (
     <Box sx={{ ...pageSx, maxWidth: 920, display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, mb: 2 }}>
+      <Box sx={{ mb: 2 }}>
         <Typography sx={pageTitleSx}>词典</Typography>
-        <Button variant="contained" onClick={handleCreateEntry} disabled={!phrase.trim()}>新增词条</Button>
       </Box>
 
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 1.5, mb: 2 }}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr auto' }, gap: 1.5, mb: 2, alignItems: 'start' }}>
         <TextField
           size="small"
           label="正确写法"
           value={phrase}
           onChange={(event) => setPhrase(event.target.value)}
+          helperText={!phrase.trim() ? '填写正确写法后可保存' : ' '}
         />
         <TextField
           size="small"
@@ -139,7 +148,21 @@ export default function Dictionary() {
           value={aliases}
           onChange={(event) => setAliases(event.target.value)}
         />
+        <Button
+          variant="contained"
+          onClick={handleCreateEntry}
+          disabled={!phrase.trim()}
+          sx={{ minWidth: 96, height: 40 }}
+        >
+          保存词条
+        </Button>
       </Box>
+
+      {saveError ? (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {saveError}
+        </Alert>
+      ) : null}
 
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 2 }}>
         {filters.map((item) => (

@@ -764,6 +764,9 @@ test('P1 词典页面接入导航和主进程 IPC', async () => {
   assert.match(dictionaryPage, /手动添加/);
   assert.match(dictionaryPage, /候选/);
   assert.match(dictionaryPage, /启用/);
+  assert.match(dictionaryPage, /保存词条/);
+  assert.match(dictionaryPage, /填写正确写法后可保存/);
+  assert.doesNotMatch(dictionaryPage, />新增词条</);
   assert.match(dictionaryStore, /dictionary:list/);
   assert.match(dictionaryStore, /dictionary:create/);
   assert.match(dictionaryStore, /dictionary:update/);
