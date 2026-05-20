@@ -22,6 +22,12 @@ const CANCELABLE_STATUSES = new Set<VoiceStatus>(['connecting', 'recording', 'st
 
 type VoiceSessionListener = (session: VoiceSession) => void
 
+type PreparedRecordingStart = {
+  parameters: Record<string, unknown>
+  socket: WebSocket
+  stream: MediaStream
+}
+
 let session: VoiceSession = initialVoiceSession
 let ws: WebSocket | null = null
 let mediaRecorder: MediaRecorder | null = null
@@ -115,20 +121,13 @@ async function startRecordingFromIntent(intent: ShortcutIntent) {
       setSession({ ...session, mode: task.mode })
     }
 
-    await ensureVoiceServerReady()
-    if (!isSessionActive(audioId)) return
-    const parameters = await getStartAudioParameters(task.mode, task.selectedText)
-    if (!isSessionActive(audioId)) return
-    const socket = await ensureOpenWebSocket()
+    const prepared = await prepareRecordingStart(task)
     if (!isSessionActive(audioId)) {
-      closeWebSocketSilently()
+      cleanupPreparedStart(prepared)
       return
     }
-    const stream = await getAudioStream()
-    if (!isSessionActive(audioId)) {
-      stream.getTracks().forEach((track) => track.stop())
-      return
-    }
+
+    const { parameters, socket, stream } = prepared
     activeStream = stream
     startAudioLevelMonitoring(stream)
     mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' })
@@ -164,6 +163,43 @@ async function startRecordingFromIntent(intent: ShortcutIntent) {
     activeTask = null
     failSession(normalizeVoiceError(error, 'recording_start_failed'))
   }
+}
+
+async function prepareRecordingStart(task: VoiceTask): Promise<PreparedRecordingStart> {
+  let pendingStream: MediaStream | null = null
+  let shouldStopPendingStream = false
+
+  try {
+    const readyPromise = ensureVoiceServerReady()
+    const parametersPromise = getStartAudioParameters(task.mode, task.selectedText)
+    const socketPromise = ensureOpenWebSocket()
+    const streamPromise = getAudioStream().then((stream) => {
+      pendingStream = stream
+      if (shouldStopPendingStream) {
+        stream.getTracks().forEach((track) => track.stop())
+      }
+      return stream
+    })
+
+    const [parameters, socket, stream] = await Promise.all([
+      parametersPromise,
+      socketPromise,
+      streamPromise,
+      readyPromise,
+    ]).then(([parameters, socket, stream]) => [parameters, socket, stream] as const)
+
+    return { parameters, socket, stream }
+  } catch (error) {
+    shouldStopPendingStream = true
+    stopStreamTracks(pendingStream as MediaStream | null)
+    closeWebSocketSilently()
+    throw error
+  }
+}
+
+function cleanupPreparedStart(prepared: PreparedRecordingStart) {
+  stopStreamTracks(prepared.stream)
+  closeWebSocketSilently()
 }
 
 async function getStartAudioParameters(mode: VoiceMode, selectedText = ''): Promise<Record<string, unknown>> {
@@ -553,8 +589,13 @@ async function restoreBackgroundAudio() {
 }
 
 function cleanupStream() {
-  activeStream?.getTracks().forEach((track) => track.stop())
+  stopStreamTracks(activeStream)
   activeStream = null
+}
+
+function stopStreamTracks(stream: MediaStream | null) {
+  if (!stream) return
+  stream.getTracks().forEach((track) => track.stop())
 }
 
 function cleanupAudioLevelMonitoring() {

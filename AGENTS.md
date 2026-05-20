@@ -55,8 +55,10 @@
 - 三种模式只要粘贴或替换失败，都必须把最终结果展示到悬浮卡片，不能让用户丢失结果。
 - 如果同一轮键态里同时存在 `Space` 和 `RightShift`，优先按翻译意图处理，避免自由提问抢占翻译。
 - `focused-context:get-selection-snapshot` 使用 Windows UI Automation 读取 confirmed 选区；`focused-context:get-selected-text` 的剪贴板读取只保留为旧兼容能力，必须尽量恢复原剪贴板。
+- 普通听写和语音翻译启动前不得读取 UIA 选区；只有 `Right Alt + Space` 自由提问需要读取选区作为上下文。
 - 自由提问未来如需回答实时问题，必须在后端增加意图分类和工具路由；不要只靠 prompt 假装具备联网、天气或网页检索能力。
 - 翻译录音启动时，renderer 必须从本地设置读取 `translationTargetLanguage`，并通过 WebSocket `start_audio.parameters.output_language` 传给后端；当前支持 `en` 和 `ja`，语言集合以共享翻译目标语言元数据为准。
+- 录音启动时可以并行准备后端 ready、设置和词典、WebSocket、麦克风；但 `start_audio` 只能在 `/ready` 成功和所有启动资源准备完成后发送，ready 失败或取消时必须清理已打开的麦克风和 WebSocket。
 - 长按 `Right Alt` 的快捷键提示也通过 `floating-panel` IPC 和独立悬浮面板展示；提示优先级低于录音、转写、完成、取消和错误状态。
 - 悬浮胶囊和悬浮面板不要依赖本机固定坐标，应基于当前显示器 `workArea` 计算并限制在屏幕内。
 - WebSocket 语音流默认输入来自 `audio/webm;codecs=opus`；后端不能把未知音频头直接当 `.wav`，非 wav 输入必须先通过 `ffmpeg` 转码再喂 ASR。

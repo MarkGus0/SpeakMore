@@ -19,6 +19,13 @@ export type VoiceTask = {
 
 type SelectionSnapshotReader = () => Promise<FocusedSelectionSnapshot>
 
+const NO_SELECTION_SNAPSHOT: FocusedSelectionSnapshot = {
+  selectedText: '',
+  source: 'none',
+  confidence: 'none',
+  focusInfo: null,
+}
+
 function createTask(
   mode: VoiceMode,
   snapshot: FocusedSelectionSnapshot,
@@ -48,18 +55,18 @@ export async function resolveVoiceTask(
   intent: ShortcutIntent,
   readSelectionSnapshot: SelectionSnapshotReader = getFocusedSelectionSnapshot,
 ): Promise<VoiceTask> {
+  if (intent === 'TranslateShortcut') {
+    return createTask('Translate', NO_SELECTION_SNAPSHOT, 'paste')
+  }
+
+  if (intent !== 'AskShortcut') {
+    return createTask('Dictate', NO_SELECTION_SNAPSHOT, 'paste')
+  }
+
   const snapshot = await readSelectionSnapshot()
   const hasConfirmedSelection = snapshot.source === 'uia'
     && snapshot.confidence === 'confirmed'
     && Boolean(snapshot.selectedText)
 
-  if (intent === 'AskShortcut') {
-    return createTask('Ask', hasConfirmedSelection ? snapshot : createNoSelectionSnapshot(snapshot), 'floating-panel')
-  }
-
-  if (intent === 'TranslateShortcut') {
-    return createTask('Translate', createNoSelectionSnapshot(snapshot), 'paste')
-  }
-
-  return createTask('Dictate', createNoSelectionSnapshot(snapshot), 'paste')
+  return createTask('Ask', hasConfirmedSelection ? snapshot : createNoSelectionSnapshot(snapshot), 'floating-panel')
 }
