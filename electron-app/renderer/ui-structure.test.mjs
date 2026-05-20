@@ -366,6 +366,12 @@ test('语音输入 IPC 会调用本地后端并把结果粘贴到焦点应用', 
   assert.match(main, /System\.Windows\.Forms\.SendKeys/);
 });
 
+test('自动粘贴子进程非零退出码不会被当作粘贴成功', async () => {
+  const main = await readProjectFile('../main.js');
+
+  assert.match(main, /ps\.on\(['"]exit['"],\s*\(code\)\s*=>\s*resolve\(code\s*===\s*0\)\)/);
+});
+
 test('audio:ai-voice-flow 会补齐逆向请求字段并保留关键返回字段', async () => {
   const main = await readProjectFile('../main.js');
 

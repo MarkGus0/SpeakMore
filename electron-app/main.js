@@ -1593,7 +1593,7 @@ function registerIpcHandlers() {
         },
       });
       const pasteSucceeded = await new Promise((resolve) => {
-        ps.on('exit', () => resolve(true));
+        ps.on('exit', (code) => resolve(code === 0));
         ps.on('error', () => resolve(false));
       });
       if (pasteSucceeded && pastedText.trim()) {
