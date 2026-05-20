@@ -313,7 +313,10 @@ function failSession(error: VoiceError) {
 
 async function pasteResultOrShowPanel(resultText: string) {
   try {
-    await ipcClient.invoke('keyboard:type-transcript', resultText)
+    const result = await ipcClient.invoke('keyboard:type-transcript', resultText)
+    if (result === false || (result && typeof result === 'object' && (result as { success?: unknown }).success === false)) {
+      showFreeAskResult(resultText)
+    }
   } catch {
     showFreeAskResult(resultText)
   }

@@ -53,6 +53,8 @@
 - `Right Alt + Space` 永远是自由提问；有 UIA 选区时只把选区作为 `selected_text` 上下文，结果永远展示在悬浮卡片，不自动替换。
 - `Right Alt + Right Shift` 是显式语音翻译；不因有选区而直接翻译选区，必须录音，完成后走普通粘贴链路把翻译结果贴到当前光标位置。
 - 三种模式只要粘贴或替换失败，都必须把最终结果展示到悬浮卡片，不能让用户丢失结果。
+- 自动粘贴前必须先确认当前存在可信文本输入目标；找不到光标或输入目标时，不得静默写剪贴板和发送 `Ctrl+V`，必须直接展示悬浮卡片。
+- 自动粘贴成功后必须恢复用户原剪贴板内容，不能让 SpeakMore 的结果长期占用系统剪贴板。
 - 如果同一轮键态里同时存在 `Space` 和 `RightShift`，优先按翻译意图处理，避免自由提问抢占翻译。
 - `focused-context:get-selection-snapshot` 使用 Windows UI Automation 读取 confirmed 选区；`focused-context:get-selected-text` 的剪贴板读取只保留为旧兼容能力，必须尽量恢复原剪贴板。
 - 普通听写和语音翻译启动前不得读取 UIA 选区；只有 `Right Alt + Space` 自由提问需要读取选区作为上下文。

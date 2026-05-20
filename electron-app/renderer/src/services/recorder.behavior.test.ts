@@ -41,6 +41,7 @@ function createTestEnvironment(options: {
   focusStillActive?: boolean
   fetchResponseText?: string
   pasteShouldFail?: boolean
+  pasteResult?: unknown
   translationTargetLanguage?: string
 } = {}) {
   const originalWindow = globalThis.window
@@ -239,6 +240,7 @@ function createTestEnvironment(options: {
       }
       if (channel === 'keyboard:type-transcript') {
         if (options.pasteShouldFail) throw new Error('paste boom')
+        if (options.pasteResult !== undefined) return options.pasteResult as never
         return { success: true } as never
       }
       return {} as never
@@ -1007,12 +1009,94 @@ test('普通听写粘贴失败时展示悬浮卡片', async () => {
   }
 })
 
+test('普通听写无可粘贴目标时展示悬浮卡片', async () => {
+  const env = createTestEnvironment({
+    pasteResult: { success: false, reason: 'focused_text_target_unavailable' },
+  })
+  let recorder: Awaited<ReturnType<typeof loadRecorderModule>> | null = null
+
+  try {
+    recorder = await loadRecorderModule('dictate-no-text-target-fallback')
+    await recorder.startRecording('Dictate')
+    recorder.stopRecording()
+
+    const socket = env.sockets[env.sockets.length - 1]
+    socket.emitJson({
+      K: 'refine_completed',
+      V: {
+        audio_id: 'audio-1',
+        refined_text: 'hello refined',
+        refine_text: 'hello refined',
+      },
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const resultPanelCall = env.sendCalls.find((call) => {
+      const payload = call.payload as { type?: string } | undefined
+      return call.channel === 'floating-panel' && payload?.type === 'free-ask-result'
+    })
+
+    assert.equal(recorder.getVoiceSession().status, 'completed')
+    assert.deepEqual(resultPanelCall?.payload, {
+      visible: true,
+      type: 'free-ask-result',
+      text: 'hello refined',
+    })
+  } finally {
+    recorder?.disposeRecorder()
+    env.restore()
+  }
+})
+
 test('RightAlt + RightShift 语音翻译粘贴失败时展示悬浮卡片', async () => {
   const env = createTestEnvironment({ pasteShouldFail: true })
   let recorder: Awaited<ReturnType<typeof loadRecorderModule>> | null = null
 
   try {
     recorder = await loadRecorderModule('voice-translate-paste-fallback')
+    await recorder.toggleRecordingByShortcut('TranslateShortcut')
+    recorder.stopRecording()
+
+    const socket = env.sockets[env.sockets.length - 1]
+    socket.emitJson({
+      K: 'refine_completed',
+      V: {
+        audio_id: 'audio-1',
+        refined_text: 'translated voice',
+        refine_text: 'translated voice',
+      },
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const resultPanelCall = env.sendCalls.find((call) => {
+      const payload = call.payload as { type?: string } | undefined
+      return call.channel === 'floating-panel' && payload?.type === 'free-ask-result'
+    })
+
+    assert.equal(recorder.getVoiceSession().status, 'completed')
+    assert.deepEqual(resultPanelCall?.payload, {
+      visible: true,
+      type: 'free-ask-result',
+      text: 'translated voice',
+    })
+  } finally {
+    recorder?.disposeRecorder()
+    env.restore()
+  }
+})
+
+test('RightAlt + RightShift 无可粘贴目标时展示悬浮卡片', async () => {
+  const env = createTestEnvironment({
+    pasteResult: { success: false, reason: 'focused_text_target_unavailable' },
+  })
+  let recorder: Awaited<ReturnType<typeof loadRecorderModule>> | null = null
+
+  try {
+    recorder = await loadRecorderModule('voice-translate-no-text-target-fallback')
     await recorder.toggleRecordingByShortcut('TranslateShortcut')
     recorder.stopRecording()
 

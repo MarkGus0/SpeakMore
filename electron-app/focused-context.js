@@ -235,6 +235,124 @@ if ([string]::IsNullOrWhiteSpace($selectedText)) {
 [PSCustomObject]@{ success = $true; text = $selectedText; source = "uia"; confidence = "confirmed" } | ConvertTo-Json -Compress
 `;
 
+const FOCUSED_TEXT_TARGET_SCRIPT = `
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+
+$element = [System.Windows.Automation.AutomationElement]::FocusedElement
+if ($null -eq $element) {
+  [PSCustomObject]@{
+    success = $false
+    source = "none"
+    confidence = "none"
+    reason = "no_focused_element"
+    value_pattern = $false
+    text_pattern = $false
+    is_read_only = $false
+    control_type = ""
+  } | ConvertTo-Json -Compress
+  exit 0
+}
+
+$controlType = ""
+try { $controlType = $element.Current.ControlType.ProgrammaticName } catch {}
+
+$valuePattern = $null
+try { $valuePattern = $element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern) } catch {}
+if ($null -ne $valuePattern) {
+  if ($valuePattern.Current.IsReadOnly) {
+    [PSCustomObject]@{
+      success = $false
+      source = "none"
+      confidence = "none"
+      reason = "read_only"
+      value_pattern = $true
+      text_pattern = $false
+      is_read_only = $true
+      control_type = $controlType
+    } | ConvertTo-Json -Compress
+    exit 0
+  }
+
+  [PSCustomObject]@{
+    success = $true
+    source = "uia"
+    confidence = "confirmed"
+    reason = "value_pattern"
+    value_pattern = $true
+    text_pattern = $false
+    is_read_only = $false
+    control_type = $controlType
+  } | ConvertTo-Json -Compress
+  exit 0
+}
+
+$textPattern = $null
+try { $textPattern = $element.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern) } catch {}
+if ($null -ne $textPattern -and ($controlType -eq "ControlType.Edit" -or $controlType -eq "ControlType.ComboBox")) {
+  [PSCustomObject]@{
+    success = $true
+    source = "uia"
+    confidence = "confirmed"
+    reason = "text_pattern"
+    value_pattern = $false
+    text_pattern = $true
+    is_read_only = $false
+    control_type = $controlType
+  } | ConvertTo-Json -Compress
+  exit 0
+}
+
+[PSCustomObject]@{
+  success = $false
+  source = "none"
+  confidence = "none"
+  reason = "text_target_unavailable"
+  value_pattern = $false
+  text_pattern = $false
+  is_read_only = $false
+  control_type = $controlType
+} | ConvertTo-Json -Compress
+`;
+
+function normalizeFocusedTextTargetResult(value) {
+  if (!value || typeof value !== 'object') {
+    return {
+      success: false,
+      source: 'none',
+      confidence: 'none',
+      reason: 'invalid_result',
+      valuePattern: false,
+      textPattern: false,
+      isReadOnly: false,
+      controlType: '',
+    };
+  }
+
+  const source = typeof value.source === 'string' ? value.source : 'none';
+  const confidence = typeof value.confidence === 'string' ? value.confidence : 'none';
+  const reason = typeof value.reason === 'string' ? value.reason : 'text_target_unavailable';
+  const valuePattern = Boolean(value.value_pattern ?? value.valuePattern);
+  const textPattern = Boolean(value.text_pattern ?? value.textPattern);
+  const isReadOnly = Boolean(value.is_read_only ?? value.isReadOnly);
+  const controlType = typeof value.control_type === 'string'
+    ? value.control_type
+    : typeof value.controlType === 'string'
+      ? value.controlType
+      : '';
+
+  return {
+    success: Boolean(value.success) && source === 'uia' && confidence === 'confirmed' && !isReadOnly && (valuePattern || textPattern),
+    source: Boolean(value.success) ? source : 'none',
+    confidence: Boolean(value.success) ? confidence : 'none',
+    reason,
+    valuePattern,
+    textPattern,
+    isReadOnly,
+    controlType,
+  };
+}
+
 async function readFocusedInfo({
   readWindowInfo = powershellJsonCommand(FOCUSED_WINDOW_SCRIPT),
 } = {}) {
@@ -386,6 +504,26 @@ async function readSelectedTextByUia({
   }
 }
 
+async function readFocusedTextTarget({
+  readTextTarget = powershellJsonCommand(FOCUSED_TEXT_TARGET_SCRIPT),
+} = {}) {
+  try {
+    return normalizeFocusedTextTargetResult(await readTextTarget());
+  } catch (error) {
+    return {
+      success: false,
+      source: 'none',
+      confidence: 'none',
+      reason: 'text_target_failed',
+      valuePattern: false,
+      textPattern: false,
+      isReadOnly: false,
+      controlType: '',
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 async function readSelectionSnapshot({
   clipboard,
   readFocusedInfo: readFocus = readFocusedInfo,
@@ -417,10 +555,14 @@ async function readSelectionSnapshot({
 module.exports = {
   isSameFocusedContext,
   normalizeFocusedInfo,
+  normalizeFocusedTextTargetResult,
   normalizeUiaSelectionResult,
   readSelectedTextByClipboard,
   readSelectedTextByUia,
+  readFocusedTextTarget,
   readFocusedInfo,
   readSelectionSnapshot,
+  createClipboardSnapshot,
+  restoreClipboardSnapshot,
   normalizeSelectedTextResult,
 };
