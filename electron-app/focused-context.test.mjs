@@ -2,9 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   isSameFocusedContext,
+  normalizeFocusedTextTargetResult,
   normalizeSelectedTextResult,
   readSelectionSnapshot,
   readSelectedTextByClipboard,
+  readFocusedTextTarget,
   readSelectedTextByUia,
 } from './focused-context.js';
 
@@ -57,6 +59,44 @@ test('readSelectedTextByClipboard 读取选区后恢复原剪贴板文本', asyn
     source: 'clipboard',
   });
   assert.equal(clipboard.current(), 'old clipboard');
+});
+
+test('normalizeFocusedTextTargetResult 只接受可输入文本目标', () => {
+  assert.equal(normalizeFocusedTextTargetResult({
+    success: true,
+    source: 'uia',
+    confidence: 'confirmed',
+    value_pattern: true,
+    text_pattern: false,
+    is_read_only: false,
+    control_type: 'ControlType.Edit',
+  }).success, true);
+
+  assert.equal(normalizeFocusedTextTargetResult({
+    success: false,
+    source: 'none',
+    confidence: 'none',
+    reason: 'no_focused_element',
+  }).success, false);
+
+  assert.equal(normalizeFocusedTextTargetResult({
+    success: true,
+    source: 'uia',
+    confidence: 'confirmed',
+    value_pattern: true,
+    is_read_only: true,
+  }).success, false);
+});
+
+test('readFocusedTextTarget 在 UIA 探测失败时返回不可粘贴目标', async () => {
+  const result = await readFocusedTextTarget({
+    readTextTarget: async () => {
+      throw new Error('uia boom');
+    },
+  });
+
+  assert.equal(result.success, false);
+  assert.equal(result.reason, 'text_target_failed');
 });
 
 test('readSelectedTextByClipboard 会恢复 HTML、RTF 和图片剪贴板内容', async () => {

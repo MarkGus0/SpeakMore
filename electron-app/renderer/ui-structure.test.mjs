@@ -410,7 +410,7 @@ test('recorder 在录音期间分析真实麦克风音量并同步 inputLevel', 
   assert.match(recorder, /audioContext\.close/);
 });
 
-test('WebSocket 录音入口会先等待主进程确认语音后端 ready', async () => {
+test('WebSocket 录音入口会等待主进程确认语音后端 ready', async () => {
   const main = await readProjectFile('../main.js');
   const recorder = await readProjectFile('src/services/recorder.ts');
   const diagnostics = await readProjectFile('src/services/diagnostics.ts');
@@ -425,7 +425,8 @@ test('WebSocket 录音入口会先等待主进程确认语音后端 ready', asyn
   assert.match(voiceServer, /VOICE_SERVER_READY_URL/);
   assert.match(voiceServer, /VOICE_SERVER_WS_URL/);
   assert.doesNotMatch(recorder, /ws:\/\/localhost:8000\/ws\/rt_voice_flow/);
-  assert.match(recorder, /await\s+ensureVoiceServerReady\(\)[\s\S]*ensureOpenWebSocket\(\)/);
+  assert.match(recorder, /const\s+readyPromise\s*=\s*ensureVoiceServerReady\(\)/);
+  assert.match(recorder, /Promise\.all\(\[[\s\S]*readyPromise[\s\S]*\]\)/);
 });
 
 test('Electron 不再负责拉起或关闭语音后端进程', async () => {

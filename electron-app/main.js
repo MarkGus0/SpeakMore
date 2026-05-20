@@ -19,10 +19,13 @@ const { spawn } = require('child_process');
 const TRANSLATION_TARGET_LANGUAGES = require('../shared/translation-target-languages.json');
 const { createRightAltRelay } = require('./right-alt-relay');
 const {
+  createClipboardSnapshot,
   isSameFocusedContext,
   readFocusedInfo,
+  readFocusedTextTarget,
   readSelectedTextByClipboard,
   readSelectionSnapshot,
+  restoreClipboardSnapshot,
 } = require('./focused-context');
 const { resolveBottomCenterBounds } = require('./floating-window-layout');
 const {
@@ -1566,31 +1569,52 @@ function registerIpcHandlers() {
   ipcMain.handle('keyboard:type-transcript', async (_, text) => {
     const pastedText = String(text || '');
     if (!pastedText) return false;
-    clipboard.writeText(pastedText);
-    const ps = spawn('powershell.exe', [
-      '-NoProfile', '-Command',
-      'Add-Type -AssemblyName System.Windows.Forms; Start-Sleep -Milliseconds 100; [System.Windows.Forms.SendKeys]::SendWait("^v")',
-    ], {
-      windowsHide: true,
-      env: {
-        SystemRoot: process.env.SystemRoot,
-        PATH: process.env.PATH,
-        TEMP: process.env.TEMP,
-        TMP: process.env.TMP,
-      },
-    });
-    const pasteSucceeded = await new Promise((resolve) => {
-      ps.on('exit', () => resolve(true));
-      ps.on('error', () => resolve(false));
-    });
-    if (pasteSucceeded && pastedText.trim()) {
-      await textObservationManager.start({
-        audioId: crypto.randomUUID(),
-        pastedText,
-        focusInfo: readFocusedInfo(),
-      });
+
+    const textTarget = await readFocusedTextTarget();
+    if (!textTarget.success) {
+      return { success: false, reason: textTarget.reason || 'focused_text_target_unavailable' };
     }
-    return pasteSucceeded;
+
+    const previousClipboard = createClipboardSnapshot(clipboard);
+    let restoreFailed = false;
+
+    try {
+      clipboard.writeText(pastedText);
+      const ps = spawn('powershell.exe', [
+        '-NoProfile', '-Command',
+        'Add-Type -AssemblyName System.Windows.Forms; Start-Sleep -Milliseconds 100; [System.Windows.Forms.SendKeys]::SendWait("^v")',
+      ], {
+        windowsHide: true,
+        env: {
+          SystemRoot: process.env.SystemRoot,
+          PATH: process.env.PATH,
+          TEMP: process.env.TEMP,
+          TMP: process.env.TMP,
+        },
+      });
+      const pasteSucceeded = await new Promise((resolve) => {
+        ps.on('exit', () => resolve(true));
+        ps.on('error', () => resolve(false));
+      });
+      if (pasteSucceeded && pastedText.trim()) {
+        await textObservationManager.start({
+          audioId: crypto.randomUUID(),
+          pastedText,
+          focusInfo: await readFocusedInfo(),
+        });
+      }
+      return { success: pasteSucceeded };
+    } finally {
+      try {
+        restoreClipboardSnapshot(clipboard, previousClipboard);
+      } catch {
+        restoreFailed = true;
+      }
+
+      if (restoreFailed) {
+        console.warn('自动粘贴后恢复剪贴板失败');
+      }
+    }
   });
   ipcMain.handle('keyboard:set-watcher-interval', () => true);
   ipcMain.handle('keyboard-input:reload-keyboard-shortcuts', () => true);

@@ -25,6 +25,18 @@ function reader(snapshot: FocusedSelectionSnapshot) {
   return async () => snapshot
 }
 
+function countingReader(snapshot: FocusedSelectionSnapshot) {
+  let calls = 0
+  const read = async () => {
+    calls += 1
+    return snapshot
+  }
+  return {
+    read,
+    getCalls: () => calls,
+  }
+}
+
 function assertTask(actual: VoiceTask, expected: VoiceTask) {
   assert.deepEqual(actual, expected)
 }
@@ -55,6 +67,27 @@ test('普通听写意图有 UIA 选区时仍保持 Dictate 录音粘贴', async 
     focusInfo,
   }))
 
+  assertTask(task, {
+    mode: 'Dictate',
+    selectedText: '',
+    source: 'none',
+    confidence: 'none',
+    focusInfo: null,
+    delivery: 'paste',
+  })
+})
+
+test('普通听写意图不读取 UIA 选区，避免连接前无用等待', async () => {
+  const source = countingReader({
+    selectedText: '你好',
+    source: 'uia',
+    confidence: 'confirmed',
+    focusInfo,
+  })
+
+  const task = await resolveVoiceTask('DictateShortcut', source.read)
+
+  assert.equal(source.getCalls(), 0)
   assertTask(task, {
     mode: 'Dictate',
     selectedText: '',
@@ -127,6 +160,27 @@ test('翻译意图有选区时仍录音并把翻译结果粘贴到光标位置',
     focusInfo,
   }))
 
+  assertTask(task, {
+    mode: 'Translate',
+    selectedText: '',
+    source: 'none',
+    confidence: 'none',
+    focusInfo: null,
+    delivery: 'paste',
+  })
+})
+
+test('语音翻译意图不读取 UIA 选区，避免连接前无用等待', async () => {
+  const source = countingReader({
+    selectedText: '你好',
+    source: 'uia',
+    confidence: 'confirmed',
+    focusInfo,
+  })
+
+  const task = await resolveVoiceTask('TranslateShortcut', source.read)
+
+  assert.equal(source.getCalls(), 0)
   assertTask(task, {
     mode: 'Translate',
     selectedText: '',

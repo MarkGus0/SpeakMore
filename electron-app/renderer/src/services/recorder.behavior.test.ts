@@ -33,11 +33,15 @@ function createDeferred<T>(): Deferred<T> {
 
 function createTestEnvironment(options: {
   userMediaPromise?: Promise<MediaStream>
+  readyPromise?: Promise<{ success?: boolean; detail?: string; status?: string }>
+  settingsPromise?: Promise<unknown>
+  dictionaryTermsPromise?: Promise<unknown>
   selectedTextResult?: unknown
   selectionSnapshot?: unknown
   focusStillActive?: boolean
   fetchResponseText?: string
   pasteShouldFail?: boolean
+  pasteResult?: unknown
   translationTargetLanguage?: string
 } = {}) {
   const originalWindow = globalThis.window
@@ -59,6 +63,7 @@ function createTestEnvironment(options: {
   const clearedIntervals: number[] = []
   let restoreCalls = 0
   let trackStops = 0
+  let userMediaCalls = 0
   let nextIntervalId = 1
   let analyserSample = 0.04
 
@@ -168,8 +173,8 @@ function createTestEnvironment(options: {
   windowLike.ipcRenderer = {
     invoke: async (channel: string, payload?: unknown) => {
       invokeCalls.push({ channel, payload })
-      if (channel === 'audio:ensure-voice-server') return { success: true } as never
-      if (channel === 'audio:check-voice-server-ready') return { success: true } as never
+      if (channel === 'audio:ensure-voice-server') return (options.readyPromise ?? Promise.resolve({ success: true })) as never
+      if (channel === 'audio:check-voice-server-ready') return (options.readyPromise ?? Promise.resolve({ success: true })) as never
       if (channel === 'audio:mute-background-sessions') return { success: true } as never
       if (channel === 'audio:restore-background-sessions') {
         restoreCalls += 1
@@ -209,7 +214,7 @@ function createTestEnvironment(options: {
         return { success: true, same: options.focusStillActive !== false } as never
       }
       if (channel === 'settings:get') {
-        return {
+        const defaultSettings = {
           selectedAudioDeviceId: 'default',
           translationTargetLanguage: options.translationTargetLanguage ?? 'en',
           showFloatingBar: true,
@@ -218,11 +223,24 @@ function createTestEnvironment(options: {
             providerId: 'deepseek',
             apiKeys: { deepseek: testLlmConfig.api_key },
             models: { deepseek: testLlmConfig.model },
+            providers: [{
+              id: 'deepseek',
+              label: 'DeepSeek',
+              baseUrl: testLlmConfig.base_url,
+              defaultModel: testLlmConfig.model,
+              allowBaseUrlEdit: false,
+              authType: 'bearer',
+            }],
           },
-        } as never
+        }
+        return (options.settingsPromise ?? Promise.resolve(defaultSettings)) as never
+      }
+      if (channel === 'dictionary:prompt-terms') {
+        return (options.dictionaryTermsPromise ?? Promise.resolve([])) as never
       }
       if (channel === 'keyboard:type-transcript') {
         if (options.pasteShouldFail) throw new Error('paste boom')
+        if (options.pasteResult !== undefined) return options.pasteResult as never
         return { success: true } as never
       }
       return {} as never
@@ -240,7 +258,14 @@ function createTestEnvironment(options: {
   })
   Object.defineProperty(globalThis, 'navigator', {
     configurable: true,
-    value: { mediaDevices: { getUserMedia: () => userMediaPromise } },
+    value: {
+      mediaDevices: {
+        getUserMedia: () => {
+          userMediaCalls += 1
+          return userMediaPromise
+        },
+      },
+    },
   })
   Object.defineProperty(globalThis, 'crypto', {
     configurable: true,
@@ -294,6 +319,7 @@ function createTestEnvironment(options: {
     sockets,
     getRestoreCalls: () => restoreCalls,
     getTrackStops: () => trackStops,
+    getUserMediaCalls: () => userMediaCalls,
     getClearedIntervals: () => clearedIntervals,
     runLevelTick(count = 1) {
       for (let index = 0; index < count; index += 1) {
@@ -457,8 +483,66 @@ test('startRecording 会先通过新 IPC 检查 ready，并连接集中定义的
     assert.ok(socket)
     assert.notEqual(readyCheckIndex, -1)
     assert.notEqual(settingsGetIndex, -1)
-    assert.ok(readyCheckIndex < settingsGetIndex)
     assert.match(socket.url, /\/ws\/rt_voice_flow\?v=[^&]+&t=[^&]+&m=0/)
+  } finally {
+    recorder?.disposeRecorder()
+    env.restore()
+  }
+})
+
+test('startRecording 并行准备 ready 和麦克风，减少 connecting 串行等待', async () => {
+  const ready = createDeferred<{ success?: boolean }>()
+  const env = createTestEnvironment({ readyPromise: ready.promise })
+  let recorder: Awaited<ReturnType<typeof loadRecorderModule>> | null = null
+
+  try {
+    recorder = await loadRecorderModule('parallel-startup')
+    const pendingStart = recorder.startRecording('Dictate')
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    assert.equal(
+      env.invokeCalls.some((call) => call.channel === 'audio:check-voice-server-ready'),
+      true,
+    )
+    assert.equal(env.sockets.length > 0, true)
+    assert.equal(env.getUserMediaCalls() > 0, true)
+    assert.equal(
+      env.sentPayloads
+        .filter((payload): payload is string => typeof payload === 'string')
+        .map((payload) => JSON.parse(payload))
+        .some((message) => message.type === 'start_audio'),
+      false,
+    )
+
+    ready.resolve({ success: true })
+    await pendingStart
+
+    assert.equal(recorder.getVoiceSession().status, 'recording')
+  } finally {
+    ready.resolve({ success: true })
+    recorder?.disposeRecorder()
+    env.restore()
+  }
+})
+
+test('ready 失败时不发送 start_audio，并清理已打开的麦克风', async () => {
+  const env = createTestEnvironment({
+    readyPromise: Promise.resolve({ success: false, detail: 'ASR 模型预热中' }),
+  })
+  let recorder: Awaited<ReturnType<typeof loadRecorderModule>> | null = null
+
+  try {
+    recorder = await loadRecorderModule('ready-failed-cleanup')
+    await recorder.startRecording('Dictate')
+
+    const sentMessages = env.sentPayloads
+      .filter((payload): payload is string => typeof payload === 'string')
+      .map((payload) => JSON.parse(payload))
+
+    assert.equal(sentMessages.some((message) => message.type === 'start_audio'), false)
+    assert.equal(env.getTrackStops(), 1)
+    assert.equal(recorder.getVoiceSession().status, 'error')
   } finally {
     recorder?.disposeRecorder()
     env.restore()
@@ -925,12 +1009,94 @@ test('普通听写粘贴失败时展示悬浮卡片', async () => {
   }
 })
 
+test('普通听写无可粘贴目标时展示悬浮卡片', async () => {
+  const env = createTestEnvironment({
+    pasteResult: { success: false, reason: 'focused_text_target_unavailable' },
+  })
+  let recorder: Awaited<ReturnType<typeof loadRecorderModule>> | null = null
+
+  try {
+    recorder = await loadRecorderModule('dictate-no-text-target-fallback')
+    await recorder.startRecording('Dictate')
+    recorder.stopRecording()
+
+    const socket = env.sockets[env.sockets.length - 1]
+    socket.emitJson({
+      K: 'refine_completed',
+      V: {
+        audio_id: 'audio-1',
+        refined_text: 'hello refined',
+        refine_text: 'hello refined',
+      },
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const resultPanelCall = env.sendCalls.find((call) => {
+      const payload = call.payload as { type?: string } | undefined
+      return call.channel === 'floating-panel' && payload?.type === 'free-ask-result'
+    })
+
+    assert.equal(recorder.getVoiceSession().status, 'completed')
+    assert.deepEqual(resultPanelCall?.payload, {
+      visible: true,
+      type: 'free-ask-result',
+      text: 'hello refined',
+    })
+  } finally {
+    recorder?.disposeRecorder()
+    env.restore()
+  }
+})
+
 test('RightAlt + RightShift 语音翻译粘贴失败时展示悬浮卡片', async () => {
   const env = createTestEnvironment({ pasteShouldFail: true })
   let recorder: Awaited<ReturnType<typeof loadRecorderModule>> | null = null
 
   try {
     recorder = await loadRecorderModule('voice-translate-paste-fallback')
+    await recorder.toggleRecordingByShortcut('TranslateShortcut')
+    recorder.stopRecording()
+
+    const socket = env.sockets[env.sockets.length - 1]
+    socket.emitJson({
+      K: 'refine_completed',
+      V: {
+        audio_id: 'audio-1',
+        refined_text: 'translated voice',
+        refine_text: 'translated voice',
+      },
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const resultPanelCall = env.sendCalls.find((call) => {
+      const payload = call.payload as { type?: string } | undefined
+      return call.channel === 'floating-panel' && payload?.type === 'free-ask-result'
+    })
+
+    assert.equal(recorder.getVoiceSession().status, 'completed')
+    assert.deepEqual(resultPanelCall?.payload, {
+      visible: true,
+      type: 'free-ask-result',
+      text: 'translated voice',
+    })
+  } finally {
+    recorder?.disposeRecorder()
+    env.restore()
+  }
+})
+
+test('RightAlt + RightShift 无可粘贴目标时展示悬浮卡片', async () => {
+  const env = createTestEnvironment({
+    pasteResult: { success: false, reason: 'focused_text_target_unavailable' },
+  })
+  let recorder: Awaited<ReturnType<typeof loadRecorderModule>> | null = null
+
+  try {
+    recorder = await loadRecorderModule('voice-translate-no-text-target-fallback')
     await recorder.toggleRecordingByShortcut('TranslateShortcut')
     recorder.stopRecording()
 
