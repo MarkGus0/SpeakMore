@@ -61,6 +61,11 @@ def create_paraformer_streaming_snapshot(cache_root: Path, snapshot_name: str = 
 
 
 class AsrConfigTest(unittest.TestCase):
+    def test_requirements_include_funasr_package_for_streaming_runtime(self):
+        requirements = (Path(__file__).parent / "requirements.txt").read_text(encoding="utf-8")
+
+        self.assertRegex(requirements, r"(?m)^funasr>=")
+
     def test_resolve_paraformer_streaming_model_source_uses_hf_cache_by_default(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             local_app_data = Path(temp_dir) / "LocalAppData"
