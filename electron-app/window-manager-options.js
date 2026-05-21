@@ -19,6 +19,7 @@ function buildMainWindowOptions({
       preload: preloadPath,
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: false,
       session,
       backgroundThrottling: false,
     },
@@ -48,6 +49,7 @@ function buildFloatingWindowOptions({
       preload: preloadPath,
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: false,
     },
   };
 }

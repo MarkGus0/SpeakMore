@@ -13,13 +13,19 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, Web
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
-from asr import preload_whisper_model, reload_whisper_model, transcribe_audio
+from asr import (
+    create_streaming_asr_session,
+    preload_asr_model,
+    reload_asr_model,
+    transcribe_audio,
+)
 from model_manager import (
-    DEFAULT_MODEL_ID,
+    FALLBACK_MODEL_ID,
     cancel_download_task,
     create_models_state,
     delete_model_files,
     find_cached_model_snapshot,
+    find_cached_model_snapshot_for_state,
     get_model_definition,
     start_download_task,
 )
@@ -140,6 +146,22 @@ def normalize_selected_text(payload: dict) -> str:
 
 def normalize_ws_object(value) -> dict:
     return value if isinstance(value, dict) else {}
+
+
+def get_pcm_streaming_sample_rate(parameters: dict) -> int:
+    audio_format = parameters.get("audio_format")
+    if not isinstance(audio_format, dict):
+        return 0
+    if audio_format.get("type") != "pcm_s16le":
+        return 0
+    try:
+        sample_rate = int(audio_format.get("sample_rate") or 16000)
+        channels = int(audio_format.get("channels") or 1)
+    except (TypeError, ValueError):
+        return 0
+    if channels != 1 or sample_rate <= 0:
+        return 0
+    return sample_rate
 
 
 def normalize_ws_text_message(raw_text: str) -> tuple[dict | None, dict | None]:
@@ -314,6 +336,8 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
     context = {}
     parameters = {}
     audio_chunks: list[bytes] = []
+    streaming_session = None
+    streaming_chunk_index = 0
 
     try:
         while True:
@@ -323,11 +347,39 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
                 continue
 
             if "bytes" in message and message["bytes"]:
-                audio_chunks.append(message["bytes"])
-                await websocket.send_json({
-                    "K": "received_audio_chunk_count",
-                    "V": {"count": len(audio_chunks), "audio_id": audio_id},
-                })
+                if streaming_session is not None:
+                    try:
+                        results = await asyncio.to_thread(streaming_session.append_pcm16, message["bytes"])
+                    except Exception as error:
+                        streaming_session = None
+                        audio_chunks = []
+                        await send_ws_error_message(
+                            websocket,
+                            "transcription_error",
+                            audio_id,
+                            str(error),
+                            "transcription_failed",
+                        )
+                        continue
+
+                    for result in results:
+                        streaming_chunk_index += 1
+                        if result.text:
+                            await send_ws_message(
+                                websocket,
+                                "transcription",
+                                {
+                                    "text": result.text,
+                                    "audio_id": audio_id,
+                                    "chunk_index": streaming_chunk_index,
+                                },
+                            )
+                else:
+                    audio_chunks.append(message["bytes"])
+                    await websocket.send_json({
+                        "K": "received_audio_chunk_count",
+                        "V": {"count": len(audio_chunks), "audio_id": audio_id},
+                    })
                 continue
 
             if "text" not in message or not message["text"]:
@@ -354,6 +406,14 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
                 context = normalize_ws_object(data.get("audio_context", {}))
                 parameters = normalize_ws_object(data.get("parameters", {}))
                 audio_chunks = []
+                streaming_session = None
+                streaming_chunk_index = 0
+                sample_rate = get_pcm_streaming_sample_rate(parameters)
+                if sample_rate:
+                    try:
+                        streaming_session = create_streaming_asr_session(sample_rate=sample_rate)
+                    except RuntimeError:
+                        streaming_session = None
 
                 await send_ws_message(websocket, "session_started", {"audio_id": audio_id})
                 await send_ws_message(
@@ -366,6 +426,72 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
 
             if msg_type == "end_audio":
                 await send_ws_message(websocket, "audio_session_ending", {"audio_id": audio_id})
+                if streaming_session is not None:
+                    current_streaming_session = streaming_session
+                    streaming_session = None
+                    try:
+                        final_result = await asyncio.to_thread(current_streaming_session.finalize)
+                        raw_text = final_result.text
+                    except Exception as error:
+                        await send_ws_error_message(
+                            websocket,
+                            "transcription_error",
+                            audio_id,
+                            str(error),
+                            "transcription_failed",
+                        )
+                        continue
+
+                    if raw_text:
+                        streaming_chunk_index += 1
+                        await send_ws_message(
+                            websocket,
+                            "transcription",
+                            {"text": raw_text, "audio_id": audio_id, "chunk_index": streaming_chunk_index},
+                        )
+                        try:
+                            refined = await refine_text(
+                                raw_text=raw_text,
+                                mode=mode,
+                                context=context,
+                                parameters=parameters,
+                            )
+                        except Exception as error:
+                            await send_ws_error_message(
+                                websocket,
+                                get_ws_refine_error_message_type(mode, parameters),
+                                audio_id,
+                                str(error),
+                                "audio_processing_failed",
+                            )
+                            continue
+
+                        await send_ws_message(
+                            websocket,
+                            get_ws_completion_message_type(mode, parameters),
+                            {
+                                "audio_id": audio_id,
+                                "refined_text": refined,
+                                "refine_text": refined,
+                                "delivery": "inline",
+                                "user_prompt": raw_text,
+                                "web_metadata": None,
+                                "external_action": None,
+                            },
+                        )
+                    else:
+                        await send_ws_message(
+                            websocket,
+                            get_ws_completion_message_type(mode, parameters),
+                            {
+                                "audio_id": audio_id,
+                                "refined_text": "",
+                                "refine_text": "",
+                                "delivery": "inline",
+                            },
+                        )
+                    continue
+
                 if not audio_chunks:
                     continue
 
@@ -474,7 +600,7 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
         pass
 
 
-def create_app(preload_model=preload_whisper_model, exit_scheduler=schedule_startup_failure_exit) -> FastAPI:
+def create_app(preload_model=preload_asr_model, exit_scheduler=schedule_startup_failure_exit) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         set_voice_service_state(app, "starting", "ASR 模型预热中")
@@ -544,12 +670,12 @@ def create_app(preload_model=preload_whisper_model, exit_scheduler=schedule_star
 
         current_model_id = state["currentModelId"]
         if current_model_id == model["id"]:
-            if model["id"] == DEFAULT_MODEL_ID:
+            if model["id"] == FALLBACK_MODEL_ID:
                 raise HTTPException(status_code=409, detail="不能删除当前使用的回退模型")
-            if not find_cached_model_snapshot(DEFAULT_MODEL_ID):
+            if not find_cached_model_snapshot(FALLBACK_MODEL_ID):
                 raise HTTPException(status_code=409, detail="base 模型未下载，不能删除当前模型")
             try:
-                reload_whisper_model(DEFAULT_MODEL_ID)
+                reload_asr_model(FALLBACK_MODEL_ID)
                 set_voice_service_state(app, "ready", "ASR 模型已完成预热")
             except Exception as error:
                 set_voice_service_state(app, "failed", str(error))
@@ -571,11 +697,12 @@ def create_app(preload_model=preload_whisper_model, exit_scheduler=schedule_star
         except ValueError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
 
-        if not find_cached_model_snapshot(model["id"]):
+        snapshot, _cache_source = find_cached_model_snapshot_for_state(model["id"])
+        if not snapshot:
             raise HTTPException(status_code=409, detail="模型尚未下载")
 
         try:
-            reload_whisper_model(model["id"])
+            reload_asr_model(model["id"])
             set_voice_service_state(app, "ready", "ASR 模型已完成预热")
         except Exception as error:
             raise HTTPException(status_code=500, detail=str(error)) from error

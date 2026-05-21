@@ -23,12 +23,13 @@
 - 后端关键接口为 `GET /health`、`GET /ready`、`GET /models`、`POST /models/{model_id}/download`、`POST /models/{model_id}/cancel`、`DELETE /models/{model_id}`、`POST /models/{model_id}/select`、`POST /ai/voice_flow` 和 `WebSocket /ws/rt_voice_flow`。
 - `/health` 表示后端进程存活；`/ready` 表示当前选择的 ASR 模型预热完成，语音链路可接收请求。
 - 模型管理由后端 FastAPI 负责，Electron 只通过 `model:*` IPC 转发到后端 `/models` 接口，不直接下载、删除或选择 ASR 模型。
-- 第一版模型管理只支持 `faster-whisper` 系列：`tiny`、`base`、`small`、`medium`、`large-v3`。
+- 模型管理支持 `Fun-ASR Nano 2512` 和 `faster-whisper` 系列：`tiny`、`base`、`small`、`medium`、`large-v3`。
 - 下载非当前模型不能影响当前语音链路，只有选择模型成功后才切换 ASR 单例。
 - 删除当前使用的非 base ASR 模型前，后端必须先成功切换到已下载的 `base`；不能删除当前正在使用的 `base` 模型。
 - 模型下载取消语义为“取消本次下载结果”：底层下载线程可能继续完成，完成后若已取消则清理该模型缓存。
 - `electron-app/main.js` 加载 `electron-app/renderer/dist/index.html`、`floating-bar.html` 和 `floating-panel.html`。
 - `electron-app/main.js` 是 Electron 主进程组合根，主要负责创建服务、依赖接线和生命周期注册；窗口、悬浮状态、IPC、本地数据、后端客户端、音频会话、文本观察和 Right Alt 监听逻辑应放在对应独立模块。
+- Windows 托盘图标由 `electron-app/assets/tray-placeholder.png` 提供，并通过 `electron-app/app-paths.js` 暴露给主进程；不要把托盘图标重新指回 `app-extracted`。
 - 结构测试不能假设所有主进程逻辑都内联在 `main.js`，应检查 `main.js` 与拆分后的生产模块共同组成的主进程实现面。
 - Windows 文本观察 helper 位于 `electron-app/windows-text-observer/`，只服务本轮粘贴后的短时自动学习，不参与基础录音链路。
 - 前端修改后必须在 `electron-app/renderer/` 下运行 `npm run build`，再重启 Electron 验证。
@@ -66,12 +67,18 @@
 - 长按 `Right Alt` 的快捷键提示也通过 `floating-panel` IPC 和独立悬浮面板展示；提示优先级低于录音、转写、完成、取消和错误状态。
 - 悬浮胶囊和悬浮面板不要依赖本机固定坐标，应基于当前显示器 `workArea` 计算并限制在屏幕内。
 - WebSocket 语音流默认输入来自 `audio/webm;codecs=opus`；后端不能把未知音频头直接当 `.wav`，非 wav 输入必须先通过 `ffmpeg` 转码再喂 ASR。
+- 选择 `paraformer-zh-streaming` 时，renderer 必须通过 Web Audio 发送 `16kHz`、单声道、`pcm_s16le` 二进制 chunk，并在 `start_audio.parameters.audio_format` 声明 `{ type: "pcm_s16le", sample_rate: 16000, channels: 1 }`。
+- `paraformer-zh-streaming` 的 WebSocket 流式链路在用户说话时持续输出 `transcription`，`end_audio` 只 flush streaming 文本并进入 LLM 润色；不要再把整段音频送入 `transcribe_audio_with_wav_conversion()`。
 - WebSocket 协议入口必须防御非法 JSON 和非对象参数；`parameters`、`audio_context` 等输入进入业务逻辑前必须归一化为对象。
 - WebSocket 单轮音频处理失败也必须清空本轮音频块，不能让下一次 `end_audio` 重复处理旧音频。
-- ASR 后端唯一使用 `faster-whisper`，默认选择模型为 `base`；不要恢复 Handy `ggml`、SenseVoice 或其他旧模型兼容逻辑。
-- 模型扫描顺序固定为 `WHISPER_MODEL_DIR` → `%LOCALAPPDATA%\Typeless\models\faster-whisper` → `%USERPROFILE%\.cache\huggingface\hub` → 首次下载到 `%LOCALAPPDATA%\Typeless\models\faster-whisper`。
+- ASR 后端支持 `Fun-ASR Nano 2512`、`paraformer-zh-streaming` 和 `faster-whisper`，默认选择模型为 `Fun-ASR Nano 2512`；不要恢复 Handy `ggml`、SenseVoice 或其他旧模型兼容逻辑。
+- `Fun-ASR Nano 2512` 运行时优先使用 CUDA，当前 PyTorch 不可用 CUDA 时降级到 CPU；本地源码默认从 `D:\CodeWorkSpace\FunASR` 读取，也可通过 `FUNASR_REPO_DIR` 或 `FUNASR_NANO_CODE_DIR` 覆盖。
+- `paraformer-zh-streaming` 运行时优先使用 CUDA，当前 PyTorch 不可用 CUDA 时降级到 CPU；模型扫描顺序固定为 `PARAFORMER_STREAMING_MODEL_DIR` → `%LOCALAPPDATA%\Typeless\models\funasr` → `%USERPROFILE%\.cache\huggingface\hub` → 首次下载到 `%LOCALAPPDATA%\Typeless\models\funasr`。
+- `Fun-ASR Nano 2512` 模型扫描顺序固定为 `FUNASR_NANO_MODEL_DIR` → `%LOCALAPPDATA%\Typeless\models\funasr` → `%USERPROFILE%\.cache\huggingface\hub` → 首次下载到 `%LOCALAPPDATA%\Typeless\models\funasr`。
+- `faster-whisper` 模型扫描顺序固定为 `WHISPER_MODEL_DIR` → `%LOCALAPPDATA%\Typeless\models\faster-whisper` → `%USERPROFILE%\.cache\huggingface\hub` → 首次下载到 `%LOCALAPPDATA%\Typeless\models\faster-whisper`。
+- HuggingFace 全局缓存中的模型可显示为已下载并允许选择，但不得从模型页删除；删除只允许作用于 `%LOCALAPPDATA%\Typeless\models` 下的托管缓存。
 - `WHISPER_MODEL_DIR` 设置后视为显式模型目录覆盖，模型页必须禁用模型切换和删除。
-- `WHISPER_MODEL` 设置后视为显式模型 ID 覆盖，模型页当前状态必须与 ASR 运行模型一致，并禁用模型切换和删除。
+- `WHISPER_MODEL` 设置后视为显式模型 ID 覆盖，模型页当前状态必须与 ASR 运行模型一致，并禁用模型切换和删除；变量名保留为历史兼容。
 - 开发态 `uvicorn reload` 必须显式由环境变量 `UVICORN_RELOAD` 开启，不要在代码里默认写死 `reload=True`。
 - 录音期间静音后台声音时，保持“短按开始、再次短按结束”的交互；Windows 上按音频会话静音，结束后只恢复本轮被 SpeakMore 主动静音的会话。
 - 自动学习只能围绕 SpeakMore 本轮粘贴结果短时观察当前焦点控件，不允许做无差别全局文本采集；目标应用不支持 UIA 文本读取时，本轮学习应降级为不可用。

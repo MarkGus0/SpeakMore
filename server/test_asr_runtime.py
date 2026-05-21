@@ -1,10 +1,14 @@
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import call, patch
 
 import asr
+
+FUNASR_MODEL_ID = "fun-asr-nano-2512"
+PARAFORMER_STREAMING_MODEL_ID = "paraformer-zh-streaming"
 
 
 class AsrRuntimeTest(unittest.TestCase):
@@ -142,6 +146,144 @@ class AsrRuntimeTest(unittest.TestCase):
         self.assertIs(asr._model, old_model)
         write_selection.assert_not_called()
         build.assert_not_called()
+
+    def test_reload_asr_model_loads_funasr_and_persists_selection_after_success(self):
+        self.assertTrue(hasattr(asr, "reload_asr_model"), "reload_asr_model 尚未实现")
+        if not hasattr(asr, "reload_asr_model"):
+            return
+
+        old_model = object()
+        new_model = object()
+        asr._model = old_model
+        source = asr.FunAsrModelSource(kind=asr.HF_CACHE_SOURCE, model_ref="C:/hf/funasr", model_id=FUNASR_MODEL_ID)
+
+        with patch("asr.get_candidate_funasr_model_sources", return_value=[source]), patch(
+            "asr.build_funasr_model",
+            return_value=new_model,
+        ) as build, patch("asr.write_selected_model_id", side_effect=lambda model_id: model_id) as write_selection:
+            model = asr.reload_asr_model(FUNASR_MODEL_ID)
+
+        self.assertIs(model, new_model)
+        self.assertIs(asr._model, new_model)
+        build.assert_called_once_with(source)
+        write_selection.assert_called_once_with(FUNASR_MODEL_ID)
+
+    def test_reload_asr_model_loads_paraformer_streaming_and_persists_selection_after_success(self):
+        old_model = object()
+        new_model = object()
+        asr._model = old_model
+        source = asr.ParaformerStreamingModelSource(
+            kind=asr.HF_CACHE_SOURCE,
+            model_ref="C:/hf/paraformer",
+            model_id=PARAFORMER_STREAMING_MODEL_ID,
+        )
+
+        with patch("asr.get_candidate_paraformer_streaming_model_sources", return_value=[source]), patch(
+            "asr.build_paraformer_streaming_model",
+            return_value=new_model,
+        ) as build, patch("asr.write_selected_model_id", side_effect=lambda model_id: model_id) as write_selection:
+            model = asr.reload_asr_model(PARAFORMER_STREAMING_MODEL_ID)
+
+        self.assertIs(model, new_model)
+        self.assertIs(asr._model, new_model)
+        build.assert_called_once_with(source)
+        write_selection.assert_called_once_with(PARAFORMER_STREAMING_MODEL_ID)
+
+    def test_resolve_funasr_device_prefers_cuda_and_falls_back_to_cpu(self):
+        self.assertTrue(hasattr(asr, "resolve_funasr_device"), "resolve_funasr_device 尚未实现")
+        if not hasattr(asr, "resolve_funasr_device"):
+            return
+
+        with patch("asr.is_cuda_available", return_value=True):
+            self.assertEqual(asr.resolve_funasr_device(), "cuda:0")
+
+        with patch("asr.is_cuda_available", return_value=False):
+            self.assertEqual(asr.resolve_funasr_device(), "cpu")
+
+    def test_transcribe_sync_uses_funasr_runtime_inference_text(self):
+        self.assertTrue(hasattr(asr, "FunAsrRuntime"), "FunAsrRuntime 尚未实现")
+        if not hasattr(asr, "FunAsrRuntime"):
+            return
+
+        class FakeFunAsrModel:
+            def inference(self, data_in, **kwargs):
+                return [[{"text": " 你好 SpeakMore "}]]
+
+        asr._model = asr.FunAsrRuntime(model=FakeFunAsrModel(), kwargs={"language": "中文"})
+
+        self.assertEqual(asr._transcribe_sync("audio.wav"), "你好 SpeakMore")
+
+    def test_streaming_asr_session_accumulates_partial_and_final_text(self):
+        class FakeStreamingModel:
+            def __init__(self):
+                self.texts = iter(["你", "好", "了"])
+                self.calls = []
+
+            def generate(self, **kwargs):
+                self.calls.append(kwargs)
+                return [{"text": next(self.texts)}]
+
+        fake_model = FakeStreamingModel()
+        runtime = asr.ParaformerStreamingRuntime(
+            model=fake_model,
+            chunk_size=[0, 10, 5],
+            encoder_chunk_look_back=4,
+            decoder_chunk_look_back=1,
+        )
+        session = asr.StreamingAsrSession(runtime, sample_rate=16000, chunk_ms=600)
+        chunk_600ms = b"\x00\x00" * 9600
+
+        partials = session.append_pcm16(chunk_600ms + chunk_600ms)
+        final = session.finalize()
+
+        self.assertEqual([partial.text for partial in partials], ["你", "你好"])
+        self.assertEqual(final.text, "你好了")
+        self.assertEqual([call["is_final"] for call in fake_model.calls], [False, False, True])
+
+    def test_create_streaming_asr_session_only_for_loaded_streaming_runtime(self):
+        asr._model = asr.ParaformerStreamingRuntime(
+            model=object(),
+            chunk_size=[0, 10, 5],
+            encoder_chunk_look_back=4,
+            decoder_chunk_look_back=1,
+        )
+
+        self.assertTrue(asr.is_streaming_asr_model_loaded())
+        self.assertIsInstance(asr.create_streaming_asr_session(sample_rate=16000), asr.StreamingAsrSession)
+
+    def test_build_paraformer_streaming_model_uses_local_funasr_repo_for_import(self):
+        repo_dir = Path("D:/CodeWorkSpace/FunASR")
+        source = asr.ParaformerStreamingModelSource(
+            kind=asr.HF_CACHE_SOURCE,
+            model_ref="C:/hf/paraformer",
+            model_id=PARAFORMER_STREAMING_MODEL_ID,
+        )
+        original_path = list(sys.path)
+
+        class FakeAutoModel:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+
+        def import_or_fail(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "funasr":
+                self.assertIn(str(repo_dir), sys.path)
+                return type("FakeFunAsrModule", (), {"AutoModel": FakeAutoModel})
+            return original_import(name, globals, locals, fromlist, level)
+
+        original_import = __import__
+        try:
+            sys.path = [path for path in sys.path if path != str(repo_dir)]
+            with patch("asr.resolve_funasr_repo_dir", return_value=repo_dir), patch(
+                "asr.resolve_funasr_device",
+                return_value="cpu",
+            ), patch("builtins.__import__", side_effect=import_or_fail):
+                runtime = asr.build_paraformer_streaming_model(source)
+        finally:
+            sys.path = original_path
+
+        self.assertEqual(runtime.model.kwargs["model"], source.model_ref)
+        self.assertEqual(runtime.model.kwargs["hub"], "hf")
+        self.assertEqual(runtime.model.kwargs["device"], "cpu")
 
 
 if __name__ == "__main__":

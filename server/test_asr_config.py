@@ -8,9 +8,13 @@ from asr import (
     DEFAULT_WHISPER_MODEL,
     DIR_SOURCE,
     DOWNLOAD_SOURCE,
+    FunAsrModelSource,
     HF_CACHE_SOURCE,
     MANAGED_CACHE_SOURCE,
+    ParaformerStreamingModelSource,
     WhisperModelSource,
+    resolve_paraformer_streaming_model_source,
+    resolve_funasr_model_source,
     resolve_whisper_model_source,
 )
 from main import should_enable_reload
@@ -31,7 +35,91 @@ def create_explicit_model_dir(root: Path) -> Path:
     return root
 
 
+def create_funasr_snapshot(cache_root: Path, snapshot_name: str = "funasr") -> Path:
+    repo_dir = "models--FunAudioLLM--Fun-ASR-Nano-2512"
+    snapshot_dir = cache_root / repo_dir / "snapshots" / snapshot_name
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    (snapshot_dir / "model.pt").write_bytes(b"model")
+    (snapshot_dir / "config.yaml").write_text("model: FunASRNano", encoding="utf-8")
+    (snapshot_dir / "configuration.json").write_text("{}", encoding="utf-8")
+    (snapshot_dir / "multilingual.tiktoken").write_text("token", encoding="utf-8")
+    qwen_dir = snapshot_dir / "Qwen3-0.6B"
+    qwen_dir.mkdir()
+    (qwen_dir / "config.json").write_text("{}", encoding="utf-8")
+    return snapshot_dir
+
+
+def create_paraformer_streaming_snapshot(cache_root: Path, snapshot_name: str = "paraformer") -> Path:
+    repo_dir = "models--funasr--paraformer-zh-streaming"
+    snapshot_dir = cache_root / repo_dir / "snapshots" / snapshot_name
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    (snapshot_dir / "model.pt").write_bytes(b"model")
+    (snapshot_dir / "config.yaml").write_text("model: paraformer", encoding="utf-8")
+    (snapshot_dir / "tokens.json").write_text("[]", encoding="utf-8")
+    (snapshot_dir / "am.mvn").write_bytes(b"mvn")
+    return snapshot_dir
+
+
 class AsrConfigTest(unittest.TestCase):
+    def test_resolve_paraformer_streaming_model_source_uses_hf_cache_by_default(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            local_app_data = Path(temp_dir) / "LocalAppData"
+            user_profile = Path(temp_dir) / "UserProfile"
+            hf_root = user_profile / ".cache" / "huggingface" / "hub"
+            snapshot = create_paraformer_streaming_snapshot(hf_root)
+
+            with patch.dict(
+                os.environ,
+                {
+                    "WHISPER_MODEL": "",
+                    "WHISPER_MODEL_DIR": "",
+                    "PARAFORMER_STREAMING_MODEL_DIR": "",
+                    "LOCALAPPDATA": str(local_app_data),
+                    "USERPROFILE": str(user_profile),
+                },
+                clear=False,
+            ):
+                source = resolve_paraformer_streaming_model_source()
+
+        self.assertEqual(
+            source,
+            ParaformerStreamingModelSource(
+                kind=HF_CACHE_SOURCE,
+                model_ref=str(snapshot),
+                download_root=None,
+                model_id="paraformer-zh-streaming",
+            ),
+        )
+
+    def test_resolve_funasr_model_source_uses_hf_cache_by_default(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            local_app_data = Path(temp_dir) / "LocalAppData"
+            user_profile = Path(temp_dir) / "UserProfile"
+            hf_root = user_profile / ".cache" / "huggingface" / "hub"
+            snapshot = create_funasr_snapshot(hf_root)
+
+            with patch.dict(
+                os.environ,
+                {
+                    "WHISPER_MODEL": "",
+                    "WHISPER_MODEL_DIR": "",
+                    "LOCALAPPDATA": str(local_app_data),
+                    "USERPROFILE": str(user_profile),
+                },
+                clear=False,
+            ):
+                source = resolve_funasr_model_source()
+
+        self.assertEqual(
+            source,
+            FunAsrModelSource(
+                kind=HF_CACHE_SOURCE,
+                model_ref=str(snapshot),
+                download_root=None,
+                model_id="fun-asr-nano-2512",
+            ),
+        )
+
     def test_resolve_whisper_model_source_prefers_explicit_dir(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             explicit_dir = create_explicit_model_dir(Path(temp_dir) / "explicit-model")
