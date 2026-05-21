@@ -43,6 +43,8 @@ function createTestEnvironment(options: {
   pasteShouldFail?: boolean
   pasteResult?: unknown
   translationTargetLanguage?: string
+  modelsState?: unknown
+  audioContextSampleRate?: number
 } = {}) {
   const originalWindow = globalThis.window
   const originalNavigator = globalThis.navigator
@@ -60,6 +62,7 @@ function createTestEnvironment(options: {
   const fetchCalls: Array<{ url: string; init?: RequestInit }> = []
   const sockets: FakeWebSocket[] = []
   const intervalCallbacks = new Map<number, () => void>()
+  const audioProcessNodes: FakeScriptProcessorNode[] = []
   const clearedIntervals: number[] = []
   let restoreCalls = 0
   let trackStops = 0
@@ -89,18 +92,50 @@ function createTestEnvironment(options: {
   }
 
   class FakeMediaStreamAudioSourceNode {
-    connect(_node: FakeAnalyserNode) {}
+    connect(_node: unknown) {}
 
     disconnect() {}
   }
 
+  class FakeScriptProcessorNode {
+    onaudioprocess: ((event: {
+      inputBuffer: { getChannelData: (channel: number) => Float32Array }
+      outputBuffer: { numberOfChannels: number; getChannelData: (channel: number) => Float32Array }
+    }) => void) | null = null
+
+    connect(_node: unknown) {}
+
+    disconnect() {}
+
+    emit(samples: Float32Array) {
+      this.onaudioprocess?.({
+        inputBuffer: {
+          getChannelData: () => samples,
+        },
+        outputBuffer: {
+          numberOfChannels: 1,
+          getChannelData: () => new Float32Array(samples.length),
+        },
+      })
+    }
+  }
+
   class FakeAudioContext {
+    sampleRate = options.audioContextSampleRate ?? 16000
+    destination = {}
+
     createAnalyser() {
       return new FakeAnalyserNode()
     }
 
     createMediaStreamSource(_stream: MediaStream) {
       return new FakeMediaStreamAudioSourceNode()
+    }
+
+    createScriptProcessor() {
+      const node = new FakeScriptProcessorNode()
+      audioProcessNodes.push(node)
+      return node
     }
 
     resume() {
@@ -238,6 +273,14 @@ function createTestEnvironment(options: {
       if (channel === 'dictionary:prompt-terms') {
         return (options.dictionaryTermsPromise ?? Promise.resolve([])) as never
       }
+      if (channel === 'model:list') {
+        return (options.modelsState ?? {
+          currentModelId: 'fun-asr-nano-2512',
+          models: [{ id: 'fun-asr-nano-2512', engine: 'funasr', isCurrent: true }],
+          explicitModelDir: '',
+          selectionLocked: false,
+        }) as never
+      }
       if (channel === 'keyboard:type-transcript') {
         if (options.pasteShouldFail) throw new Error('paste boom')
         if (options.pasteResult !== undefined) return options.pasteResult as never
@@ -321,6 +364,11 @@ function createTestEnvironment(options: {
     getTrackStops: () => trackStops,
     getUserMediaCalls: () => userMediaCalls,
     getClearedIntervals: () => clearedIntervals,
+    emitAudioProcess(samples: Float32Array) {
+      const node = audioProcessNodes[audioProcessNodes.length - 1]
+      assert.ok(node, '没有创建 PCM 采样节点')
+      node.emit(samples)
+    },
     runLevelTick(count = 1) {
       for (let index = 0; index < count; index += 1) {
         Array.from(intervalCallbacks.values()).forEach((callback) => callback())
@@ -484,6 +532,44 @@ test('startRecording 会先通过新 IPC 检查 ready，并连接集中定义的
     assert.notEqual(readyCheckIndex, -1)
     assert.notEqual(settingsGetIndex, -1)
     assert.match(socket.url, /\/ws\/rt_voice_flow\?v=[^&]+&t=[^&]+&m=0/)
+  } finally {
+    recorder?.disposeRecorder()
+    env.restore()
+  }
+})
+
+test('paraformer streaming 模型启动时通过 WebSocket 发送 PCM16 音频块', async () => {
+  const env = createTestEnvironment({
+    audioContextSampleRate: 16000,
+    modelsState: {
+      currentModelId: 'paraformer-zh-streaming',
+      models: [{ id: 'paraformer-zh-streaming', engine: 'funasr-streaming', isCurrent: true }],
+      explicitModelDir: '',
+      selectionLocked: false,
+    },
+  })
+  let recorder: Awaited<ReturnType<typeof loadRecorderModule>> | null = null
+
+  try {
+    recorder = await loadRecorderModule('streaming-pcm16')
+    await recorder.startRecording('Dictate')
+    env.emitAudioProcess(Float32Array.from([0, 0.5, -0.5, 1, -1]))
+
+    const startAudioMessage = env.sentPayloads
+      .filter((payload): payload is string => typeof payload === 'string')
+      .map((payload) => JSON.parse(payload))
+      .find((message) => message.type === 'start_audio')
+    const pcmPayload = env.sentPayloads.find((payload): payload is ArrayBuffer => payload instanceof ArrayBuffer)
+
+    assert.equal(env.invokeCalls.some((call) => call.channel === 'model:list'), true)
+    assert.deepEqual(startAudioMessage.parameters.audio_format, {
+      type: 'pcm_s16le',
+      sample_rate: 16000,
+      channels: 1,
+    })
+    assert.ok(pcmPayload)
+    assert.deepEqual(Array.from(new Int16Array(pcmPayload)), [0, 16384, -16384, 32767, -32768])
+    assert.equal(env.sentPayloads.some((payload) => payload instanceof Blob), false)
   } finally {
     recorder?.disposeRecorder()
     env.restore()

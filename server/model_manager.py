@@ -6,8 +6,26 @@ import threading
 from pathlib import Path
 
 
-DEFAULT_MODEL_ID = "base"
-AVAILABLE_MODEL_IDS = ("tiny", "base", "small", "medium", "large-v3")
+FUNASR_NANO_MODEL_ID = "fun-asr-nano-2512"
+PARAFORMER_STREAMING_MODEL_ID = "paraformer-zh-streaming"
+FALLBACK_MODEL_ID = "base"
+DEFAULT_MODEL_ID = FUNASR_NANO_MODEL_ID
+WHISPER_MODEL_IDS = ("tiny", "base", "small", "medium", "large-v3")
+AVAILABLE_MODEL_IDS = (FUNASR_NANO_MODEL_ID, PARAFORMER_STREAMING_MODEL_ID, *WHISPER_MODEL_IDS)
+WHISPER_REQUIRED_MODEL_FILES = ("model.bin", "config.json")
+FUNASR_REQUIRED_MODEL_FILES = (
+    "model.pt",
+    "config.yaml",
+    "configuration.json",
+    "multilingual.tiktoken",
+    "Qwen3-0.6B/config.json",
+)
+PARAFORMER_STREAMING_REQUIRED_MODEL_FILES = (
+    "model.pt",
+    "config.yaml",
+    "tokens.json",
+    "am.mvn",
+)
 
 _SELECTION_FILE_NAME = "model-selection.json"
 _DOWNLOAD_STATUS = {}
@@ -16,6 +34,28 @@ _DOWNLOAD_CANCELLED = set()
 _DOWNLOAD_STATUS_LOCK = threading.Lock()
 
 _MODEL_CATALOG = (
+    {
+        "id": FUNASR_NANO_MODEL_ID,
+        "name": "Fun-ASR Nano 2512",
+        "repoId": "FunAudioLLM/Fun-ASR-Nano-2512",
+        "engine": "funasr",
+        "description": "默认转录模型，适合中文、英文、日文和中文方言听写。",
+        "sizeMb": 1880,
+        "accuracyScore": 0.85,
+        "speedScore": 0.45,
+        "supportedLanguages": ["multi", "zh", "en", "ja"],
+    },
+    {
+        "id": PARAFORMER_STREAMING_MODEL_ID,
+        "name": "Paraformer 中文实时流式",
+        "repoId": "funasr/paraformer-zh-streaming",
+        "engine": "funasr-streaming",
+        "description": "中文实时听写模型，录音时边听边写，结束后直接进入大模型润色。",
+        "sizeMb": 220,
+        "accuracyScore": 0.72,
+        "speedScore": 0.9,
+        "supportedLanguages": ["zh"],
+    },
     {
         "id": "tiny",
         "name": "Faster Whisper Tiny",
@@ -84,6 +124,21 @@ def get_managed_whisper_cache_root():
     return get_managed_models_root() / "faster-whisper"
 
 
+def get_managed_model_cache_root(model_id: str):
+    model = get_model_definition(model_id)
+    if model["engine"] in {"funasr", "funasr-streaming"}:
+        return get_managed_models_root() / "funasr"
+    return get_managed_whisper_cache_root()
+
+
+def get_hf_cache_root() -> Path:
+    hf_home = os.environ.get("HF_HOME")
+    if hf_home:
+        return Path(hf_home) / "hub"
+    user_profile = Path(os.getenv("USERPROFILE") or Path.home())
+    return user_profile / ".cache" / "huggingface" / "hub"
+
+
 def repo_cache_dir_name(repo_id: str):
     return f"models--{repo_id.replace('/', '--')}"
 
@@ -97,6 +152,19 @@ def get_model_definition(model_id: str):
         if model["id"] == model_id:
             return model
     raise ValueError(f"未知模型: {model_id}")
+
+
+def get_model_required_files(model_id: str):
+    model = get_model_definition(model_id)
+    if model["engine"] == "funasr":
+        return FUNASR_REQUIRED_MODEL_FILES
+    if model["engine"] == "funasr-streaming":
+        return PARAFORMER_STREAMING_REQUIRED_MODEL_FILES
+    return WHISPER_REQUIRED_MODEL_FILES
+
+
+def normalize_whisper_model_id(model_id):
+    return model_id if isinstance(model_id, str) and model_id in WHISPER_MODEL_IDS else FALLBACK_MODEL_ID
 
 
 def normalize_model_id(model_id):
@@ -142,13 +210,14 @@ def is_model_selection_locked():
     return bool(os.environ.get("WHISPER_MODEL_DIR", "").strip() or read_explicit_model_id())
 
 
-def is_valid_model_snapshot(path: Path):
-    return path.is_dir() and (path / "model.bin").is_file() and (path / "config.json").is_file()
+def is_valid_model_snapshot(path: Path, model_id: str | None = None):
+    required_files = get_model_required_files(model_id) if model_id else WHISPER_REQUIRED_MODEL_FILES
+    return path.is_dir() and all((path / relative_path).is_file() for relative_path in required_files)
 
 
 def find_cached_model_snapshot(model_id: str, cache_root=None):
     model = get_model_definition(model_id)
-    root = Path(cache_root) if cache_root is not None else get_managed_whisper_cache_root()
+    root = Path(cache_root) if cache_root is not None else get_managed_model_cache_root(model_id)
     snapshots_root = root / repo_cache_dir_name(model["repoId"]) / "snapshots"
     try:
         candidates = list(snapshots_root.iterdir())
@@ -166,9 +235,21 @@ def find_cached_model_snapshot(model_id: str, cache_root=None):
 
     sortable_snapshots.sort(key=lambda item: item[0], reverse=True)
     for _, snapshot in sortable_snapshots:
-        if is_valid_model_snapshot(snapshot):
+        if is_valid_model_snapshot(snapshot, model_id):
             return snapshot
     return None
+
+
+def find_cached_model_snapshot_for_state(model_id: str):
+    managed_snapshot = find_cached_model_snapshot(model_id)
+    if managed_snapshot:
+        return managed_snapshot, "managed-cache"
+
+    hf_snapshot = find_cached_model_snapshot(model_id, cache_root=get_hf_cache_root())
+    if hf_snapshot:
+        return hf_snapshot, "hf-cache"
+
+    return None, ""
 
 
 def _default_download_status():
@@ -271,11 +352,11 @@ def clear_download_status_for_tests():
 def create_models_state():
     explicit_model_dir = os.environ.get("WHISPER_MODEL_DIR") or ""
     explicit_model_id = read_explicit_model_id()
-    current_model_id = explicit_model_id or read_selected_model_id()
+    current_model_id = explicit_model_id or (FALLBACK_MODEL_ID if explicit_model_dir else read_selected_model_id())
     models = []
 
     for model in get_model_catalog():
-        snapshot = find_cached_model_snapshot(model["id"])
+        snapshot, cache_source = find_cached_model_snapshot_for_state(model["id"])
         download_status = get_download_status(model["id"])
         models.append(
             {
@@ -286,6 +367,8 @@ def create_models_state():
                 "downloadProgress": download_status["downloadProgress"],
                 "downloadError": download_status["downloadError"],
                 "snapshotPath": str(snapshot) if snapshot else "",
+                "cacheSource": cache_source,
+                "canDelete": cache_source == "managed-cache",
             }
         )
 
@@ -300,7 +383,7 @@ def create_models_state():
 
 def delete_model_files(model_id):
     model = get_model_definition(model_id)
-    cache_dir = get_managed_whisper_cache_root() / repo_cache_dir_name(model["repoId"])
+    cache_dir = get_managed_model_cache_root(model["id"]) / repo_cache_dir_name(model["repoId"])
     mark_download_finished(model["id"])
 
     if not cache_dir.exists():
@@ -323,7 +406,7 @@ async def download_model(model_id):
         await asyncio.to_thread(
             snapshot_download,
             repo_id=model["repoId"],
-            cache_dir=str(get_managed_whisper_cache_root()),
+            cache_dir=str(get_managed_model_cache_root(model["id"])),
             local_files_only=False,
             tqdm_class=create_download_progress_tqdm_class(model["id"]),
         )

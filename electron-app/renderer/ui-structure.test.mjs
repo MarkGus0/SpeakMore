@@ -303,6 +303,8 @@ test('P1 模型页面接入导航并通过模型服务读取主进程 IPC', asyn
   assert.match(modelStore, /model:cancel-download/);
   assert.match(modelStore, /model:delete/);
   assert.match(modelStore, /model:select/);
+  assert.match(modelStore, /engine:\s*['"]faster-whisper['"]\s*\|\s*['"]funasr['"]\s*\|\s*['"]funasr-streaming['"]/);
+  assert.match(modelStore, /canDelete/);
   assert.doesNotMatch(modelStore, /localStorage/);
   assert.match(modelsPage, /转录模型/);
   assert.match(modelsPage, /已下载的模型/);
@@ -310,6 +312,7 @@ test('P1 模型页面接入导航并通过模型服务读取主进程 IPC', asyn
   assert.match(modelsPage, /设为当前/);
   assert.match(modelsPage, /取消下载/);
   assert.match(modelsPage, /删除/);
+  assert.match(modelsPage, /model\.canDelete/);
   assert.match(modelsPage, /所有语言/);
 });
 
@@ -857,6 +860,8 @@ test('P1 模型页面接入导航并通过模型服务读取主进程 IPC', asyn
   assert.match(modelStore, /model:cancel-download/);
   assert.match(modelStore, /model:delete/);
   assert.match(modelStore, /model:select/);
+  assert.match(modelStore, /engine:\s*['"]faster-whisper['"]\s*\|\s*['"]funasr['"]\s*\|\s*['"]funasr-streaming['"]/);
+  assert.match(modelStore, /canDelete/);
   assert.doesNotMatch(modelStore, /localStorage/);
   assert.match(modelsPage, /转录模型/);
   assert.match(modelsPage, /已下载的模型/);
@@ -864,6 +869,7 @@ test('P1 模型页面接入导航并通过模型服务读取主进程 IPC', asyn
   assert.match(modelsPage, /设为当前/);
   assert.match(modelsPage, /取消下载/);
   assert.match(modelsPage, /删除/);
+  assert.match(modelsPage, /model\.canDelete/);
   assert.match(modelsPage, /所有语言/);
 });
 

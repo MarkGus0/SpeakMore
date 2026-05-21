@@ -125,6 +125,26 @@ function createFakeTrayClass() {
   };
 }
 
+test('createWindowManager 构造阶段不读取 Electron screen 方法', () => {
+  const screen = {};
+  Object.defineProperty(screen, 'getDisplayNearestPoint', {
+    get() {
+      throw new Error('screen should not be accessed before ready');
+    },
+  });
+
+  assert.doesNotThrow(() => createWindowManager({
+    app: { quit: () => undefined },
+    BrowserWindow: createFakeBrowserWindowClass(),
+    Tray: createFakeTrayClass(),
+    Menu: { buildFromTemplate: (template) => template },
+    nativeImage: { createFromPath: (filePath) => ({ filePath, resize: () => ({ filePath }) }) },
+    session: { fromPartition: (partition) => ({ partition }) },
+    screen,
+    resolveBottomCenterBounds: () => ({ x: 0, y: 0, width: 400, height: 360 }),
+  }));
+});
+
 test('createWindowManager 创建主窗口并在关闭时隐藏', () => {
   const BrowserWindow = createFakeBrowserWindowClass();
   const trayActions = [];

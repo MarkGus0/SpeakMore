@@ -1,7 +1,7 @@
 import asyncio
 import json
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi import WebSocketDisconnect
 
@@ -186,6 +186,70 @@ class WsProtocolContractTest(unittest.TestCase):
         message_types = [message["K"] for message in websocket.sent_messages]
         self.assertEqual(message_types.count("transcription_error"), 1)
         self.assertEqual(message_types.count("audio_session_ending"), 2)
+
+    def test_streaming_model_emits_transcription_when_pcm_chunk_arrives(self):
+        class FakeStreamingSession:
+            def append_pcm16(self, chunk):
+                self.chunk = chunk
+                return [type("StreamingResult", (), {"text": "你好"})()]
+
+        websocket = FakeWebSocket([
+            {
+                "type": "websocket.receive",
+                "text": json.dumps({
+                    "type": "start_audio",
+                    "audio_id": "audio-1",
+                    "mode": "transcript",
+                    "audio_context": {},
+                    "parameters": {"audio_format": {"type": "pcm_s16le", "sample_rate": 16000, "channels": 1}},
+                }),
+            },
+            {"type": "websocket.receive", "bytes": b"\x01\x00\x02\x00"},
+        ])
+
+        with patch("main.create_streaming_asr_session", return_value=FakeStreamingSession()):
+            asyncio.run(ws_voice_flow(websocket))
+
+        transcription = next(message for message in websocket.sent_messages if message["K"] == "transcription")
+        self.assertEqual(transcription["V"]["text"], "你好")
+        self.assertEqual(transcription["V"]["audio_id"], "audio-1")
+
+    def test_streaming_model_end_audio_refines_accumulated_text_without_whole_file_asr(self):
+        class FakeStreamingSession:
+            def append_pcm16(self, _chunk):
+                return [type("StreamingResult", (), {"text": "你"})()]
+
+            def finalize(self):
+                return type("StreamingResult", (), {"text": "你好"})()
+
+        websocket = FakeWebSocket([
+            {
+                "type": "websocket.receive",
+                "text": json.dumps({
+                    "type": "start_audio",
+                    "audio_id": "audio-1",
+                    "mode": "transcript",
+                    "audio_context": {},
+                    "parameters": {"audio_format": {"type": "pcm_s16le", "sample_rate": 16000, "channels": 1}},
+                }),
+            },
+            {"type": "websocket.receive", "bytes": b"\x01\x00\x02\x00"},
+            {"type": "websocket.receive", "text": json.dumps({"type": "end_audio", "audio_id": "audio-1"})},
+        ])
+
+        with patch("main.create_streaming_asr_session", return_value=FakeStreamingSession()), patch(
+            "main.transcribe_audio_with_wav_conversion",
+            new_callable=AsyncMock,
+        ) as whole_file_asr, patch("main.refine_text", return_value="你好，世界") as refine:
+            asyncio.run(ws_voice_flow(websocket))
+
+        whole_file_asr.assert_not_called()
+        refine.assert_called_once_with(raw_text="你好", mode="transcript", context={}, parameters={
+            "audio_format": {"type": "pcm_s16le", "sample_rate": 16000, "channels": 1},
+        })
+        completion = websocket.sent_messages[-1]
+        self.assertEqual(completion["K"], "audio_processing_completed")
+        self.assertEqual(completion["V"]["refined_text"], "你好，世界")
 
     def test_refine_failure_emits_audio_processing_error(self):
         websocket = FakeWebSocket([

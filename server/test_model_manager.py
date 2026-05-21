@@ -34,9 +34,14 @@ from model_manager import (
     write_selected_model_id,
 )
 
+FUNASR_MODEL_ID = "fun-asr-nano-2512"
+FUNASR_REPO_ID = "FunAudioLLM/Fun-ASR-Nano-2512"
+PARAFORMER_STREAMING_MODEL_ID = "paraformer-zh-streaming"
+PARAFORMER_STREAMING_REPO_ID = "funasr/paraformer-zh-streaming"
+
 
 class ModelManagerCatalogTest(unittest.TestCase):
-    def test_catalog_contains_supported_faster_whisper_models(self):
+    def test_catalog_contains_supported_asr_models_with_funasr_as_default(self):
         catalog = get_model_catalog()
         required_fields = {
             "id",
@@ -50,10 +55,21 @@ class ModelManagerCatalogTest(unittest.TestCase):
             "supportedLanguages",
         }
 
-        self.assertEqual(AVAILABLE_MODEL_IDS, ("tiny", "base", "small", "medium", "large-v3"))
+        self.assertEqual(
+            AVAILABLE_MODEL_IDS,
+            (FUNASR_MODEL_ID, PARAFORMER_STREAMING_MODEL_ID, "tiny", "base", "small", "medium", "large-v3"),
+        )
+        self.assertEqual(DEFAULT_MODEL_ID, FUNASR_MODEL_ID)
         self.assertEqual([model["id"] for model in catalog], list(AVAILABLE_MODEL_IDS))
-        self.assertTrue(all(model["repoId"].startswith("Systran/faster-whisper-") for model in catalog))
-        self.assertTrue(all(model["engine"] == "faster-whisper" for model in catalog))
+        funasr_model = catalog[0]
+        self.assertEqual(funasr_model["id"], FUNASR_MODEL_ID)
+        self.assertEqual(funasr_model["repoId"], FUNASR_REPO_ID)
+        self.assertEqual(funasr_model["engine"], "funasr")
+        streaming_model = catalog[1]
+        self.assertEqual(streaming_model["id"], PARAFORMER_STREAMING_MODEL_ID)
+        self.assertEqual(streaming_model["repoId"], PARAFORMER_STREAMING_REPO_ID)
+        self.assertEqual(streaming_model["engine"], "funasr-streaming")
+        self.assertTrue(all(model["engine"] in {"funasr", "funasr-streaming", "faster-whisper"} for model in catalog))
         for model in catalog:
             self.assertEqual(set(model.keys()), required_fields)
             self.assertGreaterEqual(model["accuracyScore"], 0)
@@ -61,9 +77,10 @@ class ModelManagerCatalogTest(unittest.TestCase):
             self.assertGreaterEqual(model["speedScore"], 0)
             self.assertLessEqual(model["speedScore"], 1)
             self.assertIsInstance(model["supportedLanguages"], list)
-            self.assertIn("multi", model["supportedLanguages"])
             self.assertIn("zh", model["supportedLanguages"])
-            self.assertIn("en", model["supportedLanguages"])
+            if model["id"] != PARAFORMER_STREAMING_MODEL_ID:
+                self.assertIn("multi", model["supportedLanguages"])
+                self.assertIn("en", model["supportedLanguages"])
 
     def test_catalog_language_lists_cannot_pollute_internal_catalog(self):
         catalog = get_model_catalog()
@@ -74,13 +91,14 @@ class ModelManagerCatalogTest(unittest.TestCase):
         self.assertNotIn("polluted", next_catalog[0]["supportedLanguages"])
 
     def test_normalize_model_id_only_accepts_supported_string_ids(self):
+        self.assertEqual(normalize_model_id(FUNASR_MODEL_ID), FUNASR_MODEL_ID)
         self.assertEqual(normalize_model_id("tiny"), "tiny")
         self.assertEqual(normalize_model_id("large-v3"), "large-v3")
         self.assertEqual(normalize_model_id("invalid"), DEFAULT_MODEL_ID)
         self.assertEqual(normalize_model_id(None), DEFAULT_MODEL_ID)
         self.assertEqual(normalize_model_id(["base"]), DEFAULT_MODEL_ID)
 
-    def test_selected_model_defaults_to_base(self):
+    def test_selected_model_defaults_to_funasr(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             with patch.dict(os.environ, {"LOCALAPPDATA": str(Path(temp_dir) / "LocalAppData")}, clear=False):
                 self.assertEqual(read_selected_model_id(), DEFAULT_MODEL_ID)
@@ -132,6 +150,27 @@ class ModelManagerStateTest(unittest.TestCase):
         (snapshot / "config.json").write_text("{}", encoding="utf-8")
         return snapshot
 
+    def create_funasr_snapshot(self, cache_root, snapshot_name="funasr"):
+        snapshot = Path(cache_root) / repo_cache_dir_name(FUNASR_REPO_ID) / "snapshots" / snapshot_name
+        snapshot.mkdir(parents=True)
+        (snapshot / "model.pt").write_bytes(b"model")
+        (snapshot / "config.yaml").write_text("model: FunASRNano", encoding="utf-8")
+        (snapshot / "configuration.json").write_text("{}", encoding="utf-8")
+        (snapshot / "multilingual.tiktoken").write_text("token", encoding="utf-8")
+        qwen_dir = snapshot / "Qwen3-0.6B"
+        qwen_dir.mkdir()
+        (qwen_dir / "config.json").write_text("{}", encoding="utf-8")
+        return snapshot
+
+    def create_paraformer_streaming_snapshot(self, cache_root, snapshot_name="paraformer"):
+        snapshot = Path(cache_root) / repo_cache_dir_name(PARAFORMER_STREAMING_REPO_ID) / "snapshots" / snapshot_name
+        snapshot.mkdir(parents=True)
+        (snapshot / "model.pt").write_bytes(b"model")
+        (snapshot / "config.yaml").write_text("model: paraformer", encoding="utf-8")
+        (snapshot / "tokens.json").write_text("[]", encoding="utf-8")
+        (snapshot / "am.mvn").write_bytes(b"mvn")
+        return snapshot
+
     def create_invalid_snapshot(self, model_id="small", snapshot_name="invalid"):
         repo_id = f"Systran/faster-whisper-{model_id}"
         snapshot = get_managed_whisper_cache_root() / repo_cache_dir_name(repo_id) / "snapshots" / snapshot_name
@@ -144,6 +183,78 @@ class ModelManagerStateTest(unittest.TestCase):
             repo_cache_dir_name("Systran/faster-whisper-small"),
             "models--Systran--faster-whisper-small",
         )
+
+    def test_funasr_hf_snapshot_is_marked_downloaded_but_not_deletable(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            local_app_data = Path(temp_dir) / "LocalAppData"
+            user_profile = Path(temp_dir) / "UserProfile"
+            hf_root = user_profile / ".cache" / "huggingface" / "hub"
+            snapshot = self.create_funasr_snapshot(hf_root)
+            with patch.dict(
+                os.environ,
+                {
+                    "LOCALAPPDATA": str(local_app_data),
+                    "USERPROFILE": str(user_profile),
+                    "WHISPER_MODEL_DIR": "",
+                    "WHISPER_MODEL": "",
+                },
+                clear=False,
+            ):
+                state = create_models_state()
+
+        funasr = next(model for model in state["models"] if model["id"] == FUNASR_MODEL_ID)
+        self.assertEqual(state["currentModelId"], FUNASR_MODEL_ID)
+        self.assertTrue(funasr["isCurrent"])
+        self.assertTrue(funasr["isDownloaded"])
+        self.assertEqual(funasr["snapshotPath"], str(snapshot))
+        self.assertEqual(funasr["cacheSource"], "hf-cache")
+        self.assertFalse(funasr["canDelete"])
+
+    def test_paraformer_streaming_hf_snapshot_is_marked_downloaded_but_not_deletable(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            local_app_data = Path(temp_dir) / "LocalAppData"
+            user_profile = Path(temp_dir) / "UserProfile"
+            hf_root = user_profile / ".cache" / "huggingface" / "hub"
+            snapshot = self.create_paraformer_streaming_snapshot(hf_root)
+            with patch.dict(
+                os.environ,
+                {
+                    "LOCALAPPDATA": str(local_app_data),
+                    "USERPROFILE": str(user_profile),
+                    "WHISPER_MODEL_DIR": "",
+                    "WHISPER_MODEL": "",
+                },
+                clear=False,
+            ):
+                state = create_models_state()
+
+        streaming = next(model for model in state["models"] if model["id"] == PARAFORMER_STREAMING_MODEL_ID)
+        self.assertFalse(streaming["isCurrent"])
+        self.assertTrue(streaming["isDownloaded"])
+        self.assertEqual(streaming["snapshotPath"], str(snapshot))
+        self.assertEqual(streaming["cacheSource"], "hf-cache")
+        self.assertFalse(streaming["canDelete"])
+
+    def test_explicit_whisper_model_dir_reports_base_when_model_id_is_not_set(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            local_app_data = Path(temp_dir) / "LocalAppData"
+            explicit_dir = Path(temp_dir) / "explicit-whisper"
+            explicit_dir.mkdir()
+            (explicit_dir / "model.bin").write_bytes(b"model")
+            (explicit_dir / "config.json").write_text("{}", encoding="utf-8")
+            with patch.dict(
+                os.environ,
+                {
+                    "LOCALAPPDATA": str(local_app_data),
+                    "WHISPER_MODEL_DIR": str(explicit_dir),
+                    "WHISPER_MODEL": "",
+                },
+                clear=False,
+            ):
+                state = create_models_state()
+
+        self.assertEqual(state["currentModelId"], "base")
+        self.assertTrue(state["selectionLocked"])
 
     def test_models_state_marks_current_and_downloaded_models(self):
         with tempfile.TemporaryDirectory() as temp_dir:

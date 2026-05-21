@@ -4,7 +4,7 @@ export type ModelInfo = {
   id: string
   name: string
   repoId: string
-  engine: 'faster-whisper'
+  engine: 'faster-whisper' | 'funasr' | 'funasr-streaming'
   description: string
   sizeMb: number
   accuracyScore: number
@@ -16,6 +16,8 @@ export type ModelInfo = {
   downloadProgress: number
   downloadError: string
   snapshotPath: string
+  cacheSource: 'managed-cache' | 'hf-cache' | ''
+  canDelete: boolean
 }
 
 export type ModelsState = {
@@ -33,7 +35,7 @@ type IpcResponse<T> = {
 }
 
 export const emptyModelsState: ModelsState = {
-  currentModelId: 'base',
+  currentModelId: 'fun-asr-nano-2512',
   models: [],
   explicitModelDir: '',
   selectionLocked: false,
@@ -42,7 +44,7 @@ export const emptyModelsState: ModelsState = {
 function normalizeModelsState(value: unknown): ModelsState {
   const candidate = value && typeof value === 'object' ? value as Partial<ModelsState> : null
   return {
-    currentModelId: typeof candidate?.currentModelId === 'string' ? candidate.currentModelId : 'base',
+    currentModelId: typeof candidate?.currentModelId === 'string' ? candidate.currentModelId : 'fun-asr-nano-2512',
     models: Array.isArray(candidate?.models) ? candidate.models as ModelInfo[] : [],
     explicitModelDir: typeof candidate?.explicitModelDir === 'string' ? candidate.explicitModelDir : '',
     selectionLocked: Boolean(candidate?.selectionLocked),

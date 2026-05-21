@@ -1,6 +1,7 @@
 import { ipcClient } from './ipc'
 import { loadPromptDictionaryTerms } from './dictionaryStore'
 import { hideFloatingPanel, showFreeAskResult } from './floatingPanel'
+import { loadModelsState } from './modelStore'
 import { getCurrentLlmConfig, getSelectedAudioDeviceId, getTranslationTargetLanguage } from './settingsStore'
 import type { ShortcutIntent } from './shortcutGuard'
 import { VOICE_SERVER_WS_URL } from './voiceServer'
@@ -26,11 +27,19 @@ type PreparedRecordingStart = {
   parameters: Record<string, unknown>
   socket: WebSocket
   stream: MediaStream
+  transport: RecordingTransport
+}
+
+type RecordingTransport = 'webm' | 'pcm16'
+
+type AudioSender = {
+  stop: () => void
 }
 
 let session: VoiceSession = initialVoiceSession
 let ws: WebSocket | null = null
 let mediaRecorder: MediaRecorder | null = null
+let pcmAudioSender: AudioSender | null = null
 let activeStream: MediaStream | null = null
 let transcribeTimer: number | null = null
 let recordingStartedAt = 0
@@ -127,22 +136,28 @@ async function startRecordingFromIntent(intent: ShortcutIntent) {
       return
     }
 
-    const { parameters, socket, stream } = prepared
+    const { parameters, socket, stream, transport } = prepared
     activeStream = stream
     startAudioLevelMonitoring(stream)
-    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' })
 
-    mediaRecorder.ondataavailable = (event) => {
-      if (event.data.size > 0 && ws?.readyState === WebSocket.OPEN) {
-        event.data.arrayBuffer().then((buffer) => {
-          if (ws?.readyState === WebSocket.OPEN) ws.send(buffer)
-        })
+    if (transport === 'pcm16') {
+      pcmAudioSender = createPcm16AudioSender(stream, socket)
+      mediaRecorder = null
+    } else {
+      mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' })
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0 && ws?.readyState === WebSocket.OPEN) {
+          event.data.arrayBuffer().then((buffer) => {
+            if (ws?.readyState === WebSocket.OPEN) ws.send(buffer)
+          })
+        }
       }
-    }
 
-    mediaRecorder.onerror = () => {
-      if (!isSessionActive(audioId)) return
-      failSession(createVoiceError('recording_start_failed'))
+      mediaRecorder.onerror = () => {
+        if (!isSessionActive(audioId)) return
+        failSession(createVoiceError('recording_start_failed'))
+      }
     }
 
     socket.send(JSON.stringify({
@@ -153,7 +168,9 @@ async function startRecordingFromIntent(intent: ShortcutIntent) {
       parameters,
     }))
 
-    mediaRecorder.start(500)
+    if (mediaRecorder) {
+      mediaRecorder.start(500)
+    }
     recordingStartedAt = Date.now()
     setSessionStatus('recording')
     void muteBackgroundAudio()
@@ -171,7 +188,7 @@ async function prepareRecordingStart(task: VoiceTask): Promise<PreparedRecording
 
   try {
     const readyPromise = ensureVoiceServerReady()
-    const parametersPromise = getStartAudioParameters(task.mode, task.selectedText)
+    const transportPromise = resolveRecordingTransport()
     const socketPromise = ensureOpenWebSocket()
     const streamPromise = getAudioStream().then((stream) => {
       pendingStream = stream
@@ -181,14 +198,15 @@ async function prepareRecordingStart(task: VoiceTask): Promise<PreparedRecording
       return stream
     })
 
-    const [parameters, socket, stream] = await Promise.all([
-      parametersPromise,
+    const [transport, socket, stream] = await Promise.all([
+      transportPromise,
       socketPromise,
       streamPromise,
       readyPromise,
-    ]).then(([parameters, socket, stream]) => [parameters, socket, stream] as const)
+    ]).then(([transport, socket, stream]) => [transport, socket, stream] as const)
+    const parameters = await getStartAudioParameters(task.mode, task.selectedText, transport)
 
-    return { parameters, socket, stream }
+    return { parameters, socket, stream, transport }
   } catch (error) {
     shouldStopPendingStream = true
     stopStreamTracks(pendingStream as MediaStream | null)
@@ -202,13 +220,31 @@ function cleanupPreparedStart(prepared: PreparedRecordingStart) {
   closeWebSocketSilently()
 }
 
-async function getStartAudioParameters(mode: VoiceMode, selectedText = ''): Promise<Record<string, unknown>> {
+async function resolveRecordingTransport(): Promise<RecordingTransport> {
+  try {
+    const state = await loadModelsState()
+    const currentModel = state.models.find((model) => model.isCurrent)
+      ?? state.models.find((model) => model.id === state.currentModelId)
+    return currentModel?.engine === 'funasr-streaming' ? 'pcm16' : 'webm'
+  } catch {
+    return 'webm'
+  }
+}
+
+async function getStartAudioParameters(
+  mode: VoiceMode,
+  selectedText = '',
+  transport: RecordingTransport = 'webm',
+): Promise<Record<string, unknown>> {
   const [dictionaryTerms, llm] = await Promise.all([
     loadPromptDictionaryTerms(),
     getCurrentLlmConfig(),
   ])
   const dictionaryParameters = dictionaryTerms.length ? { dictionary_terms: dictionaryTerms } : {}
-  const baseParameters = { llm, ...dictionaryParameters }
+  const audioFormatParameters = transport === 'pcm16'
+    ? { audio_format: { type: 'pcm_s16le', sample_rate: 16000, channels: 1 } }
+    : {}
+  const baseParameters = { llm, ...dictionaryParameters, ...audioFormatParameters }
 
   if (mode === 'Ask') {
     return selectedText ? { ...baseParameters, selected_text: selectedText } : baseParameters
@@ -223,11 +259,11 @@ async function getStartAudioParameters(mode: VoiceMode, selectedText = ''): Prom
 }
 
 export function stopRecording() {
-  if (!mediaRecorder || session.status !== 'recording') return
+  if (session.status !== 'recording') return
 
   try {
     setSessionStatus('stopping')
-    mediaRecorder.stop()
+    stopActiveAudioSender()
     cleanupAudioLevelMonitoring()
     cleanupStream()
 
@@ -241,8 +277,6 @@ export function stopRecording() {
     failSession(createVoiceError('websocket_closed'))
   } catch (error) {
     failSession(normalizeVoiceError(error, 'recording_stop_failed'))
-  } finally {
-    mediaRecorder = null
   }
 }
 
@@ -516,6 +550,67 @@ async function getAudioStream() {
   }
 }
 
+function downsampleToSampleRate(input: Float32Array, inputSampleRate: number, targetSampleRate: number) {
+  if (inputSampleRate <= targetSampleRate) return input
+
+  const ratio = inputSampleRate / targetSampleRate
+  const outputLength = Math.floor(input.length / ratio)
+  const output = new Float32Array(outputLength)
+  for (let index = 0; index < outputLength; index += 1) {
+    output[index] = input[Math.floor(index * ratio)] ?? 0
+  }
+  return output
+}
+
+function encodePcm16(samples: Float32Array) {
+  const pcm = new Int16Array(samples.length)
+  for (let index = 0; index < samples.length; index += 1) {
+    const sample = Math.max(-1, Math.min(1, samples[index] ?? 0))
+    pcm[index] = Math.max(-32768, Math.min(32767, Math.round(sample * 32768)))
+  }
+  return pcm
+}
+
+function sendPcm16Chunk(socket: WebSocket, samples: Float32Array, inputSampleRate: number) {
+  if (socket.readyState !== WebSocket.OPEN) return
+
+  const downsampled = downsampleToSampleRate(samples, inputSampleRate, 16000)
+  if (!downsampled.length) return
+
+  const pcm = encodePcm16(downsampled)
+  const buffer = pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.byteLength)
+  socket.send(buffer)
+}
+
+function createPcm16AudioSender(stream: MediaStream, socket: WebSocket): AudioSender {
+  const audioContext = new AudioContext()
+  const source = audioContext.createMediaStreamSource(stream)
+  const processor = audioContext.createScriptProcessor(4096, 1, 1)
+  const inputSampleRate = audioContext.sampleRate || 16000
+
+  processor.onaudioprocess = (event) => {
+    const input = event.inputBuffer.getChannelData(0)
+    sendPcm16Chunk(socket, input, inputSampleRate)
+
+    for (let channel = 0; channel < event.outputBuffer.numberOfChannels; channel += 1) {
+      event.outputBuffer.getChannelData(channel).fill(0)
+    }
+  }
+
+  source.connect(processor)
+  processor.connect(audioContext.destination)
+  void audioContext.resume().catch(() => undefined)
+
+  return {
+    stop: () => {
+      processor.onaudioprocess = null
+      processor.disconnect()
+      source.disconnect()
+      void audioContext.close().catch(() => undefined)
+    },
+  }
+}
+
 function startAudioLevelMonitoring(stream: MediaStream) {
   cleanupAudioLevelMonitoring()
 
@@ -620,7 +715,7 @@ function cleanupAudioLevelMonitoring() {
   }
 }
 
-function cleanupRecording() {
+function stopActiveAudioSender() {
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
     try {
       mediaRecorder.stop()
@@ -629,6 +724,15 @@ function cleanupRecording() {
     }
   }
   mediaRecorder = null
+
+  if (pcmAudioSender) {
+    pcmAudioSender.stop()
+    pcmAudioSender = null
+  }
+}
+
+function cleanupRecording() {
+  stopActiveAudioSender()
   cleanupAudioLevelMonitoring()
   cleanupStream()
 }

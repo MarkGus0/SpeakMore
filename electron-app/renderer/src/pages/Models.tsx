@@ -91,6 +91,7 @@ function ModelCard({
             <Typography sx={{ fontSize: 18, fontWeight: 600 }}>{model.name}</Typography>
             {model.isCurrent ? <Chip size="small" label="当前使用" sx={{ bgcolor: '#1f1f1f', color: '#fff' }} /> : null}
             {model.isDownloaded && !model.isCurrent ? <Chip size="small" label="已下载" /> : null}
+            {model.cacheSource === 'hf-cache' ? <Chip size="small" label="本机缓存" /> : null}
           </Box>
           <Typography sx={{ mt: 0.5, color: 'text.secondary', fontSize: 14 }}>
             {model.description}
@@ -147,7 +148,7 @@ function ModelCard({
             设为当前
           </Button>
         ) : null}
-        {model.isDownloaded ? (
+        {model.isDownloaded && model.canDelete ? (
           <Button
             size="small"
             color="error"
@@ -235,7 +236,7 @@ export default function Models() {
       {error ? <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert> : null}
       {state.selectionLocked ? (
         <Alert severity="info" sx={{ mb: 2 }}>
-          当前由 WHISPER_MODEL_DIR 环境变量覆盖，模型切换和删除已禁用。
+          当前由模型环境变量覆盖，模型切换和删除已禁用。
         </Alert>
       ) : null}
       {loading ? <Typography sx={{ color: 'text.secondary', mb: 2 }}>模型状态加载中...</Typography> : null}
