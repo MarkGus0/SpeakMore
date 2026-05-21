@@ -55,7 +55,7 @@ function createWindowManager({
   if (!session || typeof session.fromPartition !== 'function') {
     throw new Error('session.fromPartition is required');
   }
-  if (!screen || typeof screen.getDisplayNearestPoint !== 'function') {
+  if (!screen) {
     throw new Error('screen is required');
   }
   if (typeof resolveBottomCenterBounds !== 'function') {
