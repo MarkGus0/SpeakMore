@@ -442,9 +442,9 @@ test('主进程具备后台音频会话静音脚本入口和新 IPC', async () =
 
 test('recorder 在录音生命周期内请求静音和恢复后台音频', async () => {
   const recorder = await readProjectFile('src/services/recorder.ts');
-  const backgroundAudio = await readProjectFile('src/services/backgroundAudio.ts');
+  const backgroundAudio = await readProjectFile('src/services/voice/backgroundAudio.ts');
 
-  assert.match(recorder, /from ['"]\.\/backgroundAudio['"]/);
+  assert.match(recorder, /from ['"]\.\/voice\/backgroundAudio['"]/);
   assert.match(backgroundAudio, /ipcClient\.invoke\(['"]audio:mute-background-sessions['"]/);
   assert.match(backgroundAudio, /ipcClient\.invoke\(['"]audio:restore-background-sessions['"]/);
   assert.match(recorder, /completeSession[\s\S]*restoreBackgroundAudio/);
@@ -454,9 +454,9 @@ test('recorder 在录音生命周期内请求静音和恢复后台音频', async
 
 test('recorder 在录音期间分析真实麦克风音量并同步 inputLevel', async () => {
   const recorder = await readProjectFile('src/services/recorder.ts');
-  const audioLevelMonitor = await readProjectFile('src/services/audioLevelMonitor.ts');
+  const audioLevelMonitor = await readProjectFile('src/services/voice/audioLevelMonitor.ts');
 
-  assert.match(recorder, /from ['"]\.\/audioLevelMonitor['"]/);
+  assert.match(recorder, /from ['"]\.\/voice\/audioLevelMonitor['"]/);
   assert.match(recorder, /startAudioLevelMonitoring\(stream,\s*updateSessionInputLevel\)/);
   assert.match(audioLevelMonitor, /AudioContext/);
   assert.match(audioLevelMonitor, /AnalyserNode/);
@@ -471,9 +471,9 @@ test('recorder 在录音期间分析真实麦克风音量并同步 inputLevel', 
 test('WebSocket 录音入口会等待主进程确认语音后端 ready', async () => {
   const main = await readMainProcessSurface();
   const recorder = await readProjectFile('src/services/recorder.ts');
-  const recordingStartup = await readProjectFile('src/services/recordingStartup.ts');
-  const voiceSocket = await readProjectFile('src/services/voiceSocket.ts');
-  const voiceServer = await readProjectFile('src/services/voiceServer.ts');
+  const recordingStartup = await readProjectFile('src/services/voice/recordingStartup.ts');
+  const voiceSocket = await readProjectFile('src/services/voice/voiceSocket.ts');
+  const voiceServer = await readProjectFile('src/services/voice/voiceServer.ts');
   const recorderSurface = `${recorder}\n${recordingStartup}\n${voiceSocket}`;
 
   assert.match(main, /ipcMain\.handle\(['"]audio:check-voice-server-ready['"]/);
@@ -488,7 +488,7 @@ test('WebSocket 录音入口会等待主进程确认语音后端 ready', async (
 });
 
 test('renderer 不再保留旧文字请求链路', async () => {
-  const voiceServer = await readProjectFile('src/services/voiceServer.ts');
+  const voiceServer = await readProjectFile('src/services/voice/voiceServer.ts');
 
   await assert.rejects(
     () => readProjectFile('src/services/textFlow.ts'),
@@ -513,7 +513,7 @@ test('Electron 不再负责拉起或关闭语音后端进程', async () => {
 test('前端按键事件按真实快捷键模式启动和停止语音流', async () => {
   const appShell = await readProjectFile('src/components/AppShell.tsx');
   const guard = await readProjectFile('src/services/shortcutGuard.ts');
-  const voiceTypes = await readProjectFile('src/services/voiceTypes.ts');
+  const voiceTypes = await readProjectFile('src/services/voice/voiceTypes.ts');
 
   assert.match(appShell, /global-keyboard/);
   assert.match(appShell, /toggleRecording/);
@@ -528,7 +528,7 @@ test('前端按键事件按真实快捷键模式启动和停止语音流', async
 });
 
 test('P0 语音状态模型和 IPC client 已收口', async () => {
-  const voiceTypes = await readProjectFile('src/services/voiceTypes.ts');
+  const voiceTypes = await readProjectFile('src/services/voice/voiceTypes.ts');
   const ipc = await readProjectFile('src/services/ipc.ts');
   const viteEnv = await readProjectFile('src/vite-env.d.ts');
 
@@ -551,7 +551,7 @@ test('P0 语音状态模型和 IPC client 已收口', async () => {
 
 test('P0 recorder 暴露可订阅状态机并支持主动取消', async () => {
   const recorder = await readProjectFile('src/services/recorder.ts');
-  const voiceSocket = await readProjectFile('src/services/voiceSocket.ts');
+  const voiceSocket = await readProjectFile('src/services/voice/voiceSocket.ts');
   const recorderSurface = `${recorder}\n${voiceSocket}`;
 
   assert.match(recorder, /subscribeVoiceSession/);
@@ -645,7 +645,7 @@ test('P0 悬浮条消费 voice-state 而不是自行 toggle 快捷键状态', as
 });
 
 test('三种语音方式在粒子 UI 中使用模式化录音和处理文案', async () => {
-  const voiceTypes = await readProjectFile('src/services/voiceTypes.ts');
+  const voiceTypes = await readProjectFile('src/services/voice/voiceTypes.ts');
   const floatingBar = await readProjectFile('public/floating-bar.html');
 
   assert.match(voiceTypes, /mode:\s*session\.mode/);
@@ -688,7 +688,7 @@ test('P0 悬浮条提示卡依赖完整视口尺寸，避免定位容器塌陷',
 test('P0 悬浮条消费 voice-state.inputLevel 并驱动粒子球听写动态', async () => {
   const main = await readMainProcessSurface();
   const recorder = await readProjectFile('src/services/recorder.ts');
-  const voiceTypes = await readProjectFile('src/services/voiceTypes.ts');
+  const voiceTypes = await readProjectFile('src/services/voice/voiceTypes.ts');
   const floatingBar = await readProjectFile('public/floating-bar.html');
 
   assert.doesNotMatch(main, /voice-input-level-debug/);
@@ -726,7 +726,7 @@ test('P0 悬浮条把语音状态映射到粒子球视觉态', async () => {
 test('P0 悬浮条在完成或取消后自动消失，并在错误后保持可见', async () => {
   const main = await readMainProcessSurface();
   const floatingBar = await readProjectFile('public/floating-bar.html');
-  const voiceTypes = await readProjectFile('src/services/voiceTypes.ts');
+  const voiceTypes = await readProjectFile('src/services/voice/voiceTypes.ts');
 
   assert.match(main, /function\s+scheduleFloatingBarCompletedHide\(/);
   assert.match(main, /function\s+renderFloatingBarForVoiceState\(/);
@@ -1026,10 +1026,10 @@ test('P1 听写历史保存由全局常驻组件负责，不依赖首页挂载',
 
 test('P1 录音链路使用设置页选择的真实麦克风设备', async () => {
   const recorder = await readProjectFile('src/services/recorder.ts');
-  const audioCapture = await readProjectFile('src/services/audioCapture.ts');
-  const recordingStartup = await readProjectFile('src/services/recordingStartup.ts');
+  const audioCapture = await readProjectFile('src/services/voice/audioCapture.ts');
+  const recordingStartup = await readProjectFile('src/services/voice/recordingStartup.ts');
 
-  assert.match(recorder, /from ['"]\.\/audioCapture['"]/);
+  assert.match(recorder, /from ['"]\.\/voice\/audioCapture['"]/);
   assert.match(audioCapture, /getSelectedAudioDeviceId/);
   assert.match(recordingStartup, /getTranslationTargetLanguage/);
   assert.match(audioCapture, /selectedAudioDeviceId/);

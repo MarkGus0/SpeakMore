@@ -1,4 +1,4 @@
-import type { VoiceErrorCode, VoiceMode } from './voiceTypes'
+import type { VoiceErrorCode, VoiceMode } from './voice/voiceTypes'
 import { ipcClient } from './ipc'
 
 export const HAND_TYPED_CHARS_PER_MINUTE = 60

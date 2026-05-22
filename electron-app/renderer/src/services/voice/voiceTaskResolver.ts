@@ -1,4 +1,4 @@
-import type { ShortcutIntent } from './shortcutGuard'
+import type { ShortcutIntent } from '../shortcutGuard'
 import {
   getFocusedSelectionSnapshot,
   type FocusedInfo,

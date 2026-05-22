@@ -1,4 +1,4 @@
-import { ipcClient } from './ipc'
+import { ipcClient } from '../ipc'
 
 export type SelectedTextResult = {
   success?: boolean

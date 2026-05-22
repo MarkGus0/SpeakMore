@@ -1,4 +1,4 @@
-import { getSelectedAudioDeviceId } from './settingsStore'
+import { getSelectedAudioDeviceId } from '../settingsStore'
 import { createVoiceError } from './voiceTypes'
 
 export type RecordingTransport = 'webm' | 'pcm16'
