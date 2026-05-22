@@ -317,7 +317,6 @@ test('registerCompatIpcHandlers 注册本地兼容桩通道', async () => {
     handleStoreUse: () => ({ ok: true }),
     sendToMain: (channel, payload) => sent.push(['main', channel, payload]),
     sendToFloatingBar: (channel, payload) => sent.push(['bar', channel, payload]),
-    getSystemInfo: () => ({ platform: 'win32' }),
     app: {
       relaunch: () => appCalls.push('relaunch'),
       exit: () => appCalls.push('exit'),
@@ -330,10 +329,7 @@ test('registerCompatIpcHandlers 注册本地兼容桩通道', async () => {
   assert.equal(localStores['app-settings'].preferredLanguage, 'en');
   assert.deepEqual(sent[0], ['main', 'i18n:language-changed', { lng: 'en' }]);
   assert.deepEqual(await ipcMain.invoke('rsa:get-config'), { publicKey: '', enabled: false });
-  assert.deepEqual(await ipcMain.invoke('troubleshooting:get-system-info'), {
-    success: true,
-    data: { basic: { platform: 'win32' } },
-  });
+  assert.equal(ipcMain.handles.has('troubleshooting:get-system-info'), false);
   await ipcMain.invoke('app:restart');
   assert.deepEqual(appCalls, ['relaunch', 'exit']);
 });

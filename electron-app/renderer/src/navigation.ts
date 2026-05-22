@@ -1,4 +1,4 @@
-export type Page = 'home' | 'history' | 'dictionary' | 'models' | 'settings' | 'diagnostics'
+export type Page = 'home' | 'history' | 'dictionary' | 'models' | 'settings'
 
 export const pages: { label: string; page: Page }[] = [
   { label: '首页', page: 'home' },
@@ -6,5 +6,4 @@ export const pages: { label: string; page: Page }[] = [
   { label: '词典', page: 'dictionary' },
   { label: '模型', page: 'models' },
   { label: '设置', page: 'settings' },
-  { label: '诊断', page: 'diagnostics' },
 ]

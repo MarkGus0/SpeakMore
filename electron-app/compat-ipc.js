@@ -5,7 +5,6 @@ function registerCompatIpcHandlers({
   handleStoreUse,
   sendToMain = () => undefined,
   sendToFloatingBar = () => undefined,
-  getSystemInfo = () => ({}),
   app,
 } = {}) {
   if (!ipcMain || typeof ipcMain.handle !== 'function') {
@@ -42,12 +41,6 @@ function registerCompatIpcHandlers({
   ipcMain.handle('rsa:is-enabled', () => false);
   ipcMain.handle('rsa:clear', () => true);
   ipcMain.handle('rsa:encrypt', (_, payload = {}) => payload.value || '');
-  ipcMain.handle('troubleshooting:get-system-info', () => ({
-    success: true,
-    data: {
-      basic: getSystemInfo(),
-    },
-  }));
   ipcMain.handle('app:restart', () => {
     app.relaunch();
     app.exit();
