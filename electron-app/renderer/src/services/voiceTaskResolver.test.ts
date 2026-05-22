@@ -134,6 +134,24 @@ test('自由提问意图有 UIA 选区时录音并展示悬浮结果', async () 
   })
 })
 
+test('自由提问意图接受 clipboard fallback 作为上下文并展示悬浮结果', async () => {
+  const task = await resolveVoiceTask('AskShortcut', reader({
+    selectedText: 'current line copied by app',
+    source: 'clipboard',
+    confidence: 'fallback',
+    focusInfo,
+  }))
+
+  assertTask(task, {
+    mode: 'Ask',
+    selectedText: 'current line copied by app',
+    source: 'clipboard',
+    confidence: 'fallback',
+    focusInfo,
+    delivery: 'floating-panel',
+  })
+})
+
 test('普通听写意图忽略非 confirmed 选区文本', async () => {
   const task = await resolveVoiceTask('DictateShortcut', reader({
     selectedText: 'current line copied by app',
