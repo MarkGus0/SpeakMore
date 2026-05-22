@@ -94,20 +94,38 @@ async function readSelectionSnapshot({
   wait,
   marker,
   copyWaitMs,
+  copyPollIntervalMs,
+  readClipboardSelection = readSelectedTextByClipboard,
 } = {}) {
   // 快照要同时保留当前焦点和选区信息，供快捷键和语音任务解析使用。
   const focusInfo = normalizeFocusedInfo(await readFocus());
   const selection = await readSelectedTextByUia({ readUiaSelection });
 
-  if (clipboard && sendCopyShortcut) {
-    // 剪贴板兜底只用于兼容场景；即使读取失败，也不影响已经拿到的 UIA 结果。
-    await readSelectedTextByClipboard({
+  if (selection.success) {
+    return {
+      ...selection,
+      focusInfo,
+    };
+  }
+
+  if (clipboard) {
+    // UIA 无 confirmed 选区时才走剪贴板 fallback，避免低可信来源覆盖 UIA 结果。
+    const clipboardSelection = await readClipboardSelection({
       clipboard,
       sendCopyShortcut,
       wait,
       marker,
       copyWaitMs,
+      copyPollIntervalMs,
     });
+
+    if (clipboardSelection.success) {
+      return {
+        ...clipboardSelection,
+        confidence: 'fallback',
+        focusInfo,
+      };
+    }
   }
 
   return {

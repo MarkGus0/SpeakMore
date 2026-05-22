@@ -68,12 +68,14 @@ export async function resolveVoiceTask(
     return createTask('Dictate', NO_SELECTION_SNAPSHOT, 'paste')
   }
 
-  // 只有自由提问需要选区上下文，且必须是 UIA 明确确认的选区。
+  // 只有自由提问需要选区上下文；UIA confirmed 优先，UIA 不可用时接受剪贴板 fallback。
   const snapshot = await readSelectionSnapshot()
-  const hasConfirmedSelection = snapshot.source === 'uia'
-    && snapshot.confidence === 'confirmed'
-    && Boolean(snapshot.selectedText)
+  const hasSupportedSelection = Boolean(snapshot.selectedText)
+    && (
+      (snapshot.source === 'uia' && snapshot.confidence === 'confirmed')
+      || (snapshot.source === 'clipboard' && snapshot.confidence === 'fallback')
+    )
 
   // 自由提问的结果永远展示在悬浮面板，不参与自动粘贴或替换。
-  return createTask('Ask', hasConfirmedSelection ? snapshot : createNoSelectionSnapshot(snapshot), 'floating-panel')
+  return createTask('Ask', hasSupportedSelection ? snapshot : createNoSelectionSnapshot(snapshot), 'floating-panel')
 }

@@ -145,6 +145,28 @@ test('readers 模块组合 PowerShell reader 和归一化函数', async () => {
   });
   assert.equal(snapshot.text, 'snapshot text');
   assert.equal(snapshot.focusInfo.appInfo.app_identifier, 'Notepad.exe');
+
+  const clipboard = createRichClipboard();
+  const fallbackSnapshot = await readSelectionSnapshot({
+    clipboard,
+    readFocusedInfo: async () => focusedInfo,
+    readUiaSelection: async () => ({
+      success: false,
+      text: '',
+      source: 'none',
+      confidence: 'none',
+      reason: 'empty',
+    }),
+    sendCopyShortcut: async () => clipboard.writeText(' 剪贴板兜底文本 '),
+    wait: async () => undefined,
+    marker: 'MARKER',
+  });
+
+  assert.equal(fallbackSnapshot.success, true);
+  assert.equal(fallbackSnapshot.text, '剪贴板兜底文本');
+  assert.equal(fallbackSnapshot.source, 'clipboard');
+  assert.equal(fallbackSnapshot.confidence, 'fallback');
+  assert.equal(fallbackSnapshot.focusInfo.appInfo.app_identifier, 'Notepad.exe');
 });
 
 test('scripts 模块导出三段 PowerShell 脚本', () => {

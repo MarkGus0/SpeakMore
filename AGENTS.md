@@ -51,16 +51,16 @@
 - 自由提问录音时悬浮胶囊显示 `请随意提出问题`；最终结果不自动粘贴、不进入首页最近结果，而是通过 `floating-panel` IPC 进入独立悬浮面板展示。
 - 自由提问 `ask_anything` 当前先按“无工具安全版”设计：有 `selected_text` 时优先围绕选区执行翻译、解释、题目解答、总结、改写等任务；没有工具结果时不得编造天气、新闻、价格、政策等实时信息。
 - 快捷键层只输出意图，不直接决定最终语音任务；最终任务由快捷键意图和启动前选区快照共同解析。
-- UIA 是唯一可信选区来源；剪贴板读取不能参与“是否有选区”的模式判断，只能作为旧兼容能力。
+- UIA 是最高可信选区来源；剪贴板读取不能参与“是否有选区”的模式判断，只能在 `Right Alt + Space` 且 UIA 无 confirmed 选区时作为低可信 `selected_text` fallback。
 - `Right Alt` 始终是普通听写并优先自动粘贴；是否有 UIA 选区都不能改变为翻译或自由提问。
-- `Right Alt + Space` 永远是自由提问；有 UIA 选区时只把选区作为 `selected_text` 上下文，结果永远展示在悬浮卡片，不自动替换。
+- `Right Alt + Space` 永远是自由提问；有 UIA confirmed 选区时优先把选区作为 `selected_text` 上下文，UIA 无 confirmed 选区但剪贴板 fallback 成功时可作为低可信 `selected_text` 上下文，结果永远展示在悬浮卡片，不自动替换。
 - `Right Alt + Right Shift` 是显式语音翻译；不因有选区而直接翻译选区，必须录音，完成后走普通粘贴链路把翻译结果贴到当前光标位置。
 - 三种模式只要粘贴或替换失败，都必须把最终结果展示到悬浮卡片，不能让用户丢失结果。
 - 自动粘贴前必须先确认当前存在可信文本输入目标；找不到光标或输入目标时，不得静默写剪贴板和发送 `Ctrl+V`，必须直接展示悬浮卡片。
 - 自动粘贴成功后必须恢复用户原剪贴板内容，不能让 SpeakMore 的结果长期占用系统剪贴板。
 - 如果同一轮键态里同时存在 `Space` 和 `RightShift`，优先按翻译意图处理，避免自由提问抢占翻译。
-- `focused-context:get-selection-snapshot` 使用 Windows UI Automation 读取 confirmed 选区；`focused-context:get-selected-text` 的剪贴板读取只保留为旧兼容能力，必须尽量恢复原剪贴板。
-- 普通听写和语音翻译启动前不得读取 UIA 选区；只有 `Right Alt + Space` 自由提问需要读取选区作为上下文。
+- `focused-context:get-selection-snapshot` 使用 Windows UI Automation 读取 confirmed 选区，并在 UIA 无 confirmed 选区时允许剪贴板 fallback；`focused-context:get-selected-text` 的剪贴板读取只保留为旧兼容能力，必须尽量恢复原剪贴板。
+- 普通听写和语音翻译启动前不得读取 UIA 或剪贴板选区；只有 `Right Alt + Space` 自由提问需要按 UIA 优先、剪贴板 fallback 次之读取选区作为上下文。
 - 自由提问未来如需回答实时问题，必须在后端增加意图分类和工具路由；不要只靠 prompt 假装具备联网、天气或网页检索能力。
 - 翻译录音启动时，renderer 必须从本地设置读取 `translationTargetLanguage`，并通过 WebSocket `start_audio.parameters.output_language` 传给后端；当前支持 `en` 和 `ja`，语言集合以共享翻译目标语言元数据为准。
 - 录音启动时可以并行准备后端 ready、设置和词典、WebSocket、麦克风；但 `start_audio` 只能在 `/ready` 成功和所有启动资源准备完成后发送，ready 失败或取消时必须清理已打开的麦克风和 WebSocket。

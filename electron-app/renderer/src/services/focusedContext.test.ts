@@ -118,6 +118,23 @@ test('normalizeSelectionSnapshot 只接受 UIA confirmed 选区', () => {
   assert.equal(snapshot.confidence, 'confirmed')
 })
 
+test('normalizeSelectionSnapshot 接受 clipboard fallback 文本', () => {
+  const snapshot = normalizeSelectionSnapshot({
+    success: true,
+    text: ' current line copied by app ',
+    source: 'clipboard',
+    confidence: 'fallback',
+    focusInfo: null,
+  })
+
+  assert.deepEqual(snapshot, {
+    selectedText: 'current line copied by app',
+    source: 'clipboard',
+    confidence: 'fallback',
+    focusInfo: null,
+  })
+})
+
 test('normalizeSelectionSnapshot 忽略 clipboard-only 文本', () => {
   const snapshot = normalizeSelectionSnapshot({
     success: true,

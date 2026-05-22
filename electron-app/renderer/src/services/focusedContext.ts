@@ -26,8 +26,8 @@ export type FocusedInfo = {
   }
 }
 
-export type SelectionSource = 'uia' | 'none'
-export type SelectionConfidence = 'confirmed' | 'none'
+export type SelectionSource = 'uia' | 'clipboard' | 'none'
+export type SelectionConfidence = 'confirmed' | 'fallback' | 'none'
 
 export type FocusedSelectionSnapshot = {
   selectedText: string
@@ -95,8 +95,11 @@ export function normalizeSelectionSnapshot(value: unknown): FocusedSelectionSnap
   const isConfirmedUia = snapshot.source === 'uia'
     && snapshot.confidence === 'confirmed'
     && Boolean(text)
+  const isClipboardFallback = snapshot.source === 'clipboard'
+    && snapshot.confidence === 'fallback'
+    && Boolean(text)
 
-  if (!isConfirmedUia) {
+  if (!isConfirmedUia && !isClipboardFallback) {
     return {
       selectedText: '',
       source: 'none',
@@ -107,8 +110,8 @@ export function normalizeSelectionSnapshot(value: unknown): FocusedSelectionSnap
 
   return {
     selectedText: text,
-    source: 'uia',
-    confidence: 'confirmed',
+    source: isConfirmedUia ? 'uia' : 'clipboard',
+    confidence: isConfirmedUia ? 'confirmed' : 'fallback',
     focusInfo,
   }
 }
