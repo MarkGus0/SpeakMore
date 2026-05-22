@@ -12,7 +12,8 @@ type WindowWithIpc = typeof globalThis & {
 
 type Deferred<T> = {
   promise: Promise<T>
-  resolve: (value: T) => void
+  resolve: (value: T | PromiseLike<T>) => void
+  reject: (reason?: unknown) => void
 }
 
 const testLlmConfig = {
@@ -24,11 +25,13 @@ const testLlmConfig = {
 }
 
 function createDeferred<T>(): Deferred<T> {
-  let resolve!: (value: T) => void
-  const promise = new Promise<T>((nextResolve) => {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((nextResolve, nextReject) => {
     resolve = nextResolve
+    reject = nextReject
   })
-  return { promise, resolve }
+  return { promise, resolve, reject }
 }
 
 function createTestEnvironment(options: {
@@ -612,6 +615,101 @@ test('startRecording 并行准备 ready 和麦克风，减少 connecting 串行�
   }
 })
 
+test('startRecording 并行准备参数和启动资源', async () => {
+  const ready = createDeferred<{ success?: boolean }>()
+  const dictionaryTerms = createDeferred<unknown>()
+  const env = createTestEnvironment({
+    readyPromise: ready.promise,
+    dictionaryTermsPromise: dictionaryTerms.promise,
+  })
+  let recorder: Awaited<ReturnType<typeof loadRecorderModule>> | null = null
+  let pendingStart: Promise<void> | null = null
+
+  try {
+    recorder = await loadRecorderModule('parallel-parameters')
+    pendingStart = recorder.startRecording('Dictate')
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const dictionaryStartedBeforeReadyResolved = env.invokeCalls.some((call) => call.channel === 'dictionary:prompt-terms')
+    const settingsGetCountBeforeReadyResolved = env.invokeCalls.filter((call) => call.channel === 'settings:get').length
+
+    assert.equal(env.invokeCalls.some((call) => call.channel === 'audio:check-voice-server-ready'), true)
+    assert.equal(env.sockets.length > 0, true)
+    assert.equal(env.getUserMediaCalls() > 0, true)
+    assert.equal(dictionaryStartedBeforeReadyResolved, true)
+    assert.equal(settingsGetCountBeforeReadyResolved >= 2, true)
+    assert.equal(
+      env.sentPayloads
+        .filter((payload): payload is string => typeof payload === 'string')
+        .map((payload) => JSON.parse(payload))
+        .some((message) => message.type === 'start_audio'),
+      false,
+    )
+
+    dictionaryTerms.resolve([])
+    ready.resolve({ success: true })
+    await pendingStart
+
+    assert.equal(recorder.getVoiceSession().status, 'recording')
+  } finally {
+    dictionaryTerms.resolve([])
+    ready.resolve({ success: true })
+    await pendingStart?.catch(() => undefined)
+    recorder?.disposeRecorder()
+    env.restore()
+  }
+})
+
+test('start_audio 等 ready socket microphone 和参数都完成后才发送', async () => {
+  const ready = createDeferred<{ success?: boolean }>()
+  const dictionaryTerms = createDeferred<unknown>()
+  const env = createTestEnvironment({
+    readyPromise: ready.promise,
+    dictionaryTermsPromise: dictionaryTerms.promise,
+  })
+  let recorder: Awaited<ReturnType<typeof loadRecorderModule>> | null = null
+  let pendingStart: Promise<void> | null = null
+
+  try {
+    recorder = await loadRecorderModule('start-audio-after-all-prepared')
+    pendingStart = recorder.startRecording('Dictate')
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    let startAudioMessages = env.sentPayloads
+      .filter((payload): payload is string => typeof payload === 'string')
+      .map((payload) => JSON.parse(payload))
+      .filter((message) => message.type === 'start_audio')
+    assert.equal(startAudioMessages.length, 0)
+
+    dictionaryTerms.resolve([{ phrase: 'Client2API', aliases: ['client to api'] }])
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    startAudioMessages = env.sentPayloads
+      .filter((payload): payload is string => typeof payload === 'string')
+      .map((payload) => JSON.parse(payload))
+      .filter((message) => message.type === 'start_audio')
+    assert.equal(startAudioMessages.length, 0)
+
+    ready.resolve({ success: true })
+    await pendingStart
+
+    startAudioMessages = env.sentPayloads
+      .filter((payload): payload is string => typeof payload === 'string')
+      .map((payload) => JSON.parse(payload))
+      .filter((message) => message.type === 'start_audio')
+    assert.equal(startAudioMessages.length, 1)
+    assert.deepEqual(startAudioMessages[0].parameters.dictionary_terms, [{ phrase: 'Client2API', aliases: ['client to api'] }])
+  } finally {
+    dictionaryTerms.resolve([])
+    ready.resolve({ success: true })
+    await pendingStart?.catch(() => undefined)
+    recorder?.disposeRecorder()
+    env.restore()
+  }
+})
+
 test('ready 失败时不发送 start_audio，并清理已打开的麦克风', async () => {
   const env = createTestEnvironment({
     readyPromise: Promise.resolve({ success: false, detail: 'ASR 模型预热中' }),
@@ -628,6 +726,7 @@ test('ready 失败时不发送 start_audio，并清理已打开的麦克风', as
 
     assert.equal(sentMessages.some((message) => message.type === 'start_audio'), false)
     assert.equal(env.getTrackStops(), 1)
+    assert.equal(env.sockets[0]?.readyState, 3)
     assert.equal(recorder.getVoiceSession().status, 'error')
   } finally {
     recorder?.disposeRecorder()

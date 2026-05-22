@@ -1,8 +1,14 @@
 import { ipcClient } from './ipc'
-import { loadPromptDictionaryTerms } from './dictionaryStore'
+import { loadPromptDictionaryTerms, type PromptDictionaryTerm } from './dictionaryStore'
 import { hideFloatingPanel, showFreeAskResult } from './floatingPanel'
 import { loadModelsState } from './modelStore'
-import { getCurrentLlmConfig, getSelectedAudioDeviceId, getTranslationTargetLanguage } from './settingsStore'
+import {
+  getCurrentLlmConfig,
+  getSelectedAudioDeviceId,
+  getTranslationTargetLanguage,
+  type LlmRequestConfig,
+  type TranslationTargetLanguage,
+} from './settingsStore'
 import type { ShortcutIntent } from './shortcutGuard'
 import { VOICE_SERVER_WS_URL } from './voiceServer'
 import { resolveVoiceTask, type VoiceTask } from './voiceTaskResolver'
@@ -19,6 +25,7 @@ import {
 
 const CONNECT_TIMEOUT_MS = 2500
 const TRANSCRIBE_TIMEOUT_MS = 60000
+// 只有这些状态代表本轮语音还没有产出最终结果，Escape 才允许取消。
 const CANCELABLE_STATUSES = new Set<VoiceStatus>(['connecting', 'recording', 'stopping', 'transcribing'])
 
 type VoiceSessionListener = (session: VoiceSession) => void
@@ -34,12 +41,20 @@ type PreparedRecordingStart = {
 // 流式 FunASR 需要浏览器侧发送 16k PCM，其它模型沿用 MediaRecorder 的 webm。
 type RecordingTransport = 'webm' | 'pcm16'
 
+type StartAudioParameterInputs = {
+  dictionaryTerms: PromptDictionaryTerm[]
+  llm: LlmRequestConfig
+  translationTargetLanguage: TranslationTargetLanguage | null
+}
+
 type AudioSender = {
   stop: () => void
 }
 
 // recorder 是渲染进程里的语音状态机，模块级变量用于保存当前唯一一轮录音会话。
+// 这里不放进 React state，是因为快捷键、悬浮窗、WebSocket 和页面组件都要共享同一份录音事实。
 let session: VoiceSession = initialVoiceSession
+// WebSocket 和音频资源都按“当前会话”持有，避免多个页面组件各自创建连接。
 let ws: WebSocket | null = null
 let mediaRecorder: MediaRecorder | null = null
 let pcmAudioSender: AudioSender | null = null
@@ -49,19 +64,23 @@ let recordingStartedAt = 0
 let backgroundAudioRestorePending = false
 let activeSessionId: string | null = null
 let activeTask: VoiceTask | null = null
+// 音量监控只服务悬浮胶囊显示，不参与真实音频发送。
 let levelAudioContext: AudioContext | null = null
 let levelAnalyser: AnalyserNode | null = null
 let levelSource: MediaStreamAudioSourceNode | null = null
 let levelTimerId: number | null = null
 let levelData: Float32Array<ArrayBuffer> | null = null
 let smoothedInputLevel = 0
+// 取消会话后，后端可能仍然返回旧 audioId 的消息，必须集中记录并过滤。
 const ignoredAudioIds = new Set<string>()
 const listeners = new Set<VoiceSessionListener>()
 
+// 外部页面读取当前语音状态时只拿快照，真正状态修改必须走 recorder 内部函数。
 export function getVoiceSession() {
   return session
 }
 
+// AppShell、页面和悬浮 UI 都通过订阅拿状态；返回清理函数避免组件卸载后继续收通知。
 export function subscribeVoiceSession(listener: VoiceSessionListener) {
   listeners.add(listener)
   // 新订阅者需要立刻拿到当前状态，避免页面切换后 UI 等下一次状态变更。
@@ -71,6 +90,7 @@ export function subscribeVoiceSession(listener: VoiceSessionListener) {
   }
 }
 
+// 页面按钮入口按显式模式启动；如果当前正在录音，同一个入口就变成停止。
 export async function toggleRecording(mode: VoiceMode) {
   if (session.status === 'recording') {
     stopRecording()
@@ -84,6 +104,7 @@ export async function toggleRecording(mode: VoiceMode) {
   await startRecording(mode)
 }
 
+// 快捷键入口先保留“意图”，后续再结合选区快照解析成最终任务。
 export async function toggleRecordingByShortcut(intent: ShortcutIntent) {
   if (session.status === 'recording') {
     stopRecording()
@@ -103,6 +124,7 @@ function toShortcutIntent(mode: VoiceMode): ShortcutIntent {
   return 'DictateShortcut'
 }
 
+// 兼容旧调用方：外部如果只知道 VoiceMode，这里转换成统一的快捷键意图入口。
 export async function startRecording(mode: VoiceMode) {
   await startRecordingFromIntent(toShortcutIntent(mode))
 }
@@ -114,6 +136,7 @@ function getInitialModeForIntent(intent: ShortcutIntent): VoiceMode {
 }
 
 async function startRecordingFromIntent(intent: ShortcutIntent) {
+  // audioId 是本轮录音的唯一边界，后续 WebSocket 消息必须匹配它才会被接受。
   // 新录音开始前先隐藏旧结果，避免用户看到上一轮悬浮面板误以为是当前结果。
   hideFloatingPanel()
   backgroundAudioRestorePending = false
@@ -191,6 +214,7 @@ async function startRecordingFromIntent(intent: ShortcutIntent) {
 }
 
 async function prepareRecordingStart(task: VoiceTask): Promise<PreparedRecordingStart> {
+  // pendingStream 用来处理“麦克风已打开但其它准备失败”的中间态，防止资源泄漏。
   let pendingStream: MediaStream | null = null
   let shouldStopPendingStream = false
 
@@ -199,6 +223,7 @@ async function prepareRecordingStart(task: VoiceTask): Promise<PreparedRecording
     const readyPromise = ensureVoiceServerReady()
     const transportPromise = resolveRecordingTransport()
     const socketPromise = ensureOpenWebSocket()
+    const parameterInputsPromise = prepareStartAudioParameterInputs(task.mode)
     const streamPromise = getAudioStream().then((stream) => {
       pendingStream = stream
       if (shouldStopPendingStream) {
@@ -207,13 +232,14 @@ async function prepareRecordingStart(task: VoiceTask): Promise<PreparedRecording
       return stream
     })
 
-    const [transport, socket, stream] = await Promise.all([
+    const [transport, socket, stream, , parameterInputs] = await Promise.all([
       transportPromise,
       socketPromise,
       streamPromise,
       readyPromise,
-    ]).then(([transport, socket, stream]) => [transport, socket, stream] as const)
-    const parameters = await getStartAudioParameters(task.mode, task.selectedText, transport)
+      parameterInputsPromise,
+    ])
+    const parameters = getStartAudioParameters(task.mode, task.selectedText, transport, parameterInputs)
 
     return { parameters, socket, stream, transport }
   } catch (error) {
@@ -225,6 +251,7 @@ async function prepareRecordingStart(task: VoiceTask): Promise<PreparedRecording
 }
 
 function cleanupPreparedStart(prepared: PreparedRecordingStart) {
+  // 会话在准备完成后被取消时，还没正式进入 active 状态，也要清理刚拿到的资源。
   stopStreamTracks(prepared.stream)
   closeWebSocketSilently()
 }
@@ -241,15 +268,27 @@ async function resolveRecordingTransport(): Promise<RecordingTransport> {
   }
 }
 
-async function getStartAudioParameters(
+async function prepareStartAudioParameterInputs(mode: VoiceMode): Promise<StartAudioParameterInputs> {
+  const translationTargetLanguagePromise = mode === 'Translate'
+    ? getTranslationTargetLanguage()
+    : Promise.resolve(null)
+  const [dictionaryTerms, llm, translationTargetLanguage] = await Promise.all([
+    loadPromptDictionaryTerms(),
+    getCurrentLlmConfig(),
+    translationTargetLanguagePromise,
+  ])
+
+  return { dictionaryTerms, llm, translationTargetLanguage }
+}
+
+function getStartAudioParameters(
   mode: VoiceMode,
   selectedText = '',
   transport: RecordingTransport = 'webm',
-): Promise<Record<string, unknown>> {
-  const [dictionaryTerms, llm] = await Promise.all([
-    loadPromptDictionaryTerms(),
-    getCurrentLlmConfig(),
-  ])
+  inputs: StartAudioParameterInputs,
+): Record<string, unknown> {
+  // 词典和 LLM 配置是本轮请求参数，必须在 start_audio 前固定下来，避免录音中途变化。
+  const { dictionaryTerms, llm, translationTargetLanguage } = inputs
   const dictionaryParameters = dictionaryTerms.length ? { dictionary_terms: dictionaryTerms } : {}
   const audioFormatParameters = transport === 'pcm16'
     ? { audio_format: { type: 'pcm_s16le', sample_rate: 16000, channels: 1 } }
@@ -266,7 +305,7 @@ async function getStartAudioParameters(
   // 翻译目标语言是用户设置，必须随本轮 start_audio 参数一起发送。
   return {
     ...baseParameters,
-    output_language: await getTranslationTargetLanguage(),
+    output_language: translationTargetLanguage,
   }
 }
 
@@ -296,6 +335,7 @@ export function stopRecording() {
 export function cancelRecording() {
   if (!CANCELABLE_STATUSES.has(session.status)) return
 
+  // 取消不是正常结束，不能发 end_audio，否则后端可能继续返回结果并触发粘贴。
   const durationMs = getRecordingDurationMs()
   activeSessionId = null
   activeTask = null
@@ -321,6 +361,7 @@ export function cancelRecording() {
 }
 
 export function disposeRecorder() {
+  // 应用退出或热重载时做完整释放，避免后台静音、麦克风和监听器残留。
   activeSessionId = null
   activeTask = null
   ignoredAudioIds.clear()
@@ -333,6 +374,7 @@ export function disposeRecorder() {
 }
 
 function setSession(next: VoiceSession) {
+  // 所有状态变更都集中从这里广播，避免 React 页面和悬浮窗看到不同步状态。
   session = next
   listeners.forEach((listener) => listener(session))
   // 悬浮胶囊只消费 voice-state，录音状态源必须集中在 recorder。
@@ -340,6 +382,7 @@ function setSession(next: VoiceSession) {
 }
 
 function setSessionStatus(status: VoiceStatus) {
+  // 状态切换时清掉旧错误，避免 UI 在新状态下还显示上一轮错误。
   setSession({ ...session, status, error: null })
 }
 
@@ -375,6 +418,7 @@ async function pasteResultOrShowPanel(resultText: string) {
 }
 
 async function completeSession(refinedText: string) {
+  // 完成路径必须先冻结本轮结果，再恢复后台音频和决定展示/粘贴方式。
   activeSessionId = null
   clearTranscribeTimeout()
   const durationMs = getRecordingDurationMs()
@@ -406,18 +450,22 @@ async function completeSession(refinedText: string) {
 }
 
 function handleRawText(text: string) {
+  // 流式转写会多次更新 rawText，最终结果仍以后端完成消息为准。
   setSession({ ...session, rawText: text, textLength: countTextLength(text) })
 }
 
 function isVoiceFinalMessageType(messageType: string) {
+  // 后端存在多种历史完成消息名，前端在这里统一归类成最终结果。
   return ['audio_processing_completed', 'refine_completed', 'refine_selected_text'].includes(messageType)
 }
 
 function isVoiceErrorMessageType(messageType: string) {
+  // ASR、音频处理和润色错误都属于本轮语音失败，但映射成不同前端错误码。
   return ['error', 'transcription_error', 'audio_processing_error', 'refine_error', 'refine_selected_text_error'].includes(messageType)
 }
 
 function normalizeSocketError(messageType: string, payload: Record<string, unknown> = {}) {
+  // WebSocket 错误结构来自后端，先提取可读 detail，再映射成前端统一错误。
   const detail = typeof payload.detail === 'string'
     ? payload.detail
     : typeof payload.message === 'string'
@@ -441,6 +489,7 @@ function normalizeSocketError(messageType: string, payload: Record<string, unkno
 
 function handleSocketMessage(event: MessageEvent) {
   try {
+    // 后端 WebSocket 消息约定为 { K, V }，K 是消息类型，V 是具体载荷。
     const msg = JSON.parse(String(event.data))
     const messageType = String(msg?.K || '')
     const audioId = msg?.V?.audio_id
@@ -485,6 +534,7 @@ function handleSocketMessage(event: MessageEvent) {
 }
 
 function ensureOpenWebSocket(): Promise<WebSocket> {
+  // 已连接时直接复用，正在连接时等待同一个连接，避免并发创建多个 socket。
   if (ws?.readyState === WebSocket.OPEN) return Promise.resolve(ws)
   if (ws?.readyState === WebSocket.CONNECTING) return waitForOpenWebSocket(ws)
 
@@ -506,6 +556,7 @@ function ensureOpenWebSocket(): Promise<WebSocket> {
 }
 
 function isSessionActive(audioId: string) {
+  // 同时检查 activeSessionId 和 session.audioId，避免旧异步任务误操作新会话。
   return activeSessionId === audioId && session.audioId === audioId
 }
 
@@ -524,6 +575,7 @@ function closeWebSocketSilently() {
 
 function waitForOpenWebSocket(socket: WebSocket): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
+    // 连接超时要尽快反馈给 UI，不能让用户停在 connecting 状态。
     const timer = window.setTimeout(() => reject(createVoiceError('websocket_timeout')), CONNECT_TIMEOUT_MS)
     socket.addEventListener('open', () => {
       window.clearTimeout(timer)
@@ -576,6 +628,7 @@ async function getAudioStream() {
 }
 
 function downsampleToSampleRate(input: Float32Array, inputSampleRate: number, targetSampleRate: number) {
+  // 浏览器采样率可能高于后端要求，发送前需要降采样；低于目标时不做插值放大。
   if (inputSampleRate <= targetSampleRate) return input
 
   // 流式模型固定吃 16k 单声道 PCM，浏览器实际采样率需要降到目标采样率。
@@ -599,6 +652,7 @@ function encodePcm16(samples: Float32Array) {
 }
 
 function sendPcm16Chunk(socket: WebSocket, samples: Float32Array, inputSampleRate: number) {
+  // PCM 发送路径只负责实时推 chunk，不缓存整段音频。
   if (socket.readyState !== WebSocket.OPEN) return
 
   const downsampled = downsampleToSampleRate(samples, inputSampleRate, 16000)
@@ -610,6 +664,7 @@ function sendPcm16Chunk(socket: WebSocket, samples: Float32Array, inputSampleRat
 }
 
 function createPcm16AudioSender(stream: MediaStream, socket: WebSocket): AudioSender {
+  // 这个 sender 是 MediaRecorder 的替代实现，专门服务 paraformer 流式模型。
   const audioContext = new AudioContext()
   const source = audioContext.createMediaStreamSource(stream)
   // ScriptProcessor 虽旧但这里足够小范围使用，用来直接拿到浏览器音频采样。
@@ -678,14 +733,17 @@ function startAudioLevelMonitoring(stream: MediaStream) {
 }
 
 function getRecordingDurationMs() {
+  // duration 只统计真正开始录音后的时间，连接准备阶段不计入听写时长。
   return recordingStartedAt > 0 ? Math.max(0, Date.now() - recordingStartedAt) : 0
 }
 
 function countTextLength(text: string) {
+  // 统计统一用 trim 后长度，避免首尾空白影响历史统计。
   return text.trim().length
 }
 
 function startTranscribeTimeout() {
+  // end_audio 后必须有最终消息或错误消息，否则按 WebSocket 超时处理。
   clearTranscribeTimeout()
   transcribeTimer = window.setTimeout(() => {
     failSession(createVoiceError('websocket_timeout'))
@@ -693,6 +751,7 @@ function startTranscribeTimeout() {
 }
 
 function clearTranscribeTimeout() {
+  // 多条完成/失败路径都会调用这里，重复清理要保持无副作用。
   if (transcribeTimer) window.clearTimeout(transcribeTimer)
   transcribeTimer = null
 }
@@ -718,11 +777,13 @@ async function restoreBackgroundAudio() {
 }
 
 function cleanupStream() {
+  // 麦克风 MediaStream 是最容易残留的资源，停止后必须释放所有 track。
   stopStreamTracks(activeStream)
   activeStream = null
 }
 
 function stopStreamTracks(stream: MediaStream | null) {
+  // stop track 才会真正释放浏览器侧麦克风占用。
   if (!stream) return
   stream.getTracks().forEach((track) => track.stop())
 }
@@ -748,6 +809,7 @@ function cleanupAudioLevelMonitoring() {
 }
 
 function stopActiveAudioSender() {
+  // 两种传输模式只会有一种处于活动状态，但清理时同时处理更稳。
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
     try {
       mediaRecorder.stop()
@@ -764,12 +826,14 @@ function stopActiveAudioSender() {
 }
 
 function cleanupRecording() {
+  // 录音清理只处理音频相关资源，WebSocket 是否关闭由调用路径决定。
   stopActiveAudioSender()
   cleanupAudioLevelMonitoring()
   cleanupStream()
 }
 
 function normalizeVoiceError(error: unknown, fallbackCode: Parameters<typeof createVoiceError>[0]) {
+  // 已经是 VoiceError 的对象直接透传，普通异常才包成前端错误码。
   if (error && typeof error === 'object' && 'code' in error && 'message' in error) {
     return error as VoiceError
   }
