@@ -1,9 +1,11 @@
 const { spawn } = require('child_process');
 
+// 这里的等待不是业务延迟，而是给系统事件、剪贴板写入和 UIA 状态一点缓冲时间。
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// PowerShell 子进程只保留最小可运行环境，避免把主进程的完整环境原样带过去。
 function createPowershellEnv(processEnv = process.env) {
   return {
     SystemRoot: processEnv.SystemRoot,
@@ -13,11 +15,13 @@ function createPowershellEnv(processEnv = process.env) {
   };
 }
 
+// 用 PowerShell 的 SendKeys 模拟按键，集中处理 Windows 的按键语义和系统派发。
 function createSendKeysShortcut(shortcut, {
   spawnProcess = spawn,
   processEnv = process.env,
 } = {}) {
   return () => new Promise((resolve, reject) => {
+    // 让 PowerShell 代发按键，比在 Node 里直接拼字符串更容易统一处理 Windows 语义。
     const ps = spawnProcess('powershell.exe', [
       '-NoProfile',
       '-Command',
@@ -35,11 +39,13 @@ function createSendKeysShortcut(shortcut, {
   });
 }
 
+// 执行 PowerShell 脚本并把标准输出解析成 JSON，供 focused-context 读取原生信息。
 function powershellJsonCommand(script, {
   spawnProcess = spawn,
   processEnv = process.env,
 } = {}) {
   return () => new Promise((resolve, reject) => {
+    // 这里只跑无界面、无配置文件模式，避免用户自己的 PowerShell 配置污染脚本结果。
     const ps = spawnProcess('powershell.exe', ['-NoProfile', '-Command', script], {
       windowsHide: true,
       env: createPowershellEnv(processEnv),

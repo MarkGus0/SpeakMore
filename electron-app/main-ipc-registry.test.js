@@ -125,12 +125,5 @@ test('createMainIpcRegistry 只注册一次并按固定顺序分发依赖', () =
   assert.equal(calls[8][1].randomUUID(), 'uuid-1');
   assert.equal(calls[9][1].createMainWindow(), 'main-window');
   assert.equal(calls[11][1].localStores, localCompatState.localStores);
-  assert.equal(typeof calls[11][1].getSystemInfo, 'function');
-  assert.deepEqual(calls[11][1].getSystemInfo(), {
-    platform: process.platform,
-    osVersion: 'os-1',
-    architecture: 'x64',
-    cpuCores: 2,
-    totalMemory: 1234,
-  });
+  assert.equal('getSystemInfo' in calls[11][1], false);
 });

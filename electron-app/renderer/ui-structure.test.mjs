@@ -466,20 +466,28 @@ test('recorder 在录音期间分析真实麦克风音量并同步 inputLevel', 
 test('WebSocket 录音入口会等待主进程确认语音后端 ready', async () => {
   const main = await readMainProcessSurface();
   const recorder = await readProjectFile('src/services/recorder.ts');
-  const diagnostics = await readProjectFile('src/services/diagnostics.ts');
   const voiceServer = await readProjectFile('src/services/voiceServer.ts');
 
   assert.match(main, /ipcMain\.handle\(['"]audio:check-voice-server-ready['"]/);
   assert.match(main, /audio:ensure-voice-server['"][\s\S]*checkVoiceServerReady/);
   assert.match(recorder, /ipcClient\.invoke\(['"]audio:check-voice-server-ready['"]/);
   assert.match(recorder, /from ['"]\.\/voiceServer['"]/);
-  assert.match(diagnostics, /from ['"]\.\/voiceServer['"]/);
   assert.match(voiceServer, /VOICE_SERVER_HTTP_BASE_URL/);
-  assert.match(voiceServer, /VOICE_SERVER_READY_URL/);
   assert.match(voiceServer, /VOICE_SERVER_WS_URL/);
   assert.doesNotMatch(recorder, /ws:\/\/localhost:8000\/ws\/rt_voice_flow/);
   assert.match(recorder, /const\s+readyPromise\s*=\s*ensureVoiceServerReady\(\)/);
   assert.match(recorder, /Promise\.all\(\[[\s\S]*readyPromise[\s\S]*\]\)/);
+});
+
+test('renderer 不再保留旧文字请求链路', async () => {
+  const voiceServer = await readProjectFile('src/services/voiceServer.ts');
+
+  await assert.rejects(
+    () => readProjectFile('src/services/textFlow.ts'),
+    /ENOENT/,
+  );
+  assert.doesNotMatch(voiceServer, /VOICE_SERVER_TEXT_FLOW_URL/);
+  assert.doesNotMatch(voiceServer, /\/ai\/text_flow/);
 });
 
 test('Electron 不再负责拉起或关闭语音后端进程', async () => {
@@ -1019,26 +1027,25 @@ test('P1 录音链路使用设置页选择的真实麦克风设备', async () =>
   assert.match(recorder, /textLength/);
 });
 
-test('P1 诊断页与导航配置已从静态展示切到真实服务', async () => {
-  const diagnosticsService = await readProjectFile('src/services/diagnostics.ts');
-  const diagnosticsPage = await readProjectFile('src/pages/Diagnostics.tsx');
+test('主窗口不再包含诊断页和诊断专用服务', async () => {
   const navigation = await readProjectFile('src/navigation.ts');
-  const uiTokens = await readProjectFile('src/uiTokens.ts');
-  const voiceServer = await readProjectFile('src/services/voiceServer.ts');
+  const sidebar = await readProjectFile('src/components/Sidebar.tsx');
+  const appShell = await readProjectFile('src/components/AppShell.tsx');
 
-  assert.match(diagnosticsService, /runDiagnostics/);
-  assert.match(diagnosticsService, /probeVoiceServerHealth/);
-  assert.match(diagnosticsService, /probeVoiceServerReady/);
-  assert.match(diagnosticsService, /VOICE_SERVER_HEALTH_URL/);
-  assert.match(diagnosticsService, /VOICE_SERVER_READY_URL/);
-  assert.match(voiceServer, /http:\/\/127\.0\.0\.1:8000/);
-  assert.match(diagnosticsPage, /runDiagnostics/);
-  assert.match(diagnosticsPage, /诊断中/);
+  await assert.rejects(
+    () => readProjectFile('src/services/diagnostics.ts'),
+    /ENOENT/,
+  );
+  await assert.rejects(
+    () => readProjectFile('src/pages/Diagnostics.tsx'),
+    /ENOENT/,
+  );
   assert.match(navigation, /export\s+type\s+Page/);
-  assert.match(navigation, /诊断/);
   assert.doesNotMatch(navigation, /Diagnostics/);
-  assert.match(uiTokens, /cardSx/);
-  assert.match(uiTokens, /subtlePanelSx/);
+  assert.doesNotMatch(navigation, /diagnostics/);
+  assert.doesNotMatch(navigation, /诊断/);
+  assert.doesNotMatch(sidebar, /BugReportIcon/);
+  assert.doesNotMatch(appShell, /Diagnostics/);
 });
 
 test('首页壳层和用户可见文案符合 SpeakMore 中文化要求', async () => {
@@ -1052,7 +1059,6 @@ test('首页壳层和用户可见文案符合 SpeakMore 中文化要求', async 
   assert.match(navigation, /首页/);
   assert.match(navigation, /历史记录/);
   assert.match(navigation, /设置/);
-  assert.match(navigation, /诊断/);
   assert.match(sidebar, /SpeakMore/);
   assert.doesNotMatch(sidebar, /bgcolor:\s*['"]#000['"]/);
   assert.doesNotMatch(sidebar, /Voice dictation/);
@@ -1072,7 +1078,6 @@ test('主页面一级标题复用设置页的左上基准和字号', async () =>
     'src/pages/History.tsx',
     'src/pages/Dictionary.tsx',
     'src/pages/Models.tsx',
-    'src/pages/Diagnostics.tsx',
     'src/pages/Settings.tsx',
   ];
 
@@ -1098,7 +1103,6 @@ test('除悬浮粒子外主前端页面不使用蓝色状态色', async () => {
     'src/pages/History.tsx',
     'src/pages/Dictionary.tsx',
     'src/pages/Models.tsx',
-    'src/pages/Diagnostics.tsx',
     'src/pages/Settings.tsx',
     'src/uiTokens.ts',
     'public/floating-panel.html',

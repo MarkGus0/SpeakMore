@@ -189,13 +189,6 @@ function createMainIpcRegistry({
       handleStoreUse: (...args) => localCompatState.handleStoreUse(...args),
       sendToMain,
       sendToFloatingBar,
-      getSystemInfo: () => ({
-        platform: process.platform,
-        osVersion: os.release(),
-        architecture: os.arch(),
-        cpuCores: os.cpus().length,
-        totalMemory: os.totalmem(),
-      }),
       app,
     });
   }

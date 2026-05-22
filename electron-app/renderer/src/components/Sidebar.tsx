@@ -4,7 +4,6 @@ import FormatListBulletedIcon from '@mui/icons-material/FormatListBulleted'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import MemoryIcon from '@mui/icons-material/Memory'
 import SettingsIcon from '@mui/icons-material/Settings'
-import BugReportIcon from '@mui/icons-material/BugReport'
 import { pages, type Page } from '../navigation'
 
 const iconByPage: Record<Page, React.ReactNode> = {
@@ -13,7 +12,6 @@ const iconByPage: Record<Page, React.ReactNode> = {
   dictionary: <AutoAwesomeIcon sx={{ fontSize: 18 }} />,
   models: <MemoryIcon sx={{ fontSize: 18 }} />,
   settings: <SettingsIcon sx={{ fontSize: 18 }} />,
-  diagnostics: <BugReportIcon sx={{ fontSize: 18 }} />,
 }
 
 const navItems: { label: string; page: Page; icon: React.ReactNode }[] = pages.map((item) => ({
