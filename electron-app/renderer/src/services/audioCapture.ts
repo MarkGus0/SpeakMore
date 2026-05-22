@@ -1,6 +1,8 @@
 import { getSelectedAudioDeviceId } from './settingsStore'
 import { createVoiceError } from './voiceTypes'
 
+export type RecordingTransport = 'webm' | 'pcm16'
+
 export type AudioSender = {
   stop: () => void
 }

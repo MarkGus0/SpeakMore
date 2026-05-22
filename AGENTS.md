@@ -36,7 +36,7 @@
 - 主窗口关闭按钮只隐藏窗口到后台，托盘“退出”或真实应用退出才结束 Electron。
 - 历史、设置、统计、日志和录音相关本地数据由 Electron 主进程写入 `app.getPath('userData')/local-data/`。
 - 词典和自动学习候选也属于本地数据，由 Electron 主进程写入 `app.getPath('userData')/local-data/`，renderer 只能通过 IPC 访问。
-- `electron-app/renderer/src/services/recorder.ts` 是语音状态机 facade 和唯一对外入口；纯会话工具、后台音频静音、音频采集/PCM 发送和输入音量监控分别位于 `voiceSessionUtils.ts`、`backgroundAudio.ts`、`audioCapture.ts` 和 `audioLevelMonitor.ts`。
+- `electron-app/renderer/src/services/recorder.ts` 是语音状态机 facade 和唯一对外入口；启动准备、WebSocket 生命周期/消息解析、最终结果交付、纯会话工具、后台音频静音、音频采集/PCM 发送和输入音量监控分别位于 `recordingStartup.ts`、`voiceSocket.ts`、`voiceResultDelivery.ts`、`voiceSessionUtils.ts`、`backgroundAudio.ts`、`audioCapture.ts` 和 `audioLevelMonitor.ts`。
 
 ## 语音链路约束
 

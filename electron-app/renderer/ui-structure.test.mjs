@@ -471,17 +471,20 @@ test('recorder 在录音期间分析真实麦克风音量并同步 inputLevel', 
 test('WebSocket 录音入口会等待主进程确认语音后端 ready', async () => {
   const main = await readMainProcessSurface();
   const recorder = await readProjectFile('src/services/recorder.ts');
+  const recordingStartup = await readProjectFile('src/services/recordingStartup.ts');
+  const voiceSocket = await readProjectFile('src/services/voiceSocket.ts');
   const voiceServer = await readProjectFile('src/services/voiceServer.ts');
+  const recorderSurface = `${recorder}\n${recordingStartup}\n${voiceSocket}`;
 
   assert.match(main, /ipcMain\.handle\(['"]audio:check-voice-server-ready['"]/);
   assert.match(main, /audio:ensure-voice-server['"][\s\S]*checkVoiceServerReady/);
-  assert.match(recorder, /ipcClient\.invoke\(['"]audio:check-voice-server-ready['"]/);
-  assert.match(recorder, /from ['"]\.\/voiceServer['"]/);
+  assert.match(recordingStartup, /ipcClient\.invoke\(['"]audio:check-voice-server-ready['"]/);
+  assert.match(voiceSocket, /from ['"]\.\/voiceServer['"]/);
   assert.match(voiceServer, /VOICE_SERVER_HTTP_BASE_URL/);
   assert.match(voiceServer, /VOICE_SERVER_WS_URL/);
-  assert.doesNotMatch(recorder, /ws:\/\/localhost:8000\/ws\/rt_voice_flow/);
-  assert.match(recorder, /const\s+readyPromise\s*=\s*ensureVoiceServerReady\(\)/);
-  assert.match(recorder, /Promise\.all\(\[[\s\S]*readyPromise[\s\S]*\]\)/);
+  assert.doesNotMatch(recorderSurface, /ws:\/\/localhost:8000\/ws\/rt_voice_flow/);
+  assert.match(recordingStartup, /const\s+readyPromise\s*=\s*ensureVoiceServerReady\(\)/);
+  assert.match(recordingStartup, /Promise\.all\(\[[\s\S]*readyPromise[\s\S]*\]\)/);
 });
 
 test('renderer 不再保留旧文字请求链路', async () => {
@@ -548,14 +551,16 @@ test('P0 语音状态模型和 IPC client 已收口', async () => {
 
 test('P0 recorder 暴露可订阅状态机并支持主动取消', async () => {
   const recorder = await readProjectFile('src/services/recorder.ts');
+  const voiceSocket = await readProjectFile('src/services/voiceSocket.ts');
+  const recorderSurface = `${recorder}\n${voiceSocket}`;
 
   assert.match(recorder, /subscribeVoiceSession/);
   assert.match(recorder, /getVoiceSession/);
   assert.match(recorder, /toggleRecording/);
   assert.match(recorder, /cancelRecording/);
   assert.match(recorder, /disposeRecorder/);
-  assert.match(recorder, /audio_processing_completed/);
-  assert.match(recorder, /audio_id/);
+  assert.match(voiceSocket, /audio_processing_completed/);
+  assert.match(recorderSurface, /audio_id/);
   assert.match(recorder, /activeSessionId/);
   assert.match(recorder, /ignoredAudioIds/);
   assert.doesNotMatch(recorder, /export\s+function\s+getIsRecording/);
@@ -1022,12 +1027,13 @@ test('P1 听写历史保存由全局常驻组件负责，不依赖首页挂载',
 test('P1 录音链路使用设置页选择的真实麦克风设备', async () => {
   const recorder = await readProjectFile('src/services/recorder.ts');
   const audioCapture = await readProjectFile('src/services/audioCapture.ts');
+  const recordingStartup = await readProjectFile('src/services/recordingStartup.ts');
 
   assert.match(recorder, /from ['"]\.\/audioCapture['"]/);
   assert.match(audioCapture, /getSelectedAudioDeviceId/);
-  assert.match(recorder, /getTranslationTargetLanguage/);
+  assert.match(recordingStartup, /getTranslationTargetLanguage/);
   assert.match(audioCapture, /selectedAudioDeviceId/);
-  assert.match(recorder, /output_language/);
+  assert.match(recordingStartup, /output_language/);
   assert.match(audioCapture, /deviceId:\s*\{\s*exact:\s*selectedAudioDeviceId\s*\}/);
   assert.match(recorder, /recordingStartedAt/);
   assert.match(recorder, /durationMs/);
