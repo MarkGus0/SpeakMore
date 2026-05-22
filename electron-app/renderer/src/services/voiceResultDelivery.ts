@@ -1,0 +1,32 @@
+import { hideFloatingPanel, showFreeAskResult } from './floatingPanel'
+import { ipcClient } from './ipc'
+import type { VoiceTask } from './voiceTaskResolver'
+import type { VoiceMode } from './voiceTypes'
+
+export { hideFloatingPanel }
+
+export async function pasteResultOrShowPanel(resultText: string) {
+  try {
+    const result = await ipcClient.invoke('keyboard:type-transcript', resultText)
+    if (result === false || (result && typeof result === 'object' && (result as { success?: unknown }).success === false)) {
+      // 自动粘贴失败时必须保底展示结果，不能让用户丢失本轮文本。
+      showFreeAskResult(resultText)
+    }
+  } catch {
+    showFreeAskResult(resultText)
+  }
+}
+
+export async function deliverVoiceResult(
+  resultText: string,
+  task: VoiceTask | null,
+  mode: VoiceMode,
+) {
+  // 自由提问不自动粘贴；其它模式先尝试粘贴，失败再展示悬浮结果。
+  if (task?.delivery === 'floating-panel' || mode === 'Ask') {
+    showFreeAskResult(resultText)
+    return
+  }
+
+  await pasteResultOrShowPanel(resultText)
+}

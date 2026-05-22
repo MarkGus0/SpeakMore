@@ -1,0 +1,147 @@
+import { getAudioStream, stopStreamTracks, type RecordingTransport } from './audioCapture'
+import { loadPromptDictionaryTerms, type PromptDictionaryTerm } from './dictionaryStore'
+import { ipcClient } from './ipc'
+import { loadModelsState } from './modelStore'
+import {
+  getCurrentLlmConfig,
+  getTranslationTargetLanguage,
+  type LlmRequestConfig,
+  type TranslationTargetLanguage,
+} from './settingsStore'
+import type { VoiceTask } from './voiceTaskResolver'
+import { createVoiceError, type VoiceMode } from './voiceTypes'
+
+export type RecordingStartSocketControls = {
+  ensureOpenWebSocket: () => Promise<WebSocket>
+  closeWebSocketSilently: () => void
+}
+
+export type PreparedRecordingStart = {
+  parameters: Record<string, unknown>
+  socket: WebSocket
+  stream: MediaStream
+  transport: RecordingTransport
+}
+
+type StartAudioParameterInputs = {
+  dictionaryTerms: PromptDictionaryTerm[]
+  llm: LlmRequestConfig
+  translationTargetLanguage: TranslationTargetLanguage | null
+}
+
+export async function prepareRecordingStart(
+  task: VoiceTask,
+  socketControls: RecordingStartSocketControls,
+): Promise<PreparedRecordingStart> {
+  // pendingStream 用来处理“麦克风已打开但其它准备失败”的中间态，防止资源泄漏。
+  let pendingStream: MediaStream | null = null
+  let shouldStopPendingStream = false
+
+  try {
+    // 启动前资源可以并行准备，但失败时必须把已经打开的麦克风和连接收掉。
+    const readyPromise = ensureVoiceServerReady()
+    const transportPromise = resolveRecordingTransport()
+    const socketPromise = socketControls.ensureOpenWebSocket()
+    const parameterInputsPromise = prepareStartAudioParameterInputs(task.mode)
+    const streamPromise = getAudioStream().then((stream) => {
+      pendingStream = stream
+      if (shouldStopPendingStream) {
+        stopStreamTracks(stream)
+      }
+      return stream
+    })
+
+    const [transport, socket, stream, , parameterInputs] = await Promise.all([
+      transportPromise,
+      socketPromise,
+      streamPromise,
+      readyPromise,
+      parameterInputsPromise,
+    ])
+    const parameters = getStartAudioParameters(task.mode, task.selectedText, transport, parameterInputs)
+
+    return { parameters, socket, stream, transport }
+  } catch (error) {
+    shouldStopPendingStream = true
+    stopStreamTracks(pendingStream)
+    socketControls.closeWebSocketSilently()
+    throw error
+  }
+}
+
+export function cleanupPreparedStart(
+  prepared: PreparedRecordingStart,
+  socketControls: RecordingStartSocketControls,
+) {
+  // 会话在准备完成后被取消时，还没正式进入 active 状态，也要清理刚拿到的资源。
+  stopStreamTracks(prepared.stream)
+  socketControls.closeWebSocketSilently()
+}
+
+export async function resolveRecordingTransport(): Promise<RecordingTransport> {
+  try {
+    const state = await loadModelsState()
+    const currentModel = state.models.find((model) => model.isCurrent)
+      ?? state.models.find((model) => model.id === state.currentModelId)
+    // 只有真正的流式 FunASR 模型需要浏览器侧直接推 PCM chunk。
+    return currentModel?.engine === 'funasr-streaming' ? 'pcm16' : 'webm'
+  } catch {
+    return 'webm'
+  }
+}
+
+export async function prepareStartAudioParameterInputs(mode: VoiceMode): Promise<StartAudioParameterInputs> {
+  const translationTargetLanguagePromise = mode === 'Translate'
+    ? getTranslationTargetLanguage()
+    : Promise.resolve(null)
+  const [dictionaryTerms, llm, translationTargetLanguage] = await Promise.all([
+    loadPromptDictionaryTerms(),
+    getCurrentLlmConfig(),
+    translationTargetLanguagePromise,
+  ])
+
+  return { dictionaryTerms, llm, translationTargetLanguage }
+}
+
+export function getStartAudioParameters(
+  mode: VoiceMode,
+  selectedText = '',
+  transport: RecordingTransport = 'webm',
+  inputs: StartAudioParameterInputs,
+): Record<string, unknown> {
+  // 词典和 LLM 配置是本轮请求参数，必须在 start_audio 前固定下来，避免录音中途变化。
+  const { dictionaryTerms, llm, translationTargetLanguage } = inputs
+  const dictionaryParameters = dictionaryTerms.length ? { dictionary_terms: dictionaryTerms } : {}
+  const audioFormatParameters = transport === 'pcm16'
+    ? { audio_format: { type: 'pcm_s16le', sample_rate: 16000, channels: 1 } }
+    : {}
+  const baseParameters = { llm, ...dictionaryParameters, ...audioFormatParameters }
+
+  // 自由提问只在有可信选区时把选区文本作为上下文发给后端。
+  if (mode === 'Ask') {
+    return selectedText ? { ...baseParameters, selected_text: selectedText } : baseParameters
+  }
+
+  if (mode !== 'Translate') return baseParameters
+
+  // 翻译目标语言是用户设置，必须随本轮 start_audio 参数一起发送。
+  return {
+    ...baseParameters,
+    output_language: translationTargetLanguage,
+  }
+}
+
+export async function ensureVoiceServerReady() {
+  let result: { success?: boolean; detail?: string; status?: string } | null = null
+
+  try {
+    // /ready 才代表当前 ASR 模型可接收请求，/health 只说明后端进程存在。
+    result = await ipcClient.invoke('audio:check-voice-server-ready') as { success?: boolean; detail?: string; status?: string }
+  } catch {
+    result = await ipcClient.invoke('audio:ensure-voice-server') as { success?: boolean; detail?: string; status?: string }
+  }
+
+  if (!result?.success) {
+    throw createVoiceError('backend_unavailable', result?.detail || result?.status || '')
+  }
+}
