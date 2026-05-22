@@ -442,9 +442,11 @@ test('主进程具备后台音频会话静音脚本入口和新 IPC', async () =
 
 test('recorder 在录音生命周期内请求静音和恢复后台音频', async () => {
   const recorder = await readProjectFile('src/services/recorder.ts');
+  const backgroundAudio = await readProjectFile('src/services/backgroundAudio.ts');
 
-  assert.match(recorder, /ipcClient\.invoke\(['"]audio:mute-background-sessions['"]/);
-  assert.match(recorder, /ipcClient\.invoke\(['"]audio:restore-background-sessions['"]/);
+  assert.match(recorder, /from ['"]\.\/backgroundAudio['"]/);
+  assert.match(backgroundAudio, /ipcClient\.invoke\(['"]audio:mute-background-sessions['"]/);
+  assert.match(backgroundAudio, /ipcClient\.invoke\(['"]audio:restore-background-sessions['"]/);
   assert.match(recorder, /completeSession[\s\S]*restoreBackgroundAudio/);
   assert.match(recorder, /failSession[\s\S]*restoreBackgroundAudio/);
   assert.match(recorder, /disposeRecorder[\s\S]*restoreBackgroundAudio/);
@@ -452,15 +454,18 @@ test('recorder 在录音生命周期内请求静音和恢复后台音频', async
 
 test('recorder 在录音期间分析真实麦克风音量并同步 inputLevel', async () => {
   const recorder = await readProjectFile('src/services/recorder.ts');
+  const audioLevelMonitor = await readProjectFile('src/services/audioLevelMonitor.ts');
 
-  assert.match(recorder, /AudioContext/);
-  assert.match(recorder, /AnalyserNode/);
-  assert.match(recorder, /setInterval\(tick,\s*50\)/);
+  assert.match(recorder, /from ['"]\.\/audioLevelMonitor['"]/);
+  assert.match(recorder, /startAudioLevelMonitoring\(stream,\s*updateSessionInputLevel\)/);
+  assert.match(audioLevelMonitor, /AudioContext/);
+  assert.match(audioLevelMonitor, /AnalyserNode/);
+  assert.match(audioLevelMonitor, /setInterval\(tick,\s*50\)/);
   assert.match(recorder, /inputLevel:/);
   assert.match(recorder, /setSession\(\{\s*\.\.\.session,\s*inputLevel:/);
-  assert.match(recorder, /cleanupAudioLevelMonitoring/);
-  assert.match(recorder, /clearInterval/);
-  assert.match(recorder, /audioContext\.close/);
+  assert.match(recorder, /cleanupSessionAudioLevelMonitoring/);
+  assert.match(audioLevelMonitor, /clearInterval/);
+  assert.match(audioLevelMonitor, /audioContext\.close/);
 });
 
 test('WebSocket 录音入口会等待主进程确认语音后端 ready', async () => {
@@ -1016,12 +1021,14 @@ test('P1 听写历史保存由全局常驻组件负责，不依赖首页挂载',
 
 test('P1 录音链路使用设置页选择的真实麦克风设备', async () => {
   const recorder = await readProjectFile('src/services/recorder.ts');
+  const audioCapture = await readProjectFile('src/services/audioCapture.ts');
 
-  assert.match(recorder, /getSelectedAudioDeviceId/);
+  assert.match(recorder, /from ['"]\.\/audioCapture['"]/);
+  assert.match(audioCapture, /getSelectedAudioDeviceId/);
   assert.match(recorder, /getTranslationTargetLanguage/);
-  assert.match(recorder, /selectedAudioDeviceId/);
+  assert.match(audioCapture, /selectedAudioDeviceId/);
   assert.match(recorder, /output_language/);
-  assert.match(recorder, /deviceId:\s*\{\s*exact:\s*selectedAudioDeviceId\s*\}/);
+  assert.match(audioCapture, /deviceId:\s*\{\s*exact:\s*selectedAudioDeviceId\s*\}/);
   assert.match(recorder, /recordingStartedAt/);
   assert.match(recorder, /durationMs/);
   assert.match(recorder, /textLength/);
