@@ -36,6 +36,7 @@
 - 主窗口关闭按钮只隐藏窗口到后台，托盘“退出”或真实应用退出才结束 Electron。
 - 历史、设置、统计、日志和录音相关本地数据由 Electron 主进程写入 `app.getPath('userData')/local-data/`。
 - 词典和自动学习候选也属于本地数据，由 Electron 主进程写入 `app.getPath('userData')/local-data/`，renderer 只能通过 IPC 访问。
+- `electron-app/renderer/src/services/recorder.ts` 是语音状态机 facade 和唯一对外入口；纯会话工具、后台音频静音、音频采集/PCM 发送和输入音量监控分别位于 `voiceSessionUtils.ts`、`backgroundAudio.ts`、`audioCapture.ts` 和 `audioLevelMonitor.ts`。
 
 ## 语音链路约束
 
@@ -47,7 +48,7 @@
   - `Escape`：取消当前未完成语音会话，或关闭当前悬浮面板。
 - `Escape` 取消语音会话时不能发送 `end_audio`，不能自动粘贴，必须忽略迟到结果。
 - 录音状态源由 `recorder.ts` 管理；悬浮胶囊只消费 `voice-state`，不要在悬浮胶囊里重新实现录音状态机。
-- 悬浮胶囊录音波形只在 `electron-app/renderer/public/floating-bar.html` 展示，音量来自 `recorder.ts` 基于同一份 `MediaStream` 计算出的 `inputLevel`。
+- 悬浮胶囊录音波形只在 `electron-app/renderer/public/floating-bar.html` 展示，音量来自 `audioLevelMonitor.ts` 基于同一份 `MediaStream` 计算出的 `inputLevel`，并由 `recorder.ts` 统一写入会话状态。
 - 自由提问录音时悬浮胶囊显示 `请随意提出问题`；最终结果不自动粘贴、不进入首页最近结果，而是通过 `floating-panel` IPC 进入独立悬浮面板展示。
 - 自由提问 `ask_anything` 当前先按“无工具安全版”设计：有 `selected_text` 时优先围绕选区执行翻译、解释、题目解答、总结、改写等任务；没有工具结果时不得编造天气、新闻、价格、政策等实时信息。
 - 快捷键层只输出意图，不直接决定最终语音任务；最终任务由快捷键意图和启动前选区快照共同解析。

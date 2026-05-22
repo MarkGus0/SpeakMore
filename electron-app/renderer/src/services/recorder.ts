@@ -1,16 +1,19 @@
 import { ipcClient } from './ipc'
+import { muteBackgroundAudio, resetBackgroundAudioRestoreState, restoreBackgroundAudio } from './backgroundAudio'
+import { createPcm16AudioSender, getAudioStream, stopStreamTracks, type AudioSender } from './audioCapture'
+import { cleanupAudioLevelMonitoring, startAudioLevelMonitoring } from './audioLevelMonitor'
 import { loadPromptDictionaryTerms, type PromptDictionaryTerm } from './dictionaryStore'
 import { hideFloatingPanel, showFreeAskResult } from './floatingPanel'
 import { loadModelsState } from './modelStore'
 import {
   getCurrentLlmConfig,
-  getSelectedAudioDeviceId,
   getTranslationTargetLanguage,
   type LlmRequestConfig,
   type TranslationTargetLanguage,
 } from './settingsStore'
 import type { ShortcutIntent } from './shortcutGuard'
 import { VOICE_SERVER_WS_URL } from './voiceServer'
+import { countTextLength, getRecordingDurationMs, normalizeVoiceError } from './voiceSessionUtils'
 import { resolveVoiceTask, type VoiceTask } from './voiceTaskResolver'
 import {
   createVoiceError,
@@ -47,10 +50,6 @@ type StartAudioParameterInputs = {
   translationTargetLanguage: TranslationTargetLanguage | null
 }
 
-type AudioSender = {
-  stop: () => void
-}
-
 // recorder 是渲染进程里的语音状态机，模块级变量用于保存当前唯一一轮录音会话。
 // 这里不放进 React state，是因为快捷键、悬浮窗、WebSocket 和页面组件都要共享同一份录音事实。
 let session: VoiceSession = initialVoiceSession
@@ -61,16 +60,8 @@ let pcmAudioSender: AudioSender | null = null
 let activeStream: MediaStream | null = null
 let transcribeTimer: number | null = null
 let recordingStartedAt = 0
-let backgroundAudioRestorePending = false
 let activeSessionId: string | null = null
 let activeTask: VoiceTask | null = null
-// 音量监控只服务悬浮胶囊显示，不参与真实音频发送。
-let levelAudioContext: AudioContext | null = null
-let levelAnalyser: AnalyserNode | null = null
-let levelSource: MediaStreamAudioSourceNode | null = null
-let levelTimerId: number | null = null
-let levelData: Float32Array<ArrayBuffer> | null = null
-let smoothedInputLevel = 0
 // 取消会话后，后端可能仍然返回旧 audioId 的消息，必须集中记录并过滤。
 const ignoredAudioIds = new Set<string>()
 const listeners = new Set<VoiceSessionListener>()
@@ -139,7 +130,7 @@ async function startRecordingFromIntent(intent: ShortcutIntent) {
   // audioId 是本轮录音的唯一边界，后续 WebSocket 消息必须匹配它才会被接受。
   // 新录音开始前先隐藏旧结果，避免用户看到上一轮悬浮面板误以为是当前结果。
   hideFloatingPanel()
-  backgroundAudioRestorePending = false
+  resetBackgroundAudioRestoreState()
   recordingStartedAt = 0
   const audioId = crypto.randomUUID()
   activeSessionId = audioId
@@ -167,7 +158,7 @@ async function startRecordingFromIntent(intent: ShortcutIntent) {
 
     const { parameters, socket, stream, transport } = prepared
     activeStream = stream
-    startAudioLevelMonitoring(stream)
+    startAudioLevelMonitoring(stream, updateSessionInputLevel)
 
     // PCM 模式绕过 MediaRecorder，避免把 paraformer 流式模型需要的原始音频包成 webm。
     if (transport === 'pcm16') {
@@ -316,7 +307,7 @@ export function stopRecording() {
     // 正常停止需要发送 end_audio，让后端 flush 音频并进入转写/润色阶段。
     setSessionStatus('stopping')
     stopActiveAudioSender()
-    cleanupAudioLevelMonitoring()
+    cleanupSessionAudioLevelMonitoring()
     cleanupStream()
 
     if (ws?.readyState === WebSocket.OPEN && session.audioId) {
@@ -336,7 +327,7 @@ export function cancelRecording() {
   if (!CANCELABLE_STATUSES.has(session.status)) return
 
   // 取消不是正常结束，不能发 end_audio，否则后端可能继续返回结果并触发粘贴。
-  const durationMs = getRecordingDurationMs()
+  const durationMs = getRecordingDurationMs(recordingStartedAt)
   activeSessionId = null
   activeTask = null
   if (session.audioId) {
@@ -398,7 +389,7 @@ function failSession(error: VoiceError) {
   activeSessionId = null
   activeTask = null
   clearTranscribeTimeout()
-  const durationMs = getRecordingDurationMs()
+  const durationMs = getRecordingDurationMs(recordingStartedAt)
   cleanupRecording()
   void restoreBackgroundAudio()
   setSession({ ...session, status: 'error', durationMs, error })
@@ -421,7 +412,7 @@ async function completeSession(refinedText: string) {
   // 完成路径必须先冻结本轮结果，再恢复后台音频和决定展示/粘贴方式。
   activeSessionId = null
   clearTranscribeTimeout()
-  const durationMs = getRecordingDurationMs()
+  const durationMs = getRecordingDurationMs(recordingStartedAt)
   const resultText = refinedText || session.rawText
   const textLength = countTextLength(resultText)
   const completedSession = {
@@ -603,145 +594,6 @@ async function ensureVoiceServerReady() {
   }
 }
 
-async function getAudioStream() {
-  try {
-    const selectedAudioDeviceId = await getSelectedAudioDeviceId()
-    const deviceConstraint = selectedAudioDeviceId === 'default' ? {} : { deviceId: { exact: selectedAudioDeviceId } }
-    // 这里关闭浏览器音频增强，避免 ASR 输入被浏览器自动处理成不可控结果。
-    return await navigator.mediaDevices.getUserMedia({
-      audio: {
-        ...deviceConstraint,
-        sampleRate: 32000,
-        channelCount: 1,
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false,
-      },
-    })
-  } catch (error) {
-    const name = error instanceof DOMException ? error.name : ''
-    if (name === 'NotAllowedError' || name === 'SecurityError') {
-      throw createVoiceError('microphone_permission_denied', String(error))
-    }
-    throw createVoiceError('microphone_unavailable', String(error))
-  }
-}
-
-function downsampleToSampleRate(input: Float32Array, inputSampleRate: number, targetSampleRate: number) {
-  // 浏览器采样率可能高于后端要求，发送前需要降采样；低于目标时不做插值放大。
-  if (inputSampleRate <= targetSampleRate) return input
-
-  // 流式模型固定吃 16k 单声道 PCM，浏览器实际采样率需要降到目标采样率。
-  const ratio = inputSampleRate / targetSampleRate
-  const outputLength = Math.floor(input.length / ratio)
-  const output = new Float32Array(outputLength)
-  for (let index = 0; index < outputLength; index += 1) {
-    output[index] = input[Math.floor(index * ratio)] ?? 0
-  }
-  return output
-}
-
-function encodePcm16(samples: Float32Array) {
-  const pcm = new Int16Array(samples.length)
-  for (let index = 0; index < samples.length; index += 1) {
-    // PCM16 只能表达 [-1, 1] 范围内的采样，编码前必须裁剪避免溢出。
-    const sample = Math.max(-1, Math.min(1, samples[index] ?? 0))
-    pcm[index] = Math.max(-32768, Math.min(32767, Math.round(sample * 32768)))
-  }
-  return pcm
-}
-
-function sendPcm16Chunk(socket: WebSocket, samples: Float32Array, inputSampleRate: number) {
-  // PCM 发送路径只负责实时推 chunk，不缓存整段音频。
-  if (socket.readyState !== WebSocket.OPEN) return
-
-  const downsampled = downsampleToSampleRate(samples, inputSampleRate, 16000)
-  if (!downsampled.length) return
-
-  const pcm = encodePcm16(downsampled)
-  const buffer = pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.byteLength)
-  socket.send(buffer)
-}
-
-function createPcm16AudioSender(stream: MediaStream, socket: WebSocket): AudioSender {
-  // 这个 sender 是 MediaRecorder 的替代实现，专门服务 paraformer 流式模型。
-  const audioContext = new AudioContext()
-  const source = audioContext.createMediaStreamSource(stream)
-  // ScriptProcessor 虽旧但这里足够小范围使用，用来直接拿到浏览器音频采样。
-  const processor = audioContext.createScriptProcessor(4096, 1, 1)
-  const inputSampleRate = audioContext.sampleRate || 16000
-
-  processor.onaudioprocess = (event) => {
-    const input = event.inputBuffer.getChannelData(0)
-    sendPcm16Chunk(socket, input, inputSampleRate)
-
-    for (let channel = 0; channel < event.outputBuffer.numberOfChannels; channel += 1) {
-      event.outputBuffer.getChannelData(channel).fill(0)
-    }
-  }
-
-  source.connect(processor)
-  processor.connect(audioContext.destination)
-  void audioContext.resume().catch(() => undefined)
-
-  return {
-    stop: () => {
-      processor.onaudioprocess = null
-      processor.disconnect()
-      source.disconnect()
-      void audioContext.close().catch(() => undefined)
-    },
-  }
-}
-
-function startAudioLevelMonitoring(stream: MediaStream) {
-  cleanupAudioLevelMonitoring()
-
-  try {
-    // 悬浮胶囊的波形只需要输入音量，不参与真实音频上传。
-    levelAudioContext = new AudioContext()
-    levelAnalyser = levelAudioContext.createAnalyser()
-    levelAnalyser.fftSize = 2048
-    levelAnalyser.smoothingTimeConstant = 0.18
-    levelSource = levelAudioContext.createMediaStreamSource(stream)
-    levelSource.connect(levelAnalyser)
-    levelData = new Float32Array(new ArrayBuffer(levelAnalyser.fftSize * Float32Array.BYTES_PER_ELEMENT))
-    smoothedInputLevel = 0
-    void levelAudioContext.resume().catch(() => undefined)
-
-    const tick = () => {
-      if (!levelAnalyser || !levelData) return
-
-      levelAnalyser.getFloatTimeDomainData(levelData)
-      let sum = 0
-      for (const sample of levelData) {
-        sum += sample * sample
-      }
-
-      const rms = Math.sqrt(sum / levelData.length)
-      const normalizedLevel = Math.min(1, rms * 3.2)
-      // 上升快、下降慢能让波形反馈更贴近用户感知，不至于频繁闪烁。
-      const smoothing = normalizedLevel > smoothedInputLevel ? 0.42 : 0.18
-      smoothedInputLevel += (normalizedLevel - smoothedInputLevel) * smoothing
-      updateSessionInputLevel(Number(smoothedInputLevel.toFixed(4)))
-    }
-
-    levelTimerId = window.setInterval(tick, 50)
-  } catch {
-    cleanupAudioLevelMonitoring()
-  }
-}
-
-function getRecordingDurationMs() {
-  // duration 只统计真正开始录音后的时间，连接准备阶段不计入听写时长。
-  return recordingStartedAt > 0 ? Math.max(0, Date.now() - recordingStartedAt) : 0
-}
-
-function countTextLength(text: string) {
-  // 统计统一用 trim 后长度，避免首尾空白影响历史统计。
-  return text.trim().length
-}
-
 function startTranscribeTimeout() {
   // end_audio 后必须有最终消息或错误消息，否则按 WebSocket 超时处理。
   clearTranscribeTimeout()
@@ -756,53 +608,15 @@ function clearTranscribeTimeout() {
   transcribeTimer = null
 }
 
-async function muteBackgroundAudio() {
-  try {
-    const result = await ipcClient.invoke('audio:mute-background-sessions') as { success?: boolean }
-    // 只在本轮确实静音成功时恢复，避免误改用户原本的音频会话状态。
-    backgroundAudioRestorePending = Boolean(result?.success)
-  } catch {
-    backgroundAudioRestorePending = false
-  }
-}
-
-async function restoreBackgroundAudio() {
-  if (!backgroundAudioRestorePending) return
-
-  try {
-    await ipcClient.invoke('audio:restore-background-sessions')
-  } finally {
-    backgroundAudioRestorePending = false
-  }
-}
-
 function cleanupStream() {
   // 麦克风 MediaStream 是最容易残留的资源，停止后必须释放所有 track。
   stopStreamTracks(activeStream)
   activeStream = null
 }
 
-function stopStreamTracks(stream: MediaStream | null) {
-  // stop track 才会真正释放浏览器侧麦克风占用。
-  if (!stream) return
-  stream.getTracks().forEach((track) => track.stop())
-}
-
-function cleanupAudioLevelMonitoring() {
-  if (levelTimerId !== null) window.clearInterval(levelTimerId)
-  levelTimerId = null
-
-  // 音量监控独立于录音上传，停止后必须归零，避免悬浮胶囊残留最后一帧音量。
-  levelSource?.disconnect()
-  levelSource = null
-  levelAnalyser = null
-  levelData = null
-  smoothedInputLevel = 0
-
-  const audioContext = levelAudioContext
-  levelAudioContext = null
-  if (audioContext) void audioContext.close().catch(() => undefined)
-
+function cleanupSessionAudioLevelMonitoring() {
+  cleanupAudioLevelMonitoring()
+  // 停止后必须归零，避免悬浮胶囊残留最后一帧音量。
   if (session.inputLevel !== 0) {
     setSession({ ...session, inputLevel: 0 })
   }
@@ -828,14 +642,6 @@ function stopActiveAudioSender() {
 function cleanupRecording() {
   // 录音清理只处理音频相关资源，WebSocket 是否关闭由调用路径决定。
   stopActiveAudioSender()
-  cleanupAudioLevelMonitoring()
+  cleanupSessionAudioLevelMonitoring()
   cleanupStream()
-}
-
-function normalizeVoiceError(error: unknown, fallbackCode: Parameters<typeof createVoiceError>[0]) {
-  // 已经是 VoiceError 的对象直接透传，普通异常才包成前端错误码。
-  if (error && typeof error === 'object' && 'code' in error && 'message' in error) {
-    return error as VoiceError
-  }
-  return createVoiceError(fallbackCode, error instanceof Error ? error.message : String(error))
 }
