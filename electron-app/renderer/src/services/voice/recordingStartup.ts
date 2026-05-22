@@ -1,13 +1,13 @@
 import { getAudioStream, stopStreamTracks, type RecordingTransport } from './audioCapture'
-import { loadPromptDictionaryTerms, type PromptDictionaryTerm } from './dictionaryStore'
-import { ipcClient } from './ipc'
-import { loadModelsState } from './modelStore'
+import { loadPromptDictionaryTerms, type PromptDictionaryTerm } from '../dictionaryStore'
+import { ipcClient } from '../ipc'
+import { loadModelsState } from '../modelStore'
 import {
   getCurrentLlmConfig,
   getTranslationTargetLanguage,
   type LlmRequestConfig,
   type TranslationTargetLanguage,
-} from './settingsStore'
+} from '../settingsStore'
 import type { VoiceTask } from './voiceTaskResolver'
 import { createVoiceError, type VoiceMode } from './voiceTypes'
 

@@ -1,5 +1,5 @@
-import { hideFloatingPanel, showFreeAskResult } from './floatingPanel'
-import { ipcClient } from './ipc'
+import { hideFloatingPanel, showFreeAskResult } from '../floatingPanel'
+import { ipcClient } from '../ipc'
 import type { VoiceTask } from './voiceTaskResolver'
 import type { VoiceMode } from './voiceTypes'
 

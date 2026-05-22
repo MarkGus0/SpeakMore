@@ -1,13 +1,13 @@
 import { ipcClient } from './ipc'
-import { muteBackgroundAudio, resetBackgroundAudioRestoreState, restoreBackgroundAudio } from './backgroundAudio'
-import { createPcm16AudioSender, stopStreamTracks, type AudioSender } from './audioCapture'
-import { cleanupAudioLevelMonitoring, startAudioLevelMonitoring } from './audioLevelMonitor'
-import { cleanupPreparedStart, prepareRecordingStart } from './recordingStartup'
-import { deliverVoiceResult, hideFloatingPanel } from './voiceResultDelivery'
+import { muteBackgroundAudio, resetBackgroundAudioRestoreState, restoreBackgroundAudio } from './voice/backgroundAudio'
+import { createPcm16AudioSender, stopStreamTracks, type AudioSender } from './voice/audioCapture'
+import { cleanupAudioLevelMonitoring, startAudioLevelMonitoring } from './voice/audioLevelMonitor'
+import { cleanupPreparedStart, prepareRecordingStart } from './voice/recordingStartup'
+import { deliverVoiceResult, hideFloatingPanel } from './voice/voiceResultDelivery'
 import type { ShortcutIntent } from './shortcutGuard'
-import { countTextLength, getRecordingDurationMs, normalizeVoiceError } from './voiceSessionUtils'
-import { createVoiceSocketManager } from './voiceSocket'
-import { resolveVoiceTask, type VoiceTask } from './voiceTaskResolver'
+import { countTextLength, getRecordingDurationMs, normalizeVoiceError } from './voice/voiceSessionUtils'
+import { createVoiceSocketManager } from './voice/voiceSocket'
+import { resolveVoiceTask, type VoiceTask } from './voice/voiceTaskResolver'
 import {
   createVoiceError,
   initialVoiceSession,
@@ -17,7 +17,7 @@ import {
   type VoiceMode,
   type VoiceSession,
   type VoiceStatus,
-} from './voiceTypes'
+} from './voice/voiceTypes'
 
 const TRANSCRIBE_TIMEOUT_MS = 60000
 // 只有这些状态代表本轮语音还没有产出最终结果，Escape 才允许取消。
