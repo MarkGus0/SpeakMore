@@ -459,16 +459,18 @@ test('recorder 在录音生命周期内请求静音和恢复后台音频', async
 
 test('recorder 在录音期间分析真实麦克风音量并同步 inputLevel', async () => {
   const recorder = await readProjectFile('src/services/recorder.ts');
+  const recordingTransportRuntime = await readProjectFile('src/services/voice/recordingTransportRuntime.ts');
   const audioLevelMonitor = await readProjectFile('src/services/voice/audioLevelMonitor.ts');
 
-  assert.match(recorder, /from ['"]\.\/voice\/audioLevelMonitor['"]/);
-  assert.match(recorder, /startAudioLevelMonitoring\(stream,\s*updateSessionInputLevel\)/);
+  assert.match(recorder, /from ['"]\.\/voice\/recordingTransportRuntime['"]/);
+  assert.match(recorder, /transportRuntime\.attach\(prepared,\s*updateSessionInputLevel/);
+  assert.match(recordingTransportRuntime, /from ['"]\.\/audioLevelMonitor['"]/);
+  assert.match(recordingTransportRuntime, /startAudioLevelMonitoring\(stream,\s*onInputLevel\)/);
   assert.match(audioLevelMonitor, /AudioContext/);
   assert.match(audioLevelMonitor, /AnalyserNode/);
   assert.match(audioLevelMonitor, /setInterval\(tick,\s*50\)/);
-  assert.match(recorder, /inputLevel:/);
-  assert.match(recorder, /setSession\(\{\s*\.\.\.session,\s*inputLevel:/);
-  assert.match(recorder, /cleanupSessionAudioLevelMonitoring/);
+  assert.match(recordingTransportRuntime, /resetInputLevel/);
+  assert.match(recordingTransportRuntime, /cleanupAudioLevelMonitoring/);
   assert.match(audioLevelMonitor, /clearInterval/);
   assert.match(audioLevelMonitor, /audioContext\.close/);
 });
@@ -557,6 +559,8 @@ test('P0 语音状态模型和 IPC client 已收口', async () => {
 test('P0 recorder 暴露可订阅状态机并支持主动取消', async () => {
   const recorder = await readProjectFile('src/services/recorder.ts');
   const voiceSocket = await readProjectFile('src/services/voice/voiceSocket.ts');
+  const voiceSessionLifecycle = await readProjectFile('src/services/voice/voiceSessionLifecycle.ts');
+  const voiceSessionStore = await readProjectFile('src/services/voice/voiceSessionStore.ts');
   const recorderSurface = `${recorder}\n${voiceSocket}`;
 
   assert.match(recorder, /subscribeVoiceSession/);
@@ -564,10 +568,15 @@ test('P0 recorder 暴露可订阅状态机并支持主动取消', async () => {
   assert.match(recorder, /toggleRecording/);
   assert.match(recorder, /cancelRecording/);
   assert.match(recorder, /disposeRecorder/);
+  assert.match(recorder, /createVoiceSessionStore/);
+  assert.match(recorder, /createVoiceSessionLifecycle/);
+  assert.match(voiceSessionStore, /clearListeners/);
+  assert.match(voiceSessionLifecycle, /isSessionActive/);
+  assert.match(voiceSessionLifecycle, /ignoredAudioIds/);
   assert.match(voiceSocket, /audio_processing_completed/);
   assert.match(recorderSurface, /audio_id/);
-  assert.match(recorder, /activeSessionId/);
-  assert.match(recorder, /ignoredAudioIds/);
+  assert.match(recorder, /lifecycle\.ignoreAudioId/);
+  assert.match(recorder, /lifecycle\.clearTranscribeTimeout/);
   assert.doesNotMatch(recorder, /export\s+function\s+getIsRecording/);
 });
 
@@ -1034,13 +1043,15 @@ test('P1 录音链路使用设置页选择的真实麦克风设备', async () =>
   const audioCapture = await readProjectFile('src/services/voice/audioCapture.ts');
   const recordingStartup = await readProjectFile('src/services/voice/recordingStartup.ts');
 
-  assert.match(recorder, /from ['"]\.\/voice\/audioCapture['"]/);
+  assert.match(recorder, /from ['"]\.\/voice\/recordingTransportRuntime['"]/);
+  assert.match(recorder, /from ['"]\.\/voice\/voiceSessionLifecycle['"]/);
+  assert.match(recordingStartup, /from ['"]\.\/audioCapture['"]/);
   assert.match(audioCapture, /getSelectedAudioDeviceId/);
   assert.match(recordingStartup, /getTranslationTargetLanguage/);
   assert.match(audioCapture, /selectedAudioDeviceId/);
   assert.match(recordingStartup, /output_language/);
   assert.match(audioCapture, /deviceId:\s*\{\s*exact:\s*selectedAudioDeviceId\s*\}/);
-  assert.match(recorder, /recordingStartedAt/);
+  assert.doesNotMatch(recorder, /recordingStartedAt/);
   assert.match(recorder, /durationMs/);
   assert.match(recorder, /textLength/);
 });
