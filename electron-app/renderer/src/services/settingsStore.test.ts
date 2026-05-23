@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { afterEach, test } from 'node:test'
 import type { LlmProvider } from './settingsStore'
+import sharedLlmProviders from '../../../../shared/llm-providers.json'
 
 type WindowWithIpc = typeof globalThis & {
   ipcRenderer?: {
@@ -56,6 +57,16 @@ test('loadSettings 会补齐默认大模型 provider 配置', async () => {
   assert.equal(settings.llm.providers.some((provider: LlmProvider) => provider.id === 'anthropic'), true)
   assert.equal(settings.llm.providers.some((provider: LlmProvider) => provider.id === 'custom'), true)
   assert.equal(settings.llm.models.deepseek, 'deepseek-chat')
+})
+
+test('默认 LLM provider 元数据来自共享 JSON', async () => {
+  installSettingsResponse({})
+  const settingsStore = await loadSettingsStore('shared-llm-providers')
+
+  assert.strictEqual(settingsStore.DEFAULT_LLM_PROVIDERS, sharedLlmProviders)
+
+  const customProvider = settingsStore.DEFAULT_LLM_PROVIDERS.find((provider: LlmProvider) => provider.id === 'custom')
+  assert.equal(customProvider?.allowBaseUrlEdit, true)
 })
 
 test('getCurrentLlmConfig 返回当前 provider 可直接传给后端的配置', async () => {

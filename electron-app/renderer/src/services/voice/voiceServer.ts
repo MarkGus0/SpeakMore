@@ -1,3 +1,8 @@
+/**
+ * 本地语音后端地址
+ *
+ * 需要调整 renderer 连接 FastAPI WebSocket 入口时看这里。
+ */
 export const VOICE_SERVER_HTTP_BASE_URL = 'http://127.0.0.1:8000'
 
 const REVERSE_COMPAT_WS_VERSION = 'win_local'

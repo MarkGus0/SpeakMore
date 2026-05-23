@@ -1,3 +1,8 @@
+/**
+ * 语音会话工具函数
+ *
+ * 需要统一录音时长、文本长度或异常归一化规则时看这里。
+ */
 import { createVoiceError, type VoiceError } from './voiceTypes'
 
 export function getRecordingDurationMs(recordingStartedAt: number, now = Date.now()) {

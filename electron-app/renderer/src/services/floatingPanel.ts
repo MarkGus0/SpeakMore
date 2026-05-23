@@ -1,3 +1,8 @@
+/**
+ * 悬浮面板命令
+ *
+ * 需要展示快捷键提示或自由提问结果时看这里。
+ */
 import { ipcClient } from './ipc'
 
 export type FloatingPanelPayload =

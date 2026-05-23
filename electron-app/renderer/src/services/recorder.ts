@@ -1,3 +1,8 @@
+/**
+ * 语音会话对外 facade
+ *
+ * 需要理解录音启动、停止、取消、状态订阅和 UI 对接时看这里。
+ */
 import { ipcClient } from './ipc'
 import { muteBackgroundAudio, resetBackgroundAudioRestoreState, restoreBackgroundAudio } from './voice/backgroundAudio'
 import { createPcm16AudioSender, stopStreamTracks, type AudioSender } from './voice/audioCapture'

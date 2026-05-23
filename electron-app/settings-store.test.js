@@ -2,10 +2,19 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   DEFAULT_LANGUAGE,
+  DEFAULT_LLM_PROVIDERS,
   DEFAULT_TRANSLATION_TARGET_LANGUAGE,
   normalizeLocalSettings,
   createSettingsStore,
 } = require('./settings-store');
+const sharedLlmProviders = require('../shared/llm-providers.json');
+
+test('默认 LLM provider 元数据来自共享 JSON', () => {
+  assert.strictEqual(DEFAULT_LLM_PROVIDERS, sharedLlmProviders);
+
+  const openaiProvider = DEFAULT_LLM_PROVIDERS.find((provider) => provider.id === 'openai');
+  assert.equal(openaiProvider.defaultModel, 'gpt-5.4');
+});
 
 test('normalizeLocalSettings 会回退不支持的翻译目标语言和空设备', () => {
   const settings = normalizeLocalSettings({

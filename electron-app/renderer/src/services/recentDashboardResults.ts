@@ -1,3 +1,8 @@
+/**
+ * 首页最近结果筛选规则
+ *
+ * 需要从历史记录中提取非自由提问的最近完成结果时看这里。
+ */
 import type { VoiceHistoryItem } from './historyStore'
 
 export const RECENT_DASHBOARD_RESULT_LIMIT = 3

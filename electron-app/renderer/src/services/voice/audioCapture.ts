@@ -1,3 +1,8 @@
+/**
+ * 录音输入采集和发送
+ *
+ * 需要处理麦克风、webm、PCM16 或流式音频 chunk 时看这里。
+ */
 import { getSelectedAudioDeviceId } from '../settingsStore'
 import { createVoiceError } from './voiceTypes'
 

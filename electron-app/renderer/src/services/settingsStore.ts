@@ -1,5 +1,11 @@
+/**
+ * 本地设置数据源
+ *
+ * 需要读取或保存麦克风、翻译目标语言、大模型配置时看这里。
+ */
 import { ipcClient } from './ipc'
 import translationTargetLanguages from '../../../../shared/translation-target-languages.json'
+import llmProviders from '../../../../shared/llm-providers.json'
 
 export type TranslationTargetLanguage = string
 export type LlmAuthType = 'bearer' | 'anthropic'
@@ -47,72 +53,7 @@ export type BackendReloadResult = {
   code?: string
 }
 
-export const DEFAULT_LLM_PROVIDERS: LlmProvider[] = [
-  {
-    id: 'deepseek',
-    label: 'DeepSeek',
-    baseUrl: 'https://api.deepseek.com/v1',
-    defaultModel: 'deepseek-chat',
-    allowBaseUrlEdit: false,
-    authType: 'bearer',
-  },
-  {
-    id: 'openai',
-    label: 'OpenAI',
-    baseUrl: 'https://api.openai.com/v1',
-    defaultModel: 'gpt-5.4',
-    allowBaseUrlEdit: false,
-    authType: 'bearer',
-  },
-  {
-    id: 'zai',
-    label: 'Z.AI',
-    baseUrl: 'https://api.z.ai/api/paas/v4',
-    defaultModel: 'glm-4.6',
-    allowBaseUrlEdit: false,
-    authType: 'bearer',
-  },
-  {
-    id: 'openrouter',
-    label: 'OpenRouter',
-    baseUrl: 'https://openrouter.ai/api/v1',
-    defaultModel: 'openai/gpt-5.4',
-    allowBaseUrlEdit: false,
-    authType: 'bearer',
-  },
-  {
-    id: 'anthropic',
-    label: 'Anthropic',
-    baseUrl: 'https://api.anthropic.com/v1',
-    defaultModel: 'claude-sonnet-4-5',
-    allowBaseUrlEdit: false,
-    authType: 'anthropic',
-  },
-  {
-    id: 'groq',
-    label: 'Groq',
-    baseUrl: 'https://api.groq.com/openai/v1',
-    defaultModel: 'llama-3.3-70b-versatile',
-    allowBaseUrlEdit: false,
-    authType: 'bearer',
-  },
-  {
-    id: 'cerebras',
-    label: 'Cerebras',
-    baseUrl: 'https://api.cerebras.ai/v1',
-    defaultModel: 'llama-3.3-70b',
-    allowBaseUrlEdit: false,
-    authType: 'bearer',
-  },
-  {
-    id: 'custom',
-    label: 'Custom',
-    baseUrl: 'http://localhost:11434/v1',
-    defaultModel: '',
-    allowBaseUrlEdit: true,
-    authType: 'bearer',
-  },
-]
+export const DEFAULT_LLM_PROVIDERS: LlmProvider[] = llmProviders as LlmProvider[]
 
 function createDefaultLlmSettings(): LlmSettings {
   return {

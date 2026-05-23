@@ -1,3 +1,8 @@
+/**
+ * 词典数据源
+ *
+ * 需要管理手动词条、自动候选词或构造语音请求词典参数时看这里。
+ */
 import { ipcClient } from './ipc'
 
 export type DictionaryEntrySource = 'manual' | 'auto'
