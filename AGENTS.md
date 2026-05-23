@@ -29,9 +29,12 @@
 - 模型下载取消语义为“取消本次下载结果”：底层下载线程可能继续完成，完成后若已取消则清理该模型缓存。
 - `electron-app/main.js` 加载 `electron-app/renderer/dist/index.html`、`floating-bar.html` 和 `floating-panel.html`。
 - `electron-app/main.js` 是 Electron 主进程组合根，主要负责创建服务、依赖接线和生命周期注册；窗口、悬浮状态、IPC、本地数据、后端客户端、音频会话、文本观察和 Right Alt 监听逻辑应放在对应独立模块。
+- `electron-app/main-ipc-registry.js` 负责按上下文注册 IPC，主进程只注入依赖，不在 `main.js` 里直接拼装各通道业务逻辑。
+- `electron-app/voice-backend-client.js` 是主进程与语音后端的统一 HTTP facade，模型接口、配置重载和语音流协议分别拆到 `model-backend-client.js`、`voice-config-client.js`、`voice-flow-form-data.js` 和 `voice-backend-urls.js`。
 - Windows 托盘图标由 `electron-app/assets/tray-placeholder.png` 提供，并通过 `electron-app/app-paths.js` 暴露给主进程；不要把托盘图标重新指回 `app-extracted`。
 - 结构测试不能假设所有主进程逻辑都内联在 `main.js`，应检查 `main.js` 与拆分后的生产模块共同组成的主进程实现面。
 - Windows 文本观察 helper 位于 `electron-app/windows-text-observer/`，只服务本轮粘贴后的短时自动学习，不参与基础录音链路。
+- `electron-app/renderer/src/components/AppShell.tsx` 只承担全局壳层和持久化订阅，页面状态拆到 `useGlobalShortcutBridge`、`useVoiceHistoryPersistence`、`useSettingsPageState` 和 `useModelsPageState` 之类的专用 hook。
 - 前端修改后必须在 `electron-app/renderer/` 下运行 `npm run build`，再重启 Electron 验证。
 - 主窗口关闭按钮只隐藏窗口到后台，托盘“退出”或真实应用退出才结束 Electron。
 - 历史、设置、统计、日志和录音相关本地数据由 Electron 主进程写入 `app.getPath('userData')/local-data/`。
