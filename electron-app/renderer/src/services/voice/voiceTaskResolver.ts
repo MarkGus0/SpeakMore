@@ -1,3 +1,8 @@
+/**
+ * 快捷键意图解析为语音任务
+ *
+ * 需要确认听写、语音翻译、自由提问和选区上下文规则时看这里。
+ */
 import type { ShortcutIntent } from '../shortcutGuard'
 import {
   getFocusedSelectionSnapshot,

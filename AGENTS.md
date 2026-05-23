@@ -100,6 +100,7 @@
 - 大模型配置优先由设置页写入 Electron 主进程 `settings.json`，并随语音或文本请求通过 `parameters.llm` 传给后端；后端 `server/.env` 的 DeepSeek 配置只作为兼容回退。
 - 大模型配置保存后由 Electron 主进程调用后端 `POST /config/reload`，用于刷新 `.env` 回退配置和清理旧 DeepSeek fallback client；不要把这个重载做成 ASR 模型重载或 Electron 自动重启后端。
 - 当前支持的网络 provider 为 `DeepSeek`、`OpenAI`、`Z.AI`、`OpenRouter`、`Anthropic`、`Groq`、`Cerebras` 和 `Custom`；`Custom` 允许编辑兼容 OpenAI 的 Base URL。
+- 大模型 provider 元数据唯一来源是 `shared/llm-providers.json`；主进程 `electron-app/settings-store.js` 和 renderer `settingsStore.ts` 都必须从该共享 JSON 派生默认配置，不要重新内联 provider 列表。
 - 不要把真实 API Key 写入仓库。Electron 本地 `settings.json` 是本机明文配置，不应作为同步或提交内容。
 - `server/.env.example` 是环境变量模板，真实 `server/.env` 不提交。
 - 历史记录和设置统一走 Electron 主进程 JSON 数据源，renderer 不应把这类业务数据写入 `localStorage`。

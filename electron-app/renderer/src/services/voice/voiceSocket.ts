@@ -1,3 +1,8 @@
+/**
+ * 语音 WebSocket 生命周期
+ *
+ * 需要处理后端流式消息、完成、错误或迟到消息过滤时看这里。
+ */
 import { VOICE_SERVER_WS_URL } from './voiceServer'
 import { createVoiceError, type VoiceError } from './voiceTypes'
 

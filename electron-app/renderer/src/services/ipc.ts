@@ -1,3 +1,8 @@
+/**
+ * renderer IPC 最小封装
+ *
+ * 需要从前端调用主进程能力或订阅主进程事件时看这里。
+ */
 type IpcListener = (event: unknown, payload: unknown) => void
 
 // 这里把 preload 注入到 window 上的 ipcRenderer 能力显式收口成一个最小接口，避免 renderer 直接依赖 Electron 类型。

@@ -1,3 +1,8 @@
+/**
+ * 听写历史和统计数据源
+ *
+ * 需要保存语音结果、读取历史列表或展示累计统计时看这里。
+ */
 import type { VoiceErrorCode, VoiceMode } from './voice/voiceTypes'
 import { ipcClient } from './ipc'
 

@@ -2,16 +2,48 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   createVoiceBackendClient,
+} = require('./voice-backend-client');
+const {
+  createVoiceBackendUrls,
+} = require('./voice-backend-urls');
+const {
+  resolveVoiceServerProbeDetail,
+} = require('./backend-http-utils');
+const {
   buildVoiceFlowParameters,
   buildVoiceFlowFormData,
+  bufferFromVoicePayload,
   normalizeVoiceMode,
-} = require('./voice-backend-client');
+} = require('./voice-flow-form-data');
+
+test('createVoiceBackendUrls 统一生成后端接口 URL', () => {
+  const urls = createVoiceBackendUrls('http://localhost:9000');
+
+  assert.equal(urls.healthUrl, 'http://localhost:9000/health');
+  assert.equal(urls.readyUrl, 'http://localhost:9000/ready');
+  assert.equal(urls.voiceFlowUrl, 'http://localhost:9000/ai/voice_flow');
+  assert.equal(urls.modelsUrl, 'http://localhost:9000/models');
+  assert.equal(urls.configReloadUrl, 'http://localhost:9000/config/reload');
+});
+
+test('resolveVoiceServerProbeDetail 优先使用后端 detail 或 status', () => {
+  assert.equal(resolveVoiceServerProbeDetail('/ready', 503, { detail: 'warming' }), 'warming');
+  assert.equal(resolveVoiceServerProbeDetail('/ready', 200, { status: 'ready' }), 'ready');
+  assert.equal(resolveVoiceServerProbeDetail('/ready', 503, null), '/ready 返回 503');
+});
 
 test('normalizeVoiceMode 统一兼容听写、翻译和自由提问模式', () => {
   assert.equal(normalizeVoiceMode('dictation'), 'transcript');
   assert.equal(normalizeVoiceMode('ask_anything'), 'ask_anything');
   assert.equal(normalizeVoiceMode('translation'), 'translation');
   assert.equal(normalizeVoiceMode('unknown'), 'transcript');
+});
+
+test('bufferFromVoicePayload 兼容 Buffer、ArrayBuffer、TypedArray 和序列化 Buffer', () => {
+  assert.deepEqual(bufferFromVoicePayload({ audioBuffer: Buffer.from('abc') }), Buffer.from('abc'));
+  assert.deepEqual(bufferFromVoicePayload({ arrayBuffer: Uint8Array.from([1, 2]).buffer }), Buffer.from([1, 2]));
+  assert.deepEqual(bufferFromVoicePayload({ data: Uint8Array.from([3, 4]) }), Buffer.from([3, 4]));
+  assert.deepEqual(bufferFromVoicePayload({ audio: { type: 'Buffer', data: [5, 6] } }), Buffer.from([5, 6]));
 });
 
 test('buildVoiceFlowParameters 解析选区、输出语言和 LLM 配置', () => {

@@ -1,3 +1,8 @@
+/**
+ * 语音结果交付策略
+ *
+ * 需要判断自动粘贴、粘贴失败兜底或自由提问展示时看这里。
+ */
 import { hideFloatingPanel, showFreeAskResult } from '../floatingPanel'
 import { ipcClient } from '../ipc'
 import type { VoiceTask } from './voiceTaskResolver'

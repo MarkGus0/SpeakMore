@@ -1,3 +1,8 @@
+/**
+ * 后台音频静音封装
+ *
+ * 需要检查录音期间 Windows 音频会话静音和恢复语义时看这里。
+ */
 import { ipcClient } from '../ipc'
 
 let backgroundAudioRestorePending = false

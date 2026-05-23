@@ -1,3 +1,8 @@
+/**
+ * 语音链路共享类型
+ *
+ * 需要理解 VoiceSession、错误码、模式映射或悬浮胶囊状态时看这里。
+ */
 export const voiceModes = ['Dictate', 'Ask', 'Translate'] as const
 
 export type VoiceMode = typeof voiceModes[number]

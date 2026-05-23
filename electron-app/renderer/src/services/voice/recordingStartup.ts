@@ -1,3 +1,8 @@
+/**
+ * 录音启动准备编排
+ *
+ * 需要理解后端 ready、WebSocket、麦克风、词典和 start_audio 参数时看这里。
+ */
 import { getAudioStream, stopStreamTracks, type RecordingTransport } from './audioCapture'
 import { loadPromptDictionaryTerms, type PromptDictionaryTerm } from '../dictionaryStore'
 import { ipcClient } from '../ipc'

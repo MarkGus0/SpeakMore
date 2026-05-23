@@ -1,3 +1,8 @@
+/**
+ * 当前焦点和选区快照
+ *
+ * 需要处理 UIA 选区、剪贴板兜底或焦点一致性时看这里。
+ */
 import { ipcClient } from '../ipc'
 
 export type SelectedTextResult = {

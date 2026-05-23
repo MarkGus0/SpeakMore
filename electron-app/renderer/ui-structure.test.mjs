@@ -41,7 +41,12 @@ const readMainProcessSurface = () => readProjectFiles([
   '../settings-ipc.js',
   '../settings-store.js',
   '../text-observer-service.js',
+  '../backend-http-utils.js',
+  '../model-backend-client.js',
+  '../voice-backend-urls.js',
   '../voice-backend-client.js',
+  '../voice-config-client.js',
+  '../voice-flow-form-data.js',
   '../window-manager.js',
   '../window-manager-options.js',
 ]);
@@ -896,6 +901,7 @@ test('P1 设置页与设置 store 统一走主进程 JSON 数据源', async () =
   const settingsPage = await readProjectFile('src/pages/Settings.tsx');
   const main = await readMainProcessSurface();
   const translationLanguages = JSON.parse(await readProjectFile('../../shared/translation-target-languages.json'));
+  const llmProviders = JSON.parse(await readProjectFile('../../shared/llm-providers.json'));
 
   assert.match(main, /SETTINGS_FILE_NAME\s*=\s*['"]settings\.json['"]/);
   assert.match(main, /function\s+readLocalSettings\(/);
@@ -916,6 +922,8 @@ test('P1 设置页与设置 store 统一走主进程 JSON 数据源', async () =
   assert.match(settingsStore, /TRANSLATION_TARGET_LANGUAGES/);
   assert.match(settingsStore, /DEFAULT_TRANSLATION_TARGET_LANGUAGE/);
   assert.match(main, /translation-target-languages\.json/);
+  assert.match(settingsStore, /llm-providers\.json/);
+  assert.match(main, /llm-providers\.json/);
   assert.match(main, /DEFAULT_LLM_PROVIDERS/);
   assert.match(main, /buildCurrentLlmRequestConfig/);
   assert.match(main, /translationTargetLanguage:\s*DEFAULT_TRANSLATION_TARGET_LANGUAGE/);
@@ -944,13 +952,10 @@ test('P1 设置页与设置 store 统一走主进程 JSON 数据源', async () =
   assert.match(settingsPage, /保存/);
   assert.match(settingsPage, /取消/);
   assert.match(settingsPage, /reloadLlmBackendConfig/);
-  assert.match(settingsStore, /DeepSeek/);
-  assert.match(settingsStore, /OpenAI/);
-  assert.match(settingsStore, /OpenRouter/);
-  assert.match(settingsStore, /Anthropic/);
-  assert.match(settingsStore, /Groq/);
-  assert.match(settingsStore, /Cerebras/);
-  assert.match(settingsStore, /Custom/);
+  assert.deepEqual(
+    llmProviders.map((provider) => provider.label),
+    ['DeepSeek', 'OpenAI', 'Z.AI', 'OpenRouter', 'Anthropic', 'Groq', 'Cerebras', 'Custom'],
+  );
   assert.match(settingsPage, /type="password"/);
   assert.match(settingsPage, /placeholder="请输入 API Key"/);
 });

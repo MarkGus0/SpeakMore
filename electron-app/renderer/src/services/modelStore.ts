@@ -1,3 +1,8 @@
+/**
+ * 转录模型数据源
+ *
+ * 需要通过 renderer 查询、下载、取消、删除或选择 ASR 模型时看这里。
+ */
 import { ipcClient } from './ipc'
 
 export type ModelInfo = {

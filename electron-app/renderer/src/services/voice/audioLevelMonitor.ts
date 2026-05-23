@@ -1,3 +1,8 @@
+/**
+ * 录音输入音量监控
+ *
+ * 需要给悬浮胶囊提供 inputLevel 或调整波形响应时看这里。
+ */
 let levelAudioContext: AudioContext | null = null
 let levelAnalyser: AnalyserNode | null = null
 let levelSource: MediaStreamAudioSourceNode | null = null
