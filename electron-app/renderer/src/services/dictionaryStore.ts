@@ -36,6 +36,15 @@ export type PromptDictionaryTerm = {
   aliases: string[]
 }
 
+export type DictionaryChangedPayload = {
+  reason?: string
+  changedAt?: string
+}
+
+function normalizeDictionaryChangedPayload(payload: unknown): DictionaryChangedPayload {
+  return payload && typeof payload === 'object' ? payload as DictionaryChangedPayload : {}
+}
+
 export async function listDictionaryEntries(): Promise<DictionaryEntry[]> {
   try {
     const entries = await ipcClient.invoke<DictionaryEntry[]>('dictionary:list')
@@ -104,4 +113,10 @@ export async function loadPromptDictionaryTerms(): Promise<PromptDictionaryTerm[
   } catch {
     return []
   }
+}
+
+export function subscribeDictionaryChanges(listener: (payload: DictionaryChangedPayload) => void) {
+  return ipcClient.on('dictionary:changed', (_event, payload) => {
+    listener(normalizeDictionaryChangedPayload(payload))
+  })
 }

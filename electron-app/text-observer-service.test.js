@@ -53,13 +53,16 @@ test('createTextObserverService 启动时向 helper 发送 observe-start', async
 test('createTextObserverService 观察到文本修改后会调用 learnCorrection', async () => {
   const child = createFakeProcess();
   const learned = [];
+  const dictionaryChanges = [];
   const service = createTextObserverService({
     processPlatform: 'win32',
     exePath: 'C:\\helper.exe',
     spawnProcess: () => child,
     learnCorrection: async (candidate) => {
       learned.push(candidate);
+      return { candidates: [{ id: 'candidate-1' }], promotedEntry: null };
     },
+    emitDictionaryChanged: (payload) => dictionaryChanges.push(payload),
   });
 
   await service.textObservationManager.start({
@@ -74,6 +77,36 @@ test('createTextObserverService 观察到文本修改后会调用 learnCorrectio
 
   assert.equal(result.success, true);
   assert.equal(learned.length > 0, true);
+  assert.deepEqual(dictionaryChanges, [{ reason: 'auto-learning-candidate' }]);
   assert.equal(child.stdin.writes.some((chunk) => chunk.includes('"type":"observe-stop"')), true);
+  await service.textObservationManager.stop('test');
+});
+
+test('createTextObserverService 没有提取到纠错候选时不广播词典变更', async () => {
+  const child = createFakeProcess();
+  const dictionaryChanges = [];
+  const service = createTextObserverService({
+    processPlatform: 'win32',
+    exePath: 'C:\\helper.exe',
+    spawnProcess: () => child,
+    learnCorrection: async () => {
+      throw new Error('不应调用学习');
+    },
+    emitDictionaryChanged: (payload) => dictionaryChanges.push(payload),
+  });
+
+  await service.textObservationManager.start({
+    audioId: 'audio-3',
+    pastedText: 'hello',
+    focusInfo: null,
+  });
+  const result = await service.textObservationManager.handleObservedText({
+    audioId: 'audio-3',
+    text: 'hello',
+  });
+
+  assert.equal(result.success, true);
+  assert.deepEqual(result.candidates, []);
+  assert.deepEqual(dictionaryChanges, []);
   await service.textObservationManager.stop('test');
 });

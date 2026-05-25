@@ -36,6 +36,7 @@ function createMainIpcRegistry({
   crypto,
   defaultLanguage,
   dictionaryRepository,
+  emitDictionaryChanged = () => undefined,
   fs,
   getFloatingBar,
   getInteractiveCardPayload,
@@ -115,6 +116,7 @@ function createMainIpcRegistry({
     registers.registerDictionaryIpcHandlers({
       ipcMain,
       dictionaryRepository,
+      emitDictionaryChanged,
     });
     registers.registerAudioIpcHandlers({
       ipcMain,

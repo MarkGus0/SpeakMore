@@ -185,6 +185,7 @@ const textObserverService = createTextObserverService({
   spawnProcess: spawn,
   fileExists: fs.existsSync,
   learnCorrection: async (candidate) => learnDictionaryCorrection(candidate),
+  emitDictionaryChanged,
   logger: console,
 });
 
@@ -221,6 +222,13 @@ function sendToMain(channel, payload) {
   if (target && !target.isDestroyed()) {
     target.webContents.send(channel, payload);
   }
+}
+
+function emitDictionaryChanged(payload = {}) {
+  sendToMain('dictionary:changed', {
+    ...payload,
+    changedAt: new Date().toISOString(),
+  });
 }
 
 function sendToFloatingBar(channel, payload) {
@@ -316,6 +324,7 @@ const mainIpcRegistry = createMainIpcRegistry({
   crypto,
   defaultLanguage: DEFAULT_LANGUAGE,
   dictionaryRepository,
+  emitDictionaryChanged,
   fs,
   getFloatingBar,
   getInteractiveCardPayload: () => pendingInteractiveCardPayload,

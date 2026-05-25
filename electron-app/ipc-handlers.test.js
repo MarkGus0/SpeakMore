@@ -153,6 +153,7 @@ test('registerSettingsIpcHandlers 注册设置通道', async () => {
 test('registerDictionaryIpcHandlers 注册词典通道', async () => {
   const ipcMain = createFakeIpcMain();
   const calls = [];
+  const changes = [];
   const repository = {
     readDictionaryEntries: () => ['entry'],
     createEntry: (payload) => {
@@ -179,13 +180,54 @@ test('registerDictionaryIpcHandlers 注册词典通道', async () => {
     readPromptDictionaryTerms: () => ['term'],
   };
 
-  registerDictionaryIpcHandlers({ ipcMain, dictionaryRepository: repository });
+  registerDictionaryIpcHandlers({
+    ipcMain,
+    dictionaryRepository: repository,
+    emitDictionaryChanged: (payload) => changes.push(payload),
+  });
 
   assert.deepEqual(await ipcMain.invoke('dictionary:list'), ['entry']);
   assert.deepEqual(await ipcMain.invoke('dictionary:create', { id: 1 }), { id: 1 });
+  assert.deepEqual(await ipcMain.invoke('dictionary:update', { id: 1, status: 'disabled' }), { id: 1, status: 'disabled' });
+  assert.equal(await ipcMain.invoke('dictionary:delete', 'dict-1'), true);
   assert.deepEqual(await ipcMain.invoke('dictionary:candidates-list'), ['candidate']);
+  assert.equal(await ipcMain.invoke('dictionary:candidate-promote', 'candidate-1'), true);
+  assert.equal(await ipcMain.invoke('dictionary:candidate-ignore', 'candidate-2'), true);
   assert.deepEqual(await ipcMain.invoke('dictionary:prompt-terms'), ['term']);
   assert.deepEqual(calls[0], ['create', { id: 1 }]);
+  assert.deepEqual(changes.map((item) => item.reason), [
+    'manual-create',
+    'manual-update',
+    'manual-delete',
+    'candidate-promote',
+    'candidate-ignore',
+  ]);
+});
+
+test('registerDictionaryIpcHandlers 写入失败时不广播词典变更', async () => {
+  const ipcMain = createFakeIpcMain();
+  const changes = [];
+
+  registerDictionaryIpcHandlers({
+    ipcMain,
+    emitDictionaryChanged: (payload) => changes.push(payload),
+    dictionaryRepository: {
+      readDictionaryEntries: () => [],
+      createEntry: () => ({ success: false, code: 'dictionary_entry_invalid' }),
+      updateEntry: () => ({ success: false, code: 'dictionary_entry_not_found' }),
+      deleteEntry: () => ({ success: true }),
+      readDictionaryCandidates: () => [],
+      promoteCandidate: () => ({ success: false, code: 'dictionary_candidate_not_found' }),
+      ignoreCandidate: () => ({ success: true }),
+      readPromptDictionaryTerms: () => [],
+    },
+  });
+
+  await ipcMain.invoke('dictionary:create', {});
+  await ipcMain.invoke('dictionary:update', { id: 'missing' });
+  await ipcMain.invoke('dictionary:candidate-promote', 'missing');
+
+  assert.deepEqual(changes, []);
 });
 
 test('registerAudioIpcHandlers 注册音频通道', async () => {

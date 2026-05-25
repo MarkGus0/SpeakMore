@@ -8,6 +8,7 @@ function createTextObserverService({
   fileExists = () => true,
   createSessionManager = createTextObservationSessionManager,
   learnCorrection = async () => undefined,
+  emitDictionaryChanged = () => undefined,
   logger = console,
   timeoutMs = 120000,
   now = () => new Date().toISOString(),
@@ -67,7 +68,13 @@ function createTextObserverService({
     stopNativeObservation: async (session) => {
       sendTextObserverMessage({ type: 'observe-stop', audioId: session.audioId });
     },
-    learnCorrection: async (candidate) => learnCorrection(candidate),
+    learnCorrection: async (candidate) => {
+      const result = await learnCorrection(candidate);
+      emitDictionaryChanged({
+        reason: result?.promotedEntry ? 'auto-learning-promoted' : 'auto-learning-candidate',
+      });
+      return result;
+    },
     now,
     timeoutMs,
   });
