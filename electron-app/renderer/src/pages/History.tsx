@@ -3,9 +3,11 @@ import { Box, TextField, Typography, Button, IconButton } from '@mui/material'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import { listVoiceHistory, clearVoiceHistory, VOICE_HISTORY_UPDATED_EVENT } from '../services/historyStore'
 import { ipcClient } from '../services/ipc'
+import { useI18n } from '../i18n'
 import { pageSx, pageTitleSx } from '../uiTokens'
 
 export default function History() {
+  const { language, t } = useI18n()
   const [query, setQuery] = useState('')
   const [items, setItems] = useState<Awaited<ReturnType<typeof listVoiceHistory>>>([])
 
@@ -37,9 +39,9 @@ export default function History() {
 
   return (
     <Box sx={{ ...pageSx, maxWidth: 800, display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <Typography sx={{ ...pageTitleSx, mb: 2 }}>历史记录</Typography>
+      <Typography sx={{ ...pageTitleSx, mb: 2 }}>{t('history.title')}</Typography>
       <TextField
-        placeholder="搜索历史记录..."
+        placeholder={t('history.searchPlaceholder')}
         size="small"
         fullWidth
         value={query}
@@ -49,7 +51,7 @@ export default function History() {
       <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
         {filteredItems.length === 0 ? (
           <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Typography sx={{ color: 'text.secondary' }}>暂无历史记录</Typography>
+            <Typography sx={{ color: 'text.secondary' }}>{t('history.empty')}</Typography>
           </Box>
         ) : (
           filteredItems.map((item) => (
@@ -59,9 +61,13 @@ export default function History() {
             >
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
                 <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>
-                  {new Date(item.createdAt).toLocaleString()}
+                  {new Date(item.createdAt).toLocaleString(language)}
                 </Typography>
-                <IconButton size="small" onClick={() => handleCopy(item.refinedText || item.rawText)}>
+                <IconButton
+                  size="small"
+                  aria-label={t('history.copyResult')}
+                  onClick={() => handleCopy(item.refinedText || item.rawText)}
+                >
                   <ContentCopyIcon sx={{ fontSize: 16 }} />
                 </IconButton>
               </Box>
@@ -71,7 +77,7 @@ export default function History() {
           ))
         )}
       </Box>
-      <Button sx={{ color: 'red', alignSelf: 'center', mt: 2 }} onClick={handleClear}>清除所有历史</Button>
+      <Button sx={{ color: 'red', alignSelf: 'center', mt: 2 }} onClick={handleClear}>{t('history.clearAll')}</Button>
     </Box>
   )
 }

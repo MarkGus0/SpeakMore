@@ -4,7 +4,12 @@
  * 需要调整界面语言或翻译目标语言时看这里。
  */
 import { Box, MenuItem, Select, Typography } from '@mui/material'
-import { TRANSLATION_TARGET_LANGUAGES, type LocalSettings } from '../../services/settingsStore'
+import { useI18n, type TranslationKey } from '../../i18n'
+import {
+  TRANSLATION_TARGET_LANGUAGES,
+  type InterfaceLanguage,
+  type LocalSettings,
+} from '../../services/settingsStore'
 
 type LanguageSettingsSectionProps = {
   settings: LocalSettings
@@ -22,22 +27,29 @@ const rowSx = {
 const sectionTitle = { fontSize: 16, fontWeight: 500, mt: 3, mb: 1 }
 
 export default function LanguageSettingsSection({ settings, updateSettings }: LanguageSettingsSectionProps) {
+  const { setLanguage, t } = useI18n()
+
   return (
     <>
-      <Typography sx={sectionTitle}>语言</Typography>
+      <Typography sx={sectionTitle}>{t('settings.language')}</Typography>
       <Box sx={rowSx}>
-        <Typography>界面语言</Typography>
+        <Typography>{t('settings.interfaceLanguage')}</Typography>
         <Select
           size="small"
           value={settings.preferredLanguage}
-          onChange={(event) => void updateSettings({ ...settings, preferredLanguage: String(event.target.value) as 'zh-CN' })}
+          onChange={(event) => {
+            const preferredLanguage = String(event.target.value) as InterfaceLanguage
+            setLanguage(preferredLanguage)
+            void updateSettings({ ...settings, preferredLanguage })
+          }}
           sx={{ minWidth: 240 }}
         >
-          <MenuItem value="zh-CN">简体中文 (zh-CN)</MenuItem>
+          <MenuItem value="zh-CN">{t('settings.zhCn')}</MenuItem>
+          <MenuItem value="en-US">{t('settings.enUs')}</MenuItem>
         </Select>
       </Box>
       <Box sx={rowSx}>
-        <Typography>翻译目标语言</Typography>
+        <Typography>{t('settings.translationTargetLanguage')}</Typography>
         <Select
           size="small"
           value={settings.translationTargetLanguage}
@@ -49,7 +61,7 @@ export default function LanguageSettingsSection({ settings, updateSettings }: La
         >
           {TRANSLATION_TARGET_LANGUAGES.map((language) => (
             <MenuItem key={language.id} value={language.id}>
-              {language.displayName}
+              {t(`settings.translationTarget.${language.id}` as TranslationKey)}
             </MenuItem>
           ))}
         </Select>

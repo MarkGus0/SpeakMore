@@ -1,12 +1,12 @@
 /**
  * 录音输入采集和发送
  *
- * 需要处理麦克风、webm、PCM16 或流式音频 chunk 时看这里。
+ * 需要处理麦克风和流式 PCM16 音频 chunk 时看这里。
  */
 import { getSelectedAudioDeviceId } from '../settingsStore'
 import { createVoiceError } from './voiceTypes'
 
-export type RecordingTransport = 'webm' | 'pcm16'
+export type RecordingTransport = 'pcm16'
 
 export type AudioSender = {
   stop: () => void
@@ -79,7 +79,7 @@ export function sendPcm16Chunk(socket: WebSocket, samples: Float32Array, inputSa
 }
 
 export function createPcm16AudioSender(stream: MediaStream, socket: WebSocket): AudioSender {
-  // 这个 sender 是 MediaRecorder 的替代实现，专门服务 paraformer 流式模型。
+  // 这个 sender 直接推 PCM16 chunk，专门服务 paraformer 流式模型。
   const audioContext = new AudioContext()
   const source = audioContext.createMediaStreamSource(stream)
   // ScriptProcessor 虽旧但这里足够小范围使用，用来直接拿到浏览器音频采样。

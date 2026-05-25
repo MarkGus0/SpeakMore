@@ -5,6 +5,7 @@
  */
 import { Box, MenuItem, Select, Switch, Typography } from '@mui/material'
 import { type LocalSettings } from '../../services/settingsStore'
+import { useI18n } from '../../i18n'
 
 type AudioDevice = { deviceId: string; label?: string }
 
@@ -25,9 +26,11 @@ const rowSx = {
 const sectionTitle = { fontSize: 16, fontWeight: 500, mt: 3, mb: 1 }
 
 export default function AudioSettingsSection({ settings, devices, updateSettings }: AudioSettingsSectionProps) {
+  const { t } = useI18n()
+
   return (
     <>
-      <Typography sx={sectionTitle}>麦克风</Typography>
+      <Typography sx={sectionTitle}>{t('settings.microphone')}</Typography>
       <Box sx={rowSx}>
         <Select
           size="small"
@@ -35,18 +38,18 @@ export default function AudioSettingsSection({ settings, devices, updateSettings
           onChange={(event) => void updateSettings({ ...settings, selectedAudioDeviceId: String(event.target.value) })}
           sx={{ minWidth: 240 }}
         >
-          <MenuItem value="default">系统默认</MenuItem>
+          <MenuItem value="default">{t('settings.systemDefault')}</MenuItem>
           {devices.map((device) => (
             <MenuItem key={device.deviceId} value={device.deviceId}>
-              {device.label || `输入设备 ${device.deviceId}`}
+              {device.label || `${t('settings.inputDevice')} ${device.deviceId}`}
             </MenuItem>
           ))}
         </Select>
       </Box>
 
-      <Typography sx={sectionTitle}>其他设置</Typography>
+      <Typography sx={sectionTitle}>{t('settings.other')}</Typography>
       <Box sx={rowSx}>
-        <Typography>开机启动</Typography>
+        <Typography>{t('settings.autoLaunch')}</Typography>
         <Switch
           checked={settings.launchAtSystemStartup}
           onChange={(_event, checked) => {

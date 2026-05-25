@@ -15,7 +15,6 @@ const {
   buildVoiceFlowParameters,
   buildVoiceFlowFormData,
 } = require('./voice-flow-form-data');
-const { createModelBackendClient } = require('./model-backend-client');
 const { createVoiceConfigClient } = require('./voice-config-client');
 
 function createVoiceBackendClient({
@@ -27,12 +26,6 @@ function createVoiceBackendClient({
 } = {}) {
   const urls = createVoiceBackendUrls(voiceServerUrl);
   const formOptions = { buildCurrentLlmRequestConfig, normalizeLlmRequestConfig };
-  const callModelBackend = createModelBackendClient({
-    modelsUrl: urls.modelsUrl,
-    fetchImpl,
-    readJsonSafely,
-    resolveVoiceServerProbeDetail,
-  });
   const reloadVoiceServerConfig = createVoiceConfigClient({
     configReloadUrl: urls.configReloadUrl,
     fetchImpl,
@@ -98,7 +91,6 @@ function createVoiceBackendClient({
   return {
     urls,
     checkVoiceServerReady,
-    callModelBackend,
     reloadVoiceServerConfig,
     callVoiceFlowBackend,
   };

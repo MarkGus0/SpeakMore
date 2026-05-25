@@ -8,7 +8,6 @@ function createFakeRegisters(calls) {
     'registerHistoryIpcHandlers',
     'registerSettingsIpcHandlers',
     'registerDictionaryIpcHandlers',
-    'registerModelIpcHandlers',
     'registerAudioIpcHandlers',
     'registerFocusedContextIpcHandlers',
     'registerFileIpcHandlers',
@@ -72,7 +71,6 @@ test('createMainIpcRegistry 只注册一次并按固定顺序分发依赖', () =
     writeLocalSettings: () => undefined,
     reloadVoiceServerConfig: () => undefined,
     dictionaryRepository: { name: 'dictionaryRepository' },
-    callModelBackend: () => undefined,
     callVoiceFlowBackend: () => undefined,
     checkVoiceServerReady: () => undefined,
     muteBackgroundSessionsForRecording: () => undefined,
@@ -103,13 +101,12 @@ test('createMainIpcRegistry 只注册一次并按固定顺序分发依赖', () =
   registry.registerIpcHandlers();
   registry.registerIpcHandlers();
 
-  assert.equal(calls.length, 12);
+  assert.equal(calls.length, 11);
   assert.deepEqual(calls.map(([name]) => name), [
     'registerClipboardUserIpcHandlers',
     'registerHistoryIpcHandlers',
     'registerSettingsIpcHandlers',
     'registerDictionaryIpcHandlers',
-    'registerModelIpcHandlers',
     'registerAudioIpcHandlers',
     'registerFocusedContextIpcHandlers',
     'registerFileIpcHandlers',
@@ -122,8 +119,8 @@ test('createMainIpcRegistry 只注册一次并按固定顺序分发依赖', () =
   assert.equal(calls[0][1].clipboard, clipboard);
   assert.equal(calls[0][1].getLocalUser(), localUser);
   assert.equal(calls[1][1].getDeviceId(), 'device-1');
-  assert.equal(calls[8][1].randomUUID(), 'uuid-1');
-  assert.equal(calls[9][1].createMainWindow(), 'main-window');
-  assert.equal(calls[11][1].localStores, localCompatState.localStores);
-  assert.equal('getSystemInfo' in calls[11][1], false);
+  assert.equal(calls[7][1].randomUUID(), 'uuid-1');
+  assert.equal(calls[8][1].createMainWindow(), 'main-window');
+  assert.equal(calls[10][1].localStores, localCompatState.localStores);
+  assert.equal('getSystemInfo' in calls[10][1], false);
 });

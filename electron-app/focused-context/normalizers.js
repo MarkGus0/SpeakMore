@@ -97,6 +97,12 @@ function normalizeFocusedInfo(value) {
 }
 
 // 自动粘贴前必须确认当前焦点是真正可写文本目标，不能只凭控件存在就发送 Ctrl+V。
+function normalizeStringArray(value) {
+  return Array.isArray(value)
+    ? value.filter((item) => typeof item === 'string' && item.trim()).map((item) => item.trim())
+    : [];
+}
+
 function normalizeFocusedTextTargetResult(value) {
   if (!value || typeof value !== 'object') {
     return {
@@ -108,6 +114,11 @@ function normalizeFocusedTextTargetResult(value) {
       textPattern: false,
       isReadOnly: false,
       controlType: '',
+      appFamily: '',
+      foregroundHwnd: '',
+      focusHwnd: '',
+      caretHwnd: '',
+      matchedSignals: [],
     };
   }
 
@@ -123,16 +134,42 @@ function normalizeFocusedTextTargetResult(value) {
     : typeof value.controlType === 'string'
       ? value.controlType
       : '';
+  const appFamily = typeof value.app_family === 'string'
+    ? value.app_family
+    : typeof value.appFamily === 'string'
+      ? value.appFamily
+      : '';
+  const foregroundHwnd = String(value.foreground_hwnd ?? value.foregroundHwnd ?? '');
+  const focusHwnd = String(value.focus_hwnd ?? value.focusHwnd ?? '');
+  const caretHwnd = String(value.caret_hwnd ?? value.caretHwnd ?? '');
+  const matchedSignals = normalizeStringArray(value.matched_signals ?? value.matchedSignals);
+  const isUiaSuccess = source === 'uia'
+    && confidence === 'confirmed'
+    && !isReadOnly
+    && (valuePattern || textPattern);
+  const isCaretSuccess = source === 'win32_caret'
+    && (confidence === 'confirmed' || confidence === 'high')
+    && Boolean(caretHwnd);
+  const isAppCompatSuccess = source === 'app_compat'
+    && (confidence === 'weak' || confidence === 'app_specific')
+    && Boolean(appFamily)
+    && matchedSignals.length > 0;
+  const success = Boolean(value.success) && (isUiaSuccess || isCaretSuccess || isAppCompatSuccess);
 
   return {
-    success: Boolean(value.success) && source === 'uia' && confidence === 'confirmed' && !isReadOnly && (valuePattern || textPattern),
-    source: Boolean(value.success) ? source : 'none',
-    confidence: Boolean(value.success) ? confidence : 'none',
+    success,
+    source: success ? source : 'none',
+    confidence: success ? confidence : 'none',
     reason,
     valuePattern,
     textPattern,
     isReadOnly,
     controlType,
+    appFamily,
+    foregroundHwnd,
+    focusHwnd,
+    caretHwnd,
+    matchedSignals,
   };
 }
 
@@ -160,6 +197,7 @@ module.exports = {
   isSameFocusedContext,
   normalizeFocusedInfo,
   normalizeFocusedTextTargetResult,
+  normalizeStringArray,
   normalizeSelectedTextResult,
   normalizeUiaSelectionResult,
 };

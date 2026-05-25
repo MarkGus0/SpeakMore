@@ -153,8 +153,147 @@ if ($null -ne $textPattern -and ($controlType -eq "ControlType.Edit" -or $contro
 } | ConvertTo-Json -Compress
 `;
 
+const WIN32_CARET_TARGET_SCRIPT = `
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+
+public class Win32CaretTarget {
+  [StructLayout(LayoutKind.Sequential)]
+  public struct RECT {
+    public int left;
+    public int top;
+    public int right;
+    public int bottom;
+  }
+
+  [StructLayout(LayoutKind.Sequential)]
+  public struct GUITHREADINFO {
+    public int cbSize;
+    public int flags;
+    public IntPtr hwndActive;
+    public IntPtr hwndFocus;
+    public IntPtr hwndCapture;
+    public IntPtr hwndMenuOwner;
+    public IntPtr hwndMoveSize;
+    public IntPtr hwndCaret;
+    public RECT rcCaret;
+  }
+
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+  [DllImport("user32.dll")] public static extern bool GetGUIThreadInfo(uint idThread, ref GUITHREADINFO lpgui);
+  [DllImport("user32.dll")] public static extern bool IsChild(IntPtr hWndParent, IntPtr hWnd);
+}
+"@
+
+$foreground = [Win32CaretTarget]::GetForegroundWindow()
+if ($foreground -eq [IntPtr]::Zero) {
+  [PSCustomObject]@{ success = $false; source = "none"; confidence = "none"; reason = "no_foreground_window"; foreground_hwnd = ""; focus_hwnd = ""; caret_hwnd = "" } | ConvertTo-Json -Compress
+  exit 0
+}
+
+$processId = 0
+$threadId = [Win32CaretTarget]::GetWindowThreadProcessId($foreground, [ref]$processId)
+$info = New-Object Win32CaretTarget+GUITHREADINFO
+$info.cbSize = [System.Runtime.InteropServices.Marshal]::SizeOf([type][Win32CaretTarget+GUITHREADINFO])
+
+if (-not [Win32CaretTarget]::GetGUIThreadInfo($threadId, [ref]$info)) {
+  [PSCustomObject]@{ success = $false; source = "none"; confidence = "none"; reason = "gui_thread_info_unavailable"; foreground_hwnd = $foreground.ToInt64().ToString(); focus_hwnd = ""; caret_hwnd = "" } | ConvertTo-Json -Compress
+  exit 0
+}
+
+$caret = $info.hwndCaret
+$focus = $info.hwndFocus
+$isCaretInForegroundTree = ($caret -ne [IntPtr]::Zero) -and (($caret -eq $foreground) -or [Win32CaretTarget]::IsChild($foreground, $caret))
+$isFocusInForegroundTree = ($focus -eq [IntPtr]::Zero) -or ($focus -eq $foreground) -or [Win32CaretTarget]::IsChild($foreground, $focus)
+
+if ($isCaretInForegroundTree -and $isFocusInForegroundTree) {
+  [PSCustomObject]@{
+    success = $true
+    source = "win32_caret"
+    confidence = "confirmed"
+    reason = "caret"
+    foreground_hwnd = $foreground.ToInt64().ToString()
+    focus_hwnd = $focus.ToInt64().ToString()
+    caret_hwnd = $caret.ToInt64().ToString()
+    flags = $info.flags
+    caret_rect = @{ left = $info.rcCaret.left; top = $info.rcCaret.top; right = $info.rcCaret.right; bottom = $info.rcCaret.bottom }
+  } | ConvertTo-Json -Compress
+  exit 0
+}
+
+[PSCustomObject]@{
+  success = $false
+  source = "none"
+  confidence = "none"
+  reason = "caret_unavailable"
+  foreground_hwnd = $foreground.ToInt64().ToString()
+  focus_hwnd = $focus.ToInt64().ToString()
+  caret_hwnd = $caret.ToInt64().ToString()
+  flags = $info.flags
+} | ConvertTo-Json -Compress
+`;
+
+const FOCUSED_WINDOW_TREE_SCRIPT = `
+Add-Type @"
+using System;
+using System.Text;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+
+public class Win32WindowTree {
+  public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, StringBuilder className, int count);
+  [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr hWndParent, EnumWindowsProc lpEnumFunc, IntPtr lParam);
+}
+"@
+
+$foreground = [Win32WindowTree]::GetForegroundWindow()
+if ($foreground -eq [IntPtr]::Zero) {
+  [PSCustomObject]@{ success = $false; reason = "no_foreground_window"; foreground_hwnd = ""; process_name = ""; window_title = ""; class_names = @() } | ConvertTo-Json -Compress
+  exit 0
+}
+
+$processId = 0
+[void][Win32WindowTree]::GetWindowThreadProcessId($foreground, [ref]$processId)
+$process = $null
+try { $process = Get-Process -Id $processId -ErrorAction Stop } catch {}
+
+$titleBuilder = New-Object System.Text.StringBuilder 512
+[void][Win32WindowTree]::GetWindowText($foreground, $titleBuilder, $titleBuilder.Capacity)
+
+$classNames = New-Object System.Collections.Generic.List[string]
+$foregroundClass = New-Object System.Text.StringBuilder 256
+[void][Win32WindowTree]::GetClassName($foreground, $foregroundClass, $foregroundClass.Capacity)
+if ($foregroundClass.Length -gt 0) { [void]$classNames.Add($foregroundClass.ToString()) }
+
+$callback = [Win32WindowTree+EnumWindowsProc]{
+  param($child, $lparam)
+  $builder = New-Object System.Text.StringBuilder 256
+  [void][Win32WindowTree]::GetClassName($child, $builder, $builder.Capacity)
+  if ($builder.Length -gt 0) { [void]$classNames.Add($builder.ToString()) }
+  return $true
+}
+[void][Win32WindowTree]::EnumChildWindows($foreground, $callback, [IntPtr]::Zero)
+
+[PSCustomObject]@{
+  success = $true
+  foreground_hwnd = $foreground.ToInt64().ToString()
+  process_name = if ($process) { $process.ProcessName } else { "" }
+  process_id = [int]$processId
+  window_title = $titleBuilder.ToString()
+  class_names = @($classNames | Select-Object -Unique)
+} | ConvertTo-Json -Compress
+`;
+
 module.exports = {
+  FOCUSED_WINDOW_TREE_SCRIPT,
   FOCUSED_TEXT_TARGET_SCRIPT,
   FOCUSED_WINDOW_SCRIPT,
   UIA_SELECTION_SCRIPT,
+  WIN32_CARET_TARGET_SCRIPT,
 };

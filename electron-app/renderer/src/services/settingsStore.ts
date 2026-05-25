@@ -8,6 +8,7 @@ import translationTargetLanguages from '../../../../shared/translation-target-la
 import llmProviders from '../../../../shared/llm-providers.json'
 
 export type TranslationTargetLanguage = string
+export type InterfaceLanguage = 'zh-CN' | 'en-US'
 export type LlmAuthType = 'bearer' | 'anthropic'
 
 export type TranslationTargetLanguageConfig = {
@@ -22,6 +23,7 @@ export const DEFAULT_TRANSLATION_TARGET_LANGUAGE: TranslationTargetLanguage =
   TRANSLATION_TARGET_LANGUAGES[0]?.id ?? 'en'
 
 const translationTargetLanguageIds = new Set(TRANSLATION_TARGET_LANGUAGES.map((language) => language.id))
+const interfaceLanguageIds = new Set<InterfaceLanguage>(['zh-CN', 'en-US'])
 
 export type LlmProvider = {
   id: string
@@ -65,7 +67,7 @@ function createDefaultLlmSettings(): LlmSettings {
 }
 
 export type LocalSettings = {
-  preferredLanguage: 'zh-CN'
+  preferredLanguage: InterfaceLanguage
   translationTargetLanguage: TranslationTargetLanguage
   launchAtSystemStartup: boolean
   selectedAudioDeviceId: string
@@ -86,6 +88,12 @@ function normalizeTranslationTargetLanguage(value: unknown): TranslationTargetLa
   return translationTargetLanguageIds.has(languageId)
     ? languageId
     : DEFAULT_TRANSLATION_TARGET_LANGUAGE
+}
+
+function normalizeInterfaceLanguage(value: unknown): InterfaceLanguage {
+  return typeof value === 'string' && interfaceLanguageIds.has(value as InterfaceLanguage)
+    ? value as InterfaceLanguage
+    : 'zh-CN'
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -146,7 +154,7 @@ export function normalizeLlmSettings(value: unknown): LlmSettings {
 function normalizeSettings(settings?: Partial<LocalSettings> | null): LocalSettings {
   return {
     ...defaultSettings,
-    preferredLanguage: 'zh-CN',
+    preferredLanguage: normalizeInterfaceLanguage(settings?.preferredLanguage),
     translationTargetLanguage: normalizeTranslationTargetLanguage(settings?.translationTargetLanguage),
     launchAtSystemStartup: Boolean(settings?.launchAtSystemStartup),
     selectedAudioDeviceId: settings?.selectedAudioDeviceId || 'default',

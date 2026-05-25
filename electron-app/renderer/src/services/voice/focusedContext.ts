@@ -137,6 +137,14 @@ export async function getFocusedSelectionSnapshot(): Promise<FocusedSelectionSna
   }
 }
 
+export async function getFocusedInfoSnapshot(): Promise<FocusedInfo | null> {
+  try {
+    return normalizeFocusedInfo(await ipcClient.invoke('focused-context:get-last-focused-info'))
+  } catch {
+    return null
+  }
+}
+
 export async function isFocusedSelectionStillActive(focusInfo: FocusedInfo | null): Promise<boolean> {
   if (!focusInfo) return false
 

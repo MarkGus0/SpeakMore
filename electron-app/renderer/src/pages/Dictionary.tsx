@@ -15,13 +15,14 @@ import {
   type DictionaryEntry,
 } from '../services/dictionaryStore'
 import { splitDictionaryAliases } from '../services/dictionaryForm'
+import { useI18n, type TranslationKey } from '../i18n'
 import { pageSx, pageTitleSx } from '../uiTokens'
 
 const filters = [
-  { label: '全部', value: 'all' },
-  { label: '自动添加', value: 'auto' },
-  { label: '手动添加', value: 'manual' },
-  { label: '候选', value: 'candidate' },
+  { labelKey: 'dictionary.filterAll', value: 'all' },
+  { labelKey: 'dictionary.filterAuto', value: 'auto' },
+  { labelKey: 'dictionary.filterManual', value: 'manual' },
+  { labelKey: 'dictionary.filterCandidate', value: 'candidate' },
 ] as const
 
 type FilterValue = (typeof filters)[number]['value']
@@ -31,11 +32,6 @@ const itemSx = {
   borderRadius: '8px',
   border: '1px solid rgba(119,119,119,0.10)',
   p: 1.5,
-}
-
-function formatDate(value: string) {
-  if (!value) return '-'
-  return new Date(value).toLocaleString()
 }
 
 function matchesQuery(entry: DictionaryEntry, query: string) {
@@ -52,6 +48,7 @@ function candidateMatchesQuery(candidate: DictionaryCandidate, query: string) {
 }
 
 export default function Dictionary() {
+  const { language, t } = useI18n()
   const [entries, setEntries] = useState<DictionaryEntry[]>([])
   const [candidates, setCandidates] = useState<DictionaryCandidate[]>([])
   const [filter, setFilter] = useState<FilterValue>('all')
@@ -95,7 +92,7 @@ export default function Dictionary() {
     })
 
     if (!created) {
-      setSaveError('保存失败，请检查词条内容')
+      setSaveError(t('dictionary.saveError'))
       return
     }
 
@@ -130,21 +127,21 @@ export default function Dictionary() {
   return (
     <Box sx={{ ...pageSx, maxWidth: 920, display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
       <Box sx={{ mb: 2 }}>
-        <Typography sx={pageTitleSx}>词典</Typography>
+        <Typography sx={pageTitleSx}>{t('dictionary.title')}</Typography>
       </Box>
 
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr auto' }, gap: 1.5, mb: 2, alignItems: 'start' }}>
         <TextField
           size="small"
-          label="正确写法"
+          label={t('dictionary.correctLabel')}
           value={phrase}
           onChange={(event) => setPhrase(event.target.value)}
-          helperText={!phrase.trim() ? '填写正确写法后可保存' : ' '}
+          helperText={!phrase.trim() ? t('dictionary.correctHelper') : ' '}
         />
         <TextField
           size="small"
-          label="错误写法或别名"
-          placeholder="多个写法可用逗号或换行分隔"
+          label={t('dictionary.aliasLabel')}
+          placeholder={t('dictionary.aliasPlaceholder')}
           value={aliases}
           onChange={(event) => setAliases(event.target.value)}
         />
@@ -154,7 +151,7 @@ export default function Dictionary() {
           disabled={!phrase.trim()}
           sx={{ minWidth: 96, height: 40 }}
         >
-          保存词条
+          {t('dictionary.saveEntry')}
         </Button>
       </Box>
 
@@ -168,7 +165,7 @@ export default function Dictionary() {
         {filters.map((item) => (
           <Chip
             key={item.value}
-            label={item.label}
+            label={t(item.labelKey as TranslationKey)}
             color={filter === item.value ? 'primary' : 'default'}
             variant={filter === item.value ? 'filled' : 'outlined'}
             onClick={() => setFilter(item.value)}
@@ -176,7 +173,7 @@ export default function Dictionary() {
         ))}
         <TextField
           size="small"
-          placeholder="搜索词条..."
+          placeholder={t('dictionary.searchPlaceholder')}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           sx={{ ml: { xs: 0, md: 'auto' }, width: { xs: '100%', md: 260 } }}
@@ -192,14 +189,14 @@ export default function Dictionary() {
                   {candidate.wrong} → {candidate.correct}
                 </Typography>
                 <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5 }}>
-                  候选 · 出现 {candidate.count} 次 · 最近学习 {formatDate(candidate.lastSeenAt)}
+                  {t('dictionary.candidate')} · {t('dictionary.seenCount')} {candidate.count} {t('dictionary.times')} · {t('dictionary.lastLearned')} {new Date(candidate.lastSeenAt).toLocaleString(language)}
                 </Typography>
               </Box>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
-                <IconButton size="small" aria-label="确认候选词" onClick={() => void handlePromoteCandidate(candidate.id)}>
+                <IconButton size="small" aria-label={t('dictionary.confirmCandidate')} onClick={() => void handlePromoteCandidate(candidate.id)}>
                   <CheckIcon sx={{ fontSize: 18 }} />
                 </IconButton>
-                <IconButton size="small" aria-label="忽略候选词" onClick={() => void handleIgnoreCandidate(candidate.id)}>
+                <IconButton size="small" aria-label={t('dictionary.ignoreCandidate')} onClick={() => void handleIgnoreCandidate(candidate.id)}>
                   <CloseIcon sx={{ fontSize: 18 }} />
                 </IconButton>
               </Box>
@@ -213,24 +210,24 @@ export default function Dictionary() {
               <Box sx={{ minWidth: 0 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
                   <Typography sx={{ fontSize: 15, fontWeight: 500 }}>{entry.phrase}</Typography>
-                  <Chip size="small" label={entry.source === 'auto' ? '自动添加' : '手动添加'} variant="outlined" />
-                  {entry.status === 'disabled' ? <Chip size="small" label="已停用" /> : null}
+                  <Chip size="small" label={entry.source === 'auto' ? t('dictionary.autoAdded') : t('dictionary.manualAdded')} variant="outlined" />
+                  {entry.status === 'disabled' ? <Chip size="small" label={t('dictionary.disabled')} /> : null}
                 </Box>
                 <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.75 }}>
-                  {entry.aliases.length ? `别名：${entry.aliases.join('、')}` : '暂无别名'}
+                  {entry.aliases.length ? `${t('dictionary.aliases')}: ${entry.aliases.join('、')}` : t('dictionary.noAliases')}
                 </Typography>
                 <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.25 }}>
-                  命中 {entry.hitCount} 次 · 更新 {formatDate(entry.updatedAt)}
+                  {t('dictionary.hit')} {entry.hitCount} {t('dictionary.times')} · {t('dictionary.updated')} {new Date(entry.updatedAt).toLocaleString(language)}
                 </Typography>
               </Box>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
-                <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>启用</Typography>
+                <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>{t('dictionary.enabled')}</Typography>
                 <Switch
                   size="small"
                   checked={entry.status === 'active'}
                   onChange={() => void handleToggleEntry(entry)}
                 />
-                <IconButton size="small" aria-label="删除词条" onClick={() => void handleDeleteEntry(entry.id)}>
+                <IconButton size="small" aria-label={t('dictionary.deleteEntry')} onClick={() => void handleDeleteEntry(entry.id)}>
                   <DeleteIcon sx={{ fontSize: 18 }} />
                 </IconButton>
               </Box>
@@ -240,7 +237,7 @@ export default function Dictionary() {
 
         {visibleEntries.length === 0 && visibleCandidates.length === 0 ? (
           <Box sx={{ py: 8, display: 'flex', justifyContent: 'center' }}>
-            <Typography sx={{ color: 'text.secondary' }}>暂无词条</Typography>
+            <Typography sx={{ color: 'text.secondary' }}>{t('dictionary.empty')}</Typography>
           </Box>
         ) : null}
       </Box>

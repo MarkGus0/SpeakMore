@@ -201,22 +201,34 @@ function renderFloatingPanel(payload) {
   copyResultButton.disabled = true;
 }
 
-function writeClipboardText(text) {
-  if (!text) return Promise.resolve();
+async function writeClipboardText(text) {
+  if (!text) return false;
   if (window.ipcRenderer && typeof window.ipcRenderer.invoke === 'function') {
-    return window.ipcRenderer.invoke('clipboard:write-text', text)
-      .catch(() => navigator.clipboard && navigator.clipboard.writeText(text));
+    try {
+      const result = await window.ipcRenderer.invoke('clipboard:write-text', text);
+      if (result === true || result?.success === true) return true;
+    } catch (_error) {
+      // 主进程剪贴板失败时再尝试浏览器剪贴板，成功后才关闭面板。
+    }
   }
-  if (navigator.clipboard) return navigator.clipboard.writeText(text);
-  return Promise.resolve();
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (_error) {
+      return false;
+    }
+  }
+  return false;
 }
 
 Array.from(document.querySelectorAll('.dismiss')).forEach((button) => {
   button.addEventListener('click', closeFloatingPanel);
 });
 
-copyResultButton.addEventListener('click', () => {
-  writeClipboardText(currentResultText);
+copyResultButton.addEventListener('click', async () => {
+  const copied = await writeClipboardText(currentResultText);
+  if (copied) closeFloatingPanel();
 });
 
 if (window.ipcRenderer) {

@@ -5,6 +5,7 @@
  */
 import { Box, Button, MenuItem, Select, TextField, Typography } from '@mui/material'
 import { type LlmProvider, type LlmSettings } from '../../services/settingsStore'
+import { useI18n } from '../../i18n'
 
 type LlmSettingsSectionProps = {
   llmView: LlmSettings
@@ -45,28 +46,32 @@ export default function LlmSettingsSection({
   cancelLlmEdit,
   saveLlmSettings,
 }: LlmSettingsSectionProps) {
+  const { t } = useI18n()
   const saveMessageColor = llmSaveMessage.startsWith('后端') ? 'error.main' : 'success.main'
+  const visibleSaveMessage = llmSaveMessage === '已保存'
+    ? t('settings.saved')
+    : llmSaveMessage.replace('后端重载失败', t('settings.backendReloadFailed')).replace('未知错误', t('settings.unknownError'))
 
   return (
     <>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 3, mb: 1 }}>
-        <Typography sx={sectionTitle}>大模型</Typography>
+        <Typography sx={sectionTitle}>{t('settings.llm')}</Typography>
         {isLlmEditing ? (
           <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-            <Button variant="outlined" size="small" onClick={cancelLlmEdit} disabled={isSavingLlm}>取消</Button>
-            <Button variant="contained" size="small" onClick={() => void saveLlmSettings()} disabled={isSavingLlm}>保存</Button>
+            <Button variant="outlined" size="small" onClick={cancelLlmEdit} disabled={isSavingLlm}>{t('settings.cancel')}</Button>
+            <Button variant="contained" size="small" onClick={() => void saveLlmSettings()} disabled={isSavingLlm}>{t('settings.save')}</Button>
           </Box>
         ) : (
-          <Button variant="outlined" size="small" onClick={beginLlmEdit}>修改</Button>
+          <Button variant="outlined" size="small" onClick={beginLlmEdit}>{t('settings.edit')}</Button>
         )}
       </Box>
       {llmSaveMessage && (
         <Typography sx={{ fontSize: 12, color: saveMessageColor, mb: 1 }}>
-          {llmSaveMessage}
+          {visibleSaveMessage}
         </Typography>
       )}
       <Box sx={rowSx}>
-        <Typography>提供商</Typography>
+        <Typography>{t('settings.provider')}</Typography>
         <Select
           size="small"
           value={llmView.providerId}
@@ -86,7 +91,7 @@ export default function LlmSettingsSection({
             fullWidth
             size="small"
             label="Base URL"
-            placeholder="请输入兼容 OpenAI 的 Base URL"
+            placeholder={t('settings.openAiBaseUrlPlaceholder')}
             value={currentProvider.baseUrl}
             onChange={(event) => updateCurrentProvider((provider) => ({ ...provider, baseUrl: event.target.value }))}
             disabled={!isLlmEditing || isSavingLlm}
@@ -101,7 +106,7 @@ export default function LlmSettingsSection({
           size="small"
           type="password"
           label="API Key"
-          placeholder="请输入 API Key"
+          placeholder={t('settings.apiKeyPlaceholder')}
           value={currentProvider ? llmView.apiKeys[currentProvider.id] ?? '' : ''}
           onChange={(event) => updateCurrentApiKey(event.target.value)}
           disabled={!isLlmEditing || isSavingLlm}
@@ -109,12 +114,12 @@ export default function LlmSettingsSection({
         />
       </Box>
       <Box sx={rowSx}>
-        <Typography>模型</Typography>
+        <Typography>{t('settings.model')}</Typography>
         <TextField
           fullWidth
           size="small"
-          label="模型"
-          placeholder="请输入模型名称"
+          label={t('settings.model')}
+          placeholder={t('settings.modelPlaceholder')}
           value={currentProvider ? llmView.models[currentProvider.id] ?? currentProvider.defaultModel : ''}
           onChange={(event) => updateCurrentModel(event.target.value)}
           disabled={!isLlmEditing || isSavingLlm}

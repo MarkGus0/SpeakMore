@@ -3,7 +3,7 @@ import { test } from 'node:test'
 
 type WindowWithIpc = typeof globalThis & {
   ipcRenderer?: {
-    invoke: <T = unknown>(channel: string, payload?: unknown) => Promise<T>
+    invoke: <T = unknown>(channel: string, ...payload: unknown[]) => Promise<T>
     send: (channel: string, payload?: unknown) => void
     on: (channel: string, listener: (...args: unknown[]) => void) => void
     off: (channel: string, listener: (...args: unknown[]) => void) => void
@@ -22,6 +22,19 @@ const testLlmConfig = {
   api_key: 'sk-deepseek',
   model: 'deepseek-chat',
   auth_type: 'bearer',
+}
+
+const pcm16AudioFormat = {
+  type: 'pcm_s16le',
+  sample_rate: 16000,
+  channels: 1,
+}
+
+function withPcm16AudioFormat(parameters: Record<string, unknown>) {
+  return {
+    ...parameters,
+    audio_format: pcm16AudioFormat,
+  }
 }
 
 function createDeferred<T>(): Deferred<T> {
@@ -46,7 +59,6 @@ function createTestEnvironment(options: {
   pasteShouldFail?: boolean
   pasteResult?: unknown
   translationTargetLanguage?: string
-  modelsState?: unknown
   audioContextSampleRate?: number
 } = {}) {
   const originalWindow = globalThis.window
@@ -60,7 +72,7 @@ function createTestEnvironment(options: {
   const originalFetch = globalThis.fetch
 
   const sentPayloads: Array<string | ArrayBufferLike | Blob | ArrayBufferView> = []
-  const invokeCalls: Array<{ channel: string; payload?: unknown }> = []
+  const invokeCalls: Array<{ channel: string; payload?: unknown; payloads?: unknown[] }> = []
   const sendCalls: Array<{ channel: string; payload?: unknown }> = []
   const fetchCalls: Array<{ url: string; init?: RequestInit }> = []
   const sockets: FakeWebSocket[] = []
@@ -209,8 +221,9 @@ function createTestEnvironment(options: {
   const userMediaPromise = options.userMediaPromise ?? Promise.resolve(mediaStream)
   const windowLike = globalThis as WindowWithIpc
   windowLike.ipcRenderer = {
-    invoke: async (channel: string, payload?: unknown) => {
-      invokeCalls.push({ channel, payload })
+    invoke: async (channel: string, ...payloads: unknown[]) => {
+      const payload = payloads[0]
+      invokeCalls.push({ channel, payload, payloads })
       if (channel === 'audio:ensure-voice-server') return (options.readyPromise ?? Promise.resolve({ success: true })) as never
       if (channel === 'audio:check-voice-server-ready') return (options.readyPromise ?? Promise.resolve({ success: true })) as never
       if (channel === 'audio:mute-background-sessions') return { success: true } as never
@@ -248,6 +261,25 @@ function createTestEnvironment(options: {
           },
         }) as never
       }
+      if (channel === 'focused-context:get-last-focused-info') {
+        return {
+          appInfo: {
+            app_name: 'Notepad',
+            app_identifier: 'notepad.exe',
+            window_title: 'note.txt',
+            app_type: 'native_app',
+            app_metadata: { hwnd: '100' },
+            browser_context: null,
+          },
+          elementInfo: {
+            role: '',
+            focused: true,
+            editable: true,
+            selected: false,
+            bounds: { x: 0, y: 0, width: 0, height: 0 },
+          },
+        } as never
+      }
       if (channel === 'focused-context:is-current-focus') {
         return { success: true, same: options.focusStillActive !== false } as never
       }
@@ -275,14 +307,6 @@ function createTestEnvironment(options: {
       }
       if (channel === 'dictionary:prompt-terms') {
         return (options.dictionaryTermsPromise ?? Promise.resolve([])) as never
-      }
-      if (channel === 'model:list') {
-        return (options.modelsState ?? {
-          currentModelId: 'fun-asr-nano-2512',
-          models: [{ id: 'fun-asr-nano-2512', engine: 'funasr', isCurrent: true }],
-          explicitModelDir: '',
-          selectionLocked: false,
-        }) as never
       }
       if (channel === 'keyboard:type-transcript') {
         if (options.pasteShouldFail) throw new Error('paste boom')
@@ -544,12 +568,6 @@ test('startRecording 会先通过新 IPC 检查 ready，并连接集中定义的
 test('paraformer streaming 模型启动时通过 WebSocket 发送 PCM16 音频块', async () => {
   const env = createTestEnvironment({
     audioContextSampleRate: 16000,
-    modelsState: {
-      currentModelId: 'paraformer-zh-streaming',
-      models: [{ id: 'paraformer-zh-streaming', engine: 'funasr-streaming', isCurrent: true }],
-      explicitModelDir: '',
-      selectionLocked: false,
-    },
   })
   let recorder: Awaited<ReturnType<typeof loadRecorderModule>> | null = null
 
@@ -564,12 +582,8 @@ test('paraformer streaming 模型启动时通过 WebSocket 发送 PCM16 音频�
       .find((message) => message.type === 'start_audio')
     const pcmPayload = env.sentPayloads.find((payload): payload is ArrayBuffer => payload instanceof ArrayBuffer)
 
-    assert.equal(env.invokeCalls.some((call) => call.channel === 'model:list'), true)
-    assert.deepEqual(startAudioMessage.parameters.audio_format, {
-      type: 'pcm_s16le',
-      sample_rate: 16000,
-      channels: 1,
-    })
+    assert.equal(env.invokeCalls.some((call) => call.channel === 'model:list'), false)
+    assert.deepEqual(startAudioMessage.parameters, withPcm16AudioFormat({ llm: testLlmConfig }))
     assert.ok(pcmPayload)
     assert.deepEqual(Array.from(new Int16Array(pcmPayload)), [0, 16384, -16384, 32767, -32768])
     assert.equal(env.sentPayloads.some((payload) => payload instanceof Blob), false)
@@ -778,10 +792,10 @@ test('翻译模式启动时会把设置里的目标语言传给后端', async ()
       audio_id: 'audio-1',
       mode: 'translation',
       audio_context: {},
-      parameters: {
+      parameters: withPcm16AudioFormat({
         llm: testLlmConfig,
         output_language: 'en',
-      },
+      }),
     })
   } finally {
     recorder?.disposeRecorder()
@@ -802,7 +816,10 @@ test('翻译模式启动时会把日语目标语言传给后端', async () => {
       .map((payload) => JSON.parse(payload))
       .find((message) => message.type === 'start_audio')
 
-    assert.equal(startAudioMessage.parameters.output_language, 'ja')
+    assert.deepEqual(startAudioMessage.parameters, withPcm16AudioFormat({
+      llm: testLlmConfig,
+      output_language: 'ja',
+    }))
   } finally {
     recorder?.disposeRecorder()
     env.restore()
@@ -831,10 +848,10 @@ test('启动录音时会把启用词典词条传给后端', async () => {
       .map((payload) => JSON.parse(payload))
       .find((message) => message.type === 'start_audio')
 
-    assert.deepEqual(startAudioMessage.parameters, {
+    assert.deepEqual(startAudioMessage.parameters, withPcm16AudioFormat({
       llm: testLlmConfig,
       dictionary_terms: [{ phrase: 'Client2API', aliases: ['client to api'] }],
-    })
+    }))
   } finally {
     recorder?.disposeRecorder()
     env.restore()
@@ -862,7 +879,10 @@ test('RightAlt + RightShift 有选区时仍启动语音翻译并粘贴结果', a
       .find((message) => message.type === 'start_audio')
 
     assert.equal(startAudioMessage.mode, 'translation')
-    assert.deepEqual(startAudioMessage.parameters, { llm: testLlmConfig, output_language: 'en' })
+    assert.deepEqual(startAudioMessage.parameters, withPcm16AudioFormat({
+      llm: testLlmConfig,
+      output_language: 'en',
+    }))
 
     recorder.stopRecording()
     const socket = env.sockets[env.sockets.length - 1]
@@ -881,6 +901,28 @@ test('RightAlt + RightShift 有选区时仍启动语音翻译并粘贴结果', a
     assert.equal(recorder.getVoiceSession().status, 'completed')
     assert.equal(recorder.getVoiceSession().refinedText, 'hello from voice')
     assert.equal(env.invokeCalls.some((call) => call.channel === 'keyboard:type-transcript' && call.payload === 'hello from voice'), true)
+    assert.deepEqual(
+      env.invokeCalls.find((call) => call.channel === 'keyboard:type-transcript' && call.payload === 'hello from voice')?.payloads?.[1],
+      {
+        startFocusInfo: {
+          appInfo: {
+            app_name: 'Notepad',
+            app_identifier: 'notepad.exe',
+            window_title: 'note.txt',
+            app_type: 'native_app',
+            app_metadata: { hwnd: '100' },
+            browser_context: null,
+          },
+          elementInfo: {
+            role: '',
+            focused: true,
+            editable: true,
+            selected: false,
+            bounds: { x: 0, y: 0, width: 0, height: 0 },
+          },
+        },
+      },
+    )
   } finally {
     recorder?.disposeRecorder()
     env.restore()
@@ -901,7 +943,10 @@ test('翻译模式无选区时保留语音翻译 WebSocket 流程', async () => 
       .map((payload) => JSON.parse(payload))
       .find((message) => message.type === 'start_audio')
 
-    assert.deepEqual(startAudioMessage.parameters, { llm: testLlmConfig, output_language: 'en' })
+    assert.deepEqual(startAudioMessage.parameters, withPcm16AudioFormat({
+      llm: testLlmConfig,
+      output_language: 'en',
+    }))
   } finally {
     recorder?.disposeRecorder()
     env.restore()
@@ -934,6 +979,28 @@ test('普通听写完成后仍自动粘贴最终结果', async () => {
     assert.equal(recorder.getVoiceSession().status, 'completed')
     assert.equal(recorder.getVoiceSession().refinedText, 'hello refined')
     assert.equal(env.invokeCalls.some((call) => call.channel === 'keyboard:type-transcript'), true)
+    assert.deepEqual(
+      env.invokeCalls.find((call) => call.channel === 'keyboard:type-transcript')?.payloads?.[1],
+      {
+        startFocusInfo: {
+          appInfo: {
+            app_name: 'Notepad',
+            app_identifier: 'notepad.exe',
+            window_title: 'note.txt',
+            app_type: 'native_app',
+            app_metadata: { hwnd: '100' },
+            browser_context: null,
+          },
+          elementInfo: {
+            role: '',
+            focused: true,
+            editable: true,
+            selected: false,
+            bounds: { x: 0, y: 0, width: 0, height: 0 },
+          },
+        },
+      },
+    )
   } finally {
     recorder?.disposeRecorder()
     env.restore()
@@ -998,7 +1065,10 @@ test('自由提问有选区时会把 selected_text 注入 start_audio.parameters
       .find((message) => message.type === 'start_audio')
 
     assert.equal(env.sockets.length, 1)
-    assert.deepEqual(startAudioMessage.parameters, { llm: testLlmConfig, selected_text: '被选中的代码' })
+    assert.deepEqual(startAudioMessage.parameters, withPcm16AudioFormat({
+      llm: testLlmConfig,
+      selected_text: '被选中的代码',
+    }))
   } finally {
     recorder?.disposeRecorder()
     env.restore()
@@ -1028,7 +1098,7 @@ test('RightAlt 有 UIA 选区时通过快捷键意图仍保留普通听写录音
     assert.equal(env.getTrackStops(), 0)
     assert.equal(env.fetchCalls.length, 0)
     assert.equal(startAudioMessage.mode, 'transcript')
-    assert.deepEqual(startAudioMessage.parameters, { llm: testLlmConfig })
+    assert.deepEqual(startAudioMessage.parameters, withPcm16AudioFormat({ llm: testLlmConfig }))
     assert.equal(recorder.getVoiceSession().mode, 'Dictate')
   } finally {
     recorder?.disposeRecorder()
@@ -1054,7 +1124,7 @@ test('RightAlt 无选区时通过快捷键意图保留普通听写录音', async
 
     assert.equal(env.sockets.length, 1)
     assert.equal(startAudioMessage.mode, 'transcript')
-    assert.deepEqual(startAudioMessage.parameters, { llm: testLlmConfig })
+    assert.deepEqual(startAudioMessage.parameters, withPcm16AudioFormat({ llm: testLlmConfig }))
   } finally {
     recorder?.disposeRecorder()
     env.restore()
@@ -1077,7 +1147,10 @@ test('RightAlt + Space 有 UIA 选区时传 selected_text 且结果展示悬浮�
       .map((payload) => JSON.parse(payload))
       .find((message) => message.type === 'start_audio')
 
-    assert.deepEqual(startAudioMessage.parameters, { llm: testLlmConfig, selected_text: '旧内容' })
+    assert.deepEqual(startAudioMessage.parameters, withPcm16AudioFormat({
+      llm: testLlmConfig,
+      selected_text: '旧内容',
+    }))
 
     recorder.stopRecording()
 

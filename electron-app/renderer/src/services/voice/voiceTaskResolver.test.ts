@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { resolveVoiceTask, type VoiceTask } from './voiceTaskResolver'
-import type { FocusedSelectionSnapshot } from './focusedContext'
+import type { FocusedInfo, FocusedSelectionSnapshot } from './focusedContext'
 
 const focusInfo = {
   appInfo: {
@@ -22,6 +22,10 @@ const focusInfo = {
 }
 
 function reader(snapshot: FocusedSelectionSnapshot) {
+  return async () => snapshot
+}
+
+function focusedReader(snapshot: FocusedInfo | null) {
   return async () => snapshot
 }
 
@@ -47,14 +51,14 @@ test('普通听写意图无选区时保持 Dictate 录音粘贴', async () => {
     source: 'none',
     confidence: 'none',
     focusInfo: null,
-  }))
+  }), focusedReader(focusInfo))
 
   assertTask(task, {
     mode: 'Dictate',
     selectedText: '',
     source: 'none',
     confidence: 'none',
-    focusInfo: null,
+    focusInfo,
     delivery: 'paste',
   })
 })
@@ -65,14 +69,14 @@ test('普通听写意图有 UIA 选区时仍保持 Dictate 录音粘贴', async 
     source: 'uia',
     confidence: 'confirmed',
     focusInfo,
-  }))
+  }), focusedReader(focusInfo))
 
   assertTask(task, {
     mode: 'Dictate',
     selectedText: '',
     source: 'none',
     confidence: 'none',
-    focusInfo: null,
+    focusInfo,
     delivery: 'paste',
   })
 })
@@ -85,7 +89,7 @@ test('普通听写意图不读取 UIA 选区，避免连接前无用等待', asy
     focusInfo,
   })
 
-  const task = await resolveVoiceTask('DictateShortcut', source.read)
+  const task = await resolveVoiceTask('DictateShortcut', source.read, focusedReader(focusInfo))
 
   assert.equal(source.getCalls(), 0)
   assertTask(task, {
@@ -93,7 +97,7 @@ test('普通听写意图不读取 UIA 选区，避免连接前无用等待', asy
     selectedText: '',
     source: 'none',
     confidence: 'none',
-    focusInfo: null,
+    focusInfo,
     delivery: 'paste',
   })
 })
@@ -158,14 +162,14 @@ test('普通听写意图忽略非 confirmed 选区文本', async () => {
     source: 'none',
     confidence: 'none',
     focusInfo: null,
-  }))
+  }), focusedReader(focusInfo))
 
   assertTask(task, {
     mode: 'Dictate',
     selectedText: '',
     source: 'none',
     confidence: 'none',
-    focusInfo: null,
+    focusInfo,
     delivery: 'paste',
   })
 })
@@ -176,14 +180,14 @@ test('翻译意图有选区时仍录音并把翻译结果粘贴到光标位置',
     source: 'uia',
     confidence: 'confirmed',
     focusInfo,
-  }))
+  }), focusedReader(focusInfo))
 
   assertTask(task, {
     mode: 'Translate',
     selectedText: '',
     source: 'none',
     confidence: 'none',
-    focusInfo: null,
+    focusInfo,
     delivery: 'paste',
   })
 })
@@ -196,7 +200,7 @@ test('语音翻译意图不读取 UIA 选区，避免连接前无用等待', asy
     focusInfo,
   })
 
-  const task = await resolveVoiceTask('TranslateShortcut', source.read)
+  const task = await resolveVoiceTask('TranslateShortcut', source.read, focusedReader(focusInfo))
 
   assert.equal(source.getCalls(), 0)
   assertTask(task, {
@@ -204,7 +208,7 @@ test('语音翻译意图不读取 UIA 选区，避免连接前无用等待', asy
     selectedText: '',
     source: 'none',
     confidence: 'none',
-    focusInfo: null,
+    focusInfo,
     delivery: 'paste',
   })
 })
@@ -215,14 +219,14 @@ test('翻译意图无选区时保留语音翻译粘贴', async () => {
     source: 'none',
     confidence: 'none',
     focusInfo: null,
-  }))
+  }), focusedReader(focusInfo))
 
   assertTask(task, {
     mode: 'Translate',
     selectedText: '',
     source: 'none',
     confidence: 'none',
-    focusInfo: null,
+    focusInfo,
     delivery: 'paste',
   })
 })

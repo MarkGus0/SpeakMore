@@ -4,6 +4,7 @@ const DEFAULT_LLM_PROVIDERS = require('../shared/llm-providers.json');
 const DEFAULT_LANGUAGE = 'zh-CN';
 const DEFAULT_LLM_PROVIDER_ID = 'deepseek';
 const DEFAULT_TRANSLATION_TARGET_LANGUAGE = TRANSLATION_TARGET_LANGUAGES[0]?.id || 'en';
+const SUPPORTED_INTERFACE_LANGUAGES = new Set(['zh-CN', 'en-US']);
 const SUPPORTED_TRANSLATION_TARGET_LANGUAGES = new Set(
   TRANSLATION_TARGET_LANGUAGES.map((language) => language.id),
 );
@@ -93,7 +94,9 @@ function normalizeLlmRequestConfig(value) {
 function normalizeLocalSettings(value = {}) {
   const settings = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   return {
-    preferredLanguage: DEFAULT_LANGUAGE,
+    preferredLanguage: SUPPORTED_INTERFACE_LANGUAGES.has(settings.preferredLanguage)
+      ? settings.preferredLanguage
+      : DEFAULT_LANGUAGE,
     translationTargetLanguage: SUPPORTED_TRANSLATION_TARGET_LANGUAGES.has(settings.translationTargetLanguage)
       ? settings.translationTargetLanguage
       : DEFAULT_TRANSLATION_TARGET_LANGUAGE,
@@ -159,6 +162,7 @@ module.exports = {
   DEFAULT_LLM_PROVIDER_ID,
   DEFAULT_LLM_PROVIDERS,
   DEFAULT_TRANSLATION_TARGET_LANGUAGE,
+  SUPPORTED_INTERFACE_LANGUAGES,
   SUPPORTED_TRANSLATION_TARGET_LANGUAGES,
   createDefaultLlmSettings,
   createDefaultLocalSettings,

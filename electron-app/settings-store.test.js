@@ -29,6 +29,17 @@ test('normalizeLocalSettings 会回退不支持的翻译目标语言和空设备
   assert.equal(settings.launchAtSystemStartup, true);
 });
 
+test('normalizeLocalSettings 会保留英文界面语言并回退未知界面语言', () => {
+  assert.equal(
+    normalizeLocalSettings({ preferredLanguage: 'en-US' }).preferredLanguage,
+    'en-US',
+  );
+  assert.equal(
+    normalizeLocalSettings({ preferredLanguage: 'xx' }).preferredLanguage,
+    DEFAULT_LANGUAGE,
+  );
+});
+
 test('normalizeLocalSettings 会保留合法的 LLM 配置', () => {
   const settings = normalizeLocalSettings({
     llm: {
