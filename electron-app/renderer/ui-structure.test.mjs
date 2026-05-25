@@ -915,6 +915,8 @@ test('P1 主进程在粘贴成功后启动词典自动学习观察', async () =>
   const main = await readMainProcessSurface();
 
   assert.match(main, /createTextObservationSessionManager/);
+  assert.match(main, /function\s+emitDictionaryChanged\(/);
+  assert.match(main, /sendToMain\(['"]dictionary:changed['"]/);
   assert.match(main, /function\s+learnDictionaryCorrection\(/);
   assert.match(main, /learnDictionaryCandidate\(readDictionaryCandidates\(\),\s*candidate/);
   assert.match(main, /textObservationManager\.start\(\{[\s\S]*pastedText/);
@@ -973,6 +975,9 @@ test('P1 词典页面接入导航和主进程 IPC', async () => {
   assert.match(dictionaryStore, /dictionary:candidate-promote/);
   assert.match(dictionaryStore, /dictionary:candidate-ignore/);
   assert.match(dictionaryStore, /dictionary:prompt-terms/);
+  assert.match(dictionaryStore, /dictionary:changed/);
+  assert.match(dictionaryStore, /subscribeDictionaryChanges/);
+  assert.match(dictionaryPage, /subscribeDictionaryChanges/);
   assert.doesNotMatch(dictionaryStore, /localStorage/);
 });
 

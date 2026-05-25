@@ -24,6 +24,7 @@ test('createMainIpcRegistry 只注册一次并按固定顺序分发依赖', () =
   const calls = [];
   const clipboard = { name: 'clipboard' };
   const localUser = { name: 'SpeakMore' };
+  const emitDictionaryChanged = () => undefined;
   const localCompatState = {
     localStores: { 'app-settings': { enabledMuteBackgroundAudio: true } },
     getLocalUser: () => localUser,
@@ -71,6 +72,7 @@ test('createMainIpcRegistry 只注册一次并按固定顺序分发依赖', () =
     writeLocalSettings: () => undefined,
     reloadVoiceServerConfig: () => undefined,
     dictionaryRepository: { name: 'dictionaryRepository' },
+    emitDictionaryChanged,
     callVoiceFlowBackend: () => undefined,
     checkVoiceServerReady: () => undefined,
     muteBackgroundSessionsForRecording: () => undefined,
@@ -119,6 +121,7 @@ test('createMainIpcRegistry 只注册一次并按固定顺序分发依赖', () =
   assert.equal(calls[0][1].clipboard, clipboard);
   assert.equal(calls[0][1].getLocalUser(), localUser);
   assert.equal(calls[1][1].getDeviceId(), 'device-1');
+  assert.equal(calls[3][1].emitDictionaryChanged, emitDictionaryChanged);
   assert.equal(calls[7][1].randomUUID(), 'uuid-1');
   assert.equal(calls[8][1].createMainWindow(), 'main-window');
   assert.equal(calls[10][1].localStores, localCompatState.localStores);

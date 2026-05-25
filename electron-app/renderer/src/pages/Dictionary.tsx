@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Box, Button, Chip, IconButton, Switch, TextField, Typography } from '@mui/material'
 import CheckIcon from '@mui/icons-material/Check'
 import CloseIcon from '@mui/icons-material/Close'
@@ -10,6 +10,7 @@ import {
   listDictionaryCandidates,
   listDictionaryEntries,
   promoteDictionaryCandidate,
+  subscribeDictionaryChanges,
   updateDictionaryEntry,
   type DictionaryCandidate,
   type DictionaryEntry,
@@ -57,18 +58,21 @@ export default function Dictionary() {
   const [aliases, setAliases] = useState('')
   const [saveError, setSaveError] = useState('')
 
-  const refreshDictionary = async () => {
+  const refreshDictionary = useCallback(async () => {
     const [nextEntries, nextCandidates] = await Promise.all([
       listDictionaryEntries(),
       listDictionaryCandidates(),
     ])
     setEntries(nextEntries)
     setCandidates(nextCandidates)
-  }
+  }, [])
 
   useEffect(() => {
     void refreshDictionary()
-  }, [])
+    return subscribeDictionaryChanges(() => {
+      void refreshDictionary()
+    })
+  }, [refreshDictionary])
 
   const visibleEntries = useMemo(() => entries
     .filter((entry) => filter === 'all' || filter === 'candidate' || entry.source === filter)
