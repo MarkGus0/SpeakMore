@@ -273,10 +273,6 @@ async function checkVoiceServerReady() {
   return voiceBackendClient.checkVoiceServerReady();
 }
 
-async function callModelBackend(pathname = '', options = {}) {
-  return voiceBackendClient.callModelBackend(pathname, options);
-}
-
 async function reloadVoiceServerConfig() {
   return voiceBackendClient.reloadVoiceServerConfig();
 }
@@ -311,7 +307,6 @@ windowManager = createWindowManager({
 const mainIpcRegistry = createMainIpcRegistry({
   app,
   calculateDirectorySize,
-  callModelBackend,
   callVoiceFlowBackend,
   checkVoiceServerReady,
   clipboard,

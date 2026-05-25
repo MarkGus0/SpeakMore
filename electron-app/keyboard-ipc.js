@@ -28,11 +28,14 @@ function registerKeyboardIpcHandlers({
 
   ipcMain.handle('keyboard:start-keyboard-listener', () => true);
   ipcMain.handle('keyboard:stop-keyboard-listener', () => true);
-  ipcMain.handle('keyboard:type-transcript', async (_, text) => {
+  ipcMain.handle('keyboard:type-transcript', async (_, text, pasteContext = {}) => {
     const pastedText = String(text || '');
     if (!pastedText) return false;
 
-    const textTarget = await readFocusedTextTarget();
+    const startFocusInfo = pasteContext && typeof pasteContext === 'object'
+      ? pasteContext.startFocusInfo || null
+      : null;
+    const textTarget = await readFocusedTextTarget({ startFocusInfo });
     if (!textTarget.success) {
       return { success: false, reason: textTarget.reason || 'focused_text_target_unavailable' };
     }

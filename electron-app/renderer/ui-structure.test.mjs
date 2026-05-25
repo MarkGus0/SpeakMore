@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { runInNewContext } from 'node:vm';
 
 const require = createRequire(import.meta.url);
 const readProjectFile = (relativePath) =>
@@ -33,7 +34,6 @@ const readMainProcessSurface = () => readProjectFiles([
   '../keyboard-ipc.js',
   '../local-compat-state.js',
   '../main-ipc-registry.js',
-  '../model-ipc.js',
   '../page-ipc.js',
   '../permission-ipc.js',
   '../right-alt-relay.js',
@@ -42,7 +42,6 @@ const readMainProcessSurface = () => readProjectFiles([
   '../settings-store.js',
   '../text-observer-service.js',
   '../backend-http-utils.js',
-  '../model-backend-client.js',
   '../voice-backend-urls.js',
   '../voice-backend-client.js',
   '../voice-config-client.js',
@@ -144,6 +143,78 @@ test('悬浮面板复用长按提示框位置，并支持快捷键提示和自�
   assert.match(floatingPanel, /class=["']copy-icon["']/);
   assert.doesNotMatch(floatingPanel, /原选区已失效/);
   assert.doesNotMatch(floatingPanel, /-webkit-app-region:\s*drag/);
+});
+
+test('悬浮结果面板复制成功后自动关闭', async () => {
+  const floatingPanel = await readProjectFile('public/floating-panel.html');
+  const script = floatingPanel.match(/<script>([\s\S]*)<\/script>/)?.[1];
+  assert.ok(script);
+
+  const createElement = () => ({
+    classList: {
+      add() {},
+      remove() {},
+    },
+    disabled: false,
+    textContent: '',
+    listeners: {},
+    addEventListener(eventName, listener) {
+      this.listeners[eventName] = listener;
+    },
+  });
+  const elements = {
+    'shortcut-view': createElement(),
+    'result-view': createElement(),
+    'result-text': createElement(),
+    'copy-result': createElement(),
+  };
+  const dismissButtons = [createElement(), createElement()];
+  const sentMessages = [];
+  const clipboardWrites = [];
+  let panelListener = null;
+
+  runInNewContext(script, {
+    window: {
+      ipcRenderer: {
+        send(channel, payload) {
+          sentMessages.push({ channel, payload });
+        },
+        invoke(channel, text) {
+          clipboardWrites.push({ channel, text });
+          return Promise.resolve({ success: true });
+        },
+        on(channel, listener) {
+          if (channel === 'floating-panel') panelListener = listener;
+        },
+      },
+    },
+    document: {
+      getElementById(id) {
+        return elements[id];
+      },
+      querySelectorAll(selector) {
+        return selector === '.dismiss' ? dismissButtons : [];
+      },
+    },
+    navigator: {},
+    Promise,
+    Array,
+  }, { filename: 'floating-panel.html' });
+
+  assert.equal(typeof panelListener, 'function');
+  panelListener(null, { visible: true, type: 'free-ask-result', text: '复制内容' });
+
+  assert.deepEqual(sentMessages, []);
+
+  await elements['copy-result'].listeners.click();
+  await Promise.resolve();
+
+  assert.deepEqual(clipboardWrites, [
+    { channel: 'clipboard:write-text', text: '复制内容' },
+  ]);
+  assert.deepEqual(JSON.parse(JSON.stringify(sentMessages)), [
+    { channel: 'floating-panel', payload: { visible: false } },
+  ]);
 });
 
 test('P0 长按提示低于语音状态优先级', async () => {
@@ -280,51 +351,37 @@ test('主进程注册真实 bundle 首屏所需的 IPC shim', async () => {
   }
 });
 
-test('模型管理 IPC 只转发到后端，不在 Electron 主进程管理模型文件', async () => {
+test('模型管理能力已从主进程和 renderer 中删除', async () => {
   const main = await readMainProcessSurface();
-
-  for (const channel of ['model:list', 'model:download', 'model:cancel-download', 'model:delete', 'model:select']) {
-    assert.match(main, new RegExp(`ipcMain\\.handle\\(['"]${channel.replaceAll(':', '\\:')}['"]`));
-  }
-  assert.match(main, /modelsUrl:\s*`\$\{voiceServerUrl\}\/models`/);
-  assert.match(main, /callModelBackend/);
-  assert.doesNotMatch(main, /snapshot_download/);
-  assert.doesNotMatch(main, /models--Systran--faster-whisper/);
-});
-
-test('P1 模型页面接入导航并通过模型服务读取主进程 IPC', async () => {
   const navigation = await readProjectFile('src/navigation.ts');
   const sidebar = await readProjectFile('src/components/Sidebar.tsx');
   const appShell = await readProjectFile('src/components/AppShell.tsx');
-  const modelStore = await readProjectFile('src/services/modelStore.ts');
-  const modelsPage = await readProjectFile('src/pages/Models.tsx');
-  const modelsState = await readProjectFile('src/pages/models/useModelsPageState.ts');
-  const modelCard = await readProjectFile('src/pages/models/ModelCard.tsx');
 
-  assert.match(navigation, /'models'/);
-  assert.match(navigation, /模型/);
-  assert.match(sidebar, /MemoryIcon|StorageIcon|HubIcon/);
-  assert.match(appShell, /Models/);
-  assert.match(modelStore, /model:list/);
-  assert.match(modelStore, /model:download/);
-  assert.match(modelStore, /model:cancel-download/);
-  assert.match(modelStore, /model:delete/);
-  assert.match(modelStore, /model:select/);
-  assert.match(modelStore, /engine:\s*['"]faster-whisper['"]\s*\|\s*['"]funasr['"]\s*\|\s*['"]funasr-streaming['"]/);
-  assert.match(modelStore, /canDelete/);
-  assert.doesNotMatch(modelStore, /localStorage/);
-  assert.match(modelsPage, /useModelsPageState/);
-  assert.match(modelsPage, /ModelCard/);
-  assert.match(modelsPage, /转录模型/);
-  assert.match(modelsPage, /已下载的模型/);
-  assert.match(modelsPage, /可供下载/);
-  assert.match(modelsPage, /所有语言/);
-  assert.match(modelsState, /loadModelsState/);
-  assert.match(modelsState, /window\.setInterval/);
-  assert.match(modelCard, /设为当前/);
-  assert.match(modelCard, /取消下载/);
-  assert.match(modelCard, /删除/);
-  assert.match(modelCard, /model\.canDelete/);
+  await assert.rejects(
+    () => readProjectFile('src/pages/Models.tsx'),
+    /ENOENT/,
+  );
+  await assert.rejects(
+    () => readProjectFile('src/pages/models/useModelsPageState.ts'),
+    /ENOENT/,
+  );
+  await assert.rejects(
+    () => readProjectFile('src/pages/models/ModelCard.tsx'),
+    /ENOENT/,
+  );
+  await assert.rejects(
+    () => readProjectFile('src/services/modelStore.ts'),
+    /ENOENT/,
+  );
+
+  assert.doesNotMatch(navigation, /'models'/);
+  assert.doesNotMatch(navigation, /模型/);
+  assert.doesNotMatch(sidebar, /MemoryIcon|StorageIcon|HubIcon/);
+  assert.doesNotMatch(appShell, /Models/);
+  assert.doesNotMatch(main, /ipcMain\.handle\(['"]model:/);
+  assert.doesNotMatch(main, /modelsUrl:/);
+  assert.doesNotMatch(main, /callModelBackend/);
+  assert.doesNotMatch(main, /snapshot_download/);
 });
 
 test('项目根启动脚本指向本地 Electron 壳而不是逆向资料目录', async () => {
@@ -333,13 +390,41 @@ test('项目根启动脚本指向本地 Electron 壳而不是逆向资料目录'
   assert.equal(rootPackage.scripts.start, 'electron ./electron-app');
 });
 
-test('本地壳默认使用简体中文作为唯一应用语言', async () => {
+test('本地壳默认使用简体中文并允许英文界面语言', async () => {
   const main = await readMainProcessSurface();
 
   assert.match(main, /DEFAULT_LANGUAGE\s*=\s*['"]zh-CN['"]/);
   assert.match(main, /preferredLanguage:\s*DEFAULT_LANGUAGE/);
+  assert.match(main, /SUPPORTED_INTERFACE_LANGUAGES/);
+  assert.match(main, /en-US/);
   assert.doesNotMatch(main, /preferredLanguage:\s*['"]en['"]/);
   assert.doesNotMatch(main, /language\s*\|\|\s*['"]en['"]/);
+});
+
+test('主窗口四页和侧边栏通过轻量 i18n 切换中英文', async () => {
+  const i18n = await readProjectFile('src/i18n.tsx');
+  const appShell = await readProjectFile('src/components/AppShell.tsx');
+  const sidebar = await readProjectFile('src/components/Sidebar.tsx');
+  const pages = await readProjectFiles([
+    'src/pages/Dashboard.tsx',
+    'src/pages/History.tsx',
+    'src/pages/Dictionary.tsx',
+    'src/pages/Settings.tsx',
+  ]);
+
+  assert.match(i18n, /zh-CN/);
+  assert.match(i18n, /en-US/);
+  assert.match(i18n, /export\s+function\s+I18nProvider/);
+  assert.match(i18n, /export\s+function\s+useI18n/);
+  assert.match(i18n, /Dashboard/);
+  assert.match(i18n, /History/);
+  assert.match(i18n, /Dictionary/);
+  assert.match(i18n, /Settings/);
+  assert.match(appShell, /I18nProvider/);
+  assert.match(appShell, /loadSettings/);
+  assert.match(appShell, /setLanguage/);
+  assert.match(sidebar, /useI18n/);
+  assert.match(pages, /useI18n/);
 });
 
 test('preload 会移除移动应用下载入口和二维码弹窗', async () => {
@@ -592,6 +677,7 @@ test('P0 recorder 暴露可订阅状态机并支持主动取消', async () => {
 
 test('Dashboard 最近结果只展示最终结果，不再展示实时语音状态和中间转写', async () => {
   const dashboard = await readProjectFile('src/pages/Dashboard.tsx');
+  const i18n = await readProjectFile('src/i18n.tsx');
 
   assert.match(dashboard, /subscribeVoiceSession/);
   assert.match(dashboard, /status\s*===\s*['"]completed['"]/);
@@ -601,11 +687,13 @@ test('Dashboard 最近结果只展示最终结果，不再展示实时语音状�
   assert.match(dashboard, /selectRecentDashboardResults/);
   assert.match(dashboard, /prependRecentDashboardResult/);
   assert.match(dashboard, /recentResults\.map/);
-  assert.match(dashboard, /最近结果/);
+  assert.match(dashboard, /t\(['"]dashboard\.recentResults['"]\)/);
+  assert.match(i18n, /['"]dashboard\.recentResults['"]:\s*['"]最近结果['"]/);
   assert.match(dashboard, /ContentCopyIcon/);
   assert.match(dashboard, /IconButton/);
   assert.match(dashboard, /clipboard:write-text/);
-  assert.match(dashboard, /复制最近结果 \$\{index \+ 1\}/);
+  assert.match(dashboard, /t\(['"]dashboard\.copyRecentResult['"]\)/);
+  assert.match(i18n, /['"]dashboard\.copyRecentResult['"]:\s*['"]复制最近结果['"]/);
   assert.doesNotMatch(dashboard, /getVoiceStatusLabel/);
   assert.doesNotMatch(dashboard, /voiceStatusLabel/);
   assert.doesNotMatch(dashboard, /voiceSession\.rawText\s*\|\|\s*['"]-['"]/);
@@ -857,17 +945,25 @@ test('P1 词典页面接入导航和主进程 IPC', async () => {
   const appShell = await readProjectFile('src/components/AppShell.tsx');
   const dictionaryPage = await readProjectFile('src/pages/Dictionary.tsx');
   const dictionaryStore = await readProjectFile('src/services/dictionaryStore.ts');
+  const i18n = await readProjectFile('src/i18n.tsx');
 
   assert.match(navigation, /'dictionary'/);
-  assert.match(navigation, /词典/);
+  assert.match(navigation, /labelKey:\s*['"]nav\.dictionary['"]/);
+  assert.match(i18n, /['"]nav\.dictionary['"]:\s*['"]词典['"]/);
   assert.match(sidebar, /AutoAwesomeIcon|MenuBookIcon|LibraryBooksIcon/);
   assert.match(appShell, /Dictionary/);
-  assert.match(dictionaryPage, /自动添加/);
-  assert.match(dictionaryPage, /手动添加/);
-  assert.match(dictionaryPage, /候选/);
-  assert.match(dictionaryPage, /启用/);
-  assert.match(dictionaryPage, /保存词条/);
-  assert.match(dictionaryPage, /填写正确写法后可保存/);
+  assert.match(dictionaryPage, /t\(['"]dictionary\.autoAdded['"]\)/);
+  assert.match(dictionaryPage, /t\(['"]dictionary\.manualAdded['"]\)/);
+  assert.match(dictionaryPage, /t\(['"]dictionary\.candidate['"]\)/);
+  assert.match(dictionaryPage, /t\(['"]dictionary\.enabled['"]\)/);
+  assert.match(dictionaryPage, /t\(['"]dictionary\.saveEntry['"]\)/);
+  assert.match(dictionaryPage, /t\(['"]dictionary\.correctHelper['"]\)/);
+  assert.match(i18n, /['"]dictionary\.autoAdded['"]:\s*['"]自动添加['"]/);
+  assert.match(i18n, /['"]dictionary\.manualAdded['"]:\s*['"]手动添加['"]/);
+  assert.match(i18n, /['"]dictionary\.candidate['"]:\s*['"]候选['"]/);
+  assert.match(i18n, /['"]dictionary\.enabled['"]:\s*['"]启用['"]/);
+  assert.match(i18n, /['"]dictionary\.saveEntry['"]:\s*['"]保存词条['"]/);
+  assert.match(i18n, /['"]dictionary\.correctHelper['"]:\s*['"]填写正确写法后可保存['"]/);
   assert.doesNotMatch(dictionaryPage, />新增词条</);
   assert.match(dictionaryStore, /dictionary:list/);
   assert.match(dictionaryStore, /dictionary:create/);
@@ -880,51 +976,25 @@ test('P1 词典页面接入导航和主进程 IPC', async () => {
   assert.doesNotMatch(dictionaryStore, /localStorage/);
 });
 
-test('P1 模型管理 IPC 只转发到后端，不在 Electron 主进程管理模型文件', async () => {
+test('P1 模型管理能力已从主进程和 renderer 中删除', async () => {
   const main = await readMainProcessSurface();
-
-  for (const channel of ['model:list', 'model:download', 'model:cancel-download', 'model:delete', 'model:select']) {
-    assert.match(main, new RegExp(`ipcMain\\.handle\\(['"]${channel.replaceAll(':', '\\:')}['"]`));
-  }
-  assert.match(main, /modelsUrl:\s*`\$\{voiceServerUrl\}\/models`/);
-  assert.match(main, /callModelBackend/);
-  assert.doesNotMatch(main, /snapshot_download/);
-  assert.doesNotMatch(main, /models--Systran--faster-whisper/);
-});
-
-test('P1 模型页面接入导航并通过模型服务读取主进程 IPC', async () => {
   const navigation = await readProjectFile('src/navigation.ts');
   const sidebar = await readProjectFile('src/components/Sidebar.tsx');
   const appShell = await readProjectFile('src/components/AppShell.tsx');
-  const modelStore = await readProjectFile('src/services/modelStore.ts');
-  const modelsPage = await readProjectFile('src/pages/Models.tsx');
-  const modelsState = await readProjectFile('src/pages/models/useModelsPageState.ts');
-  const modelCard = await readProjectFile('src/pages/models/ModelCard.tsx');
 
-  assert.match(navigation, /'models'/);
-  assert.match(navigation, /模型/);
-  assert.match(sidebar, /MemoryIcon|StorageIcon|HubIcon/);
-  assert.match(appShell, /Models/);
-  assert.match(modelStore, /model:list/);
-  assert.match(modelStore, /model:download/);
-  assert.match(modelStore, /model:cancel-download/);
-  assert.match(modelStore, /model:delete/);
-  assert.match(modelStore, /model:select/);
-  assert.match(modelStore, /engine:\s*['"]faster-whisper['"]\s*\|\s*['"]funasr['"]\s*\|\s*['"]funasr-streaming['"]/);
-  assert.match(modelStore, /canDelete/);
-  assert.doesNotMatch(modelStore, /localStorage/);
-  assert.match(modelsPage, /useModelsPageState/);
-  assert.match(modelsPage, /ModelCard/);
-  assert.match(modelsPage, /转录模型/);
-  assert.match(modelsPage, /已下载的模型/);
-  assert.match(modelsPage, /可供下载/);
-  assert.match(modelsPage, /所有语言/);
-  assert.match(modelsState, /loadModelsState/);
-  assert.match(modelsState, /window\.setInterval/);
-  assert.match(modelCard, /设为当前/);
-  assert.match(modelCard, /取消下载/);
-  assert.match(modelCard, /删除/);
-  assert.match(modelCard, /model\.canDelete/);
+  await assert.rejects(() => readProjectFile('src/pages/Models.tsx'), /ENOENT/);
+  await assert.rejects(() => readProjectFile('src/pages/models/useModelsPageState.ts'), /ENOENT/);
+  await assert.rejects(() => readProjectFile('src/pages/models/ModelCard.tsx'), /ENOENT/);
+  await assert.rejects(() => readProjectFile('src/services/modelStore.ts'), /ENOENT/);
+
+  assert.doesNotMatch(navigation, /'models'/);
+  assert.doesNotMatch(navigation, /模型/);
+  assert.doesNotMatch(sidebar, /MemoryIcon|StorageIcon|HubIcon/);
+  assert.doesNotMatch(appShell, /Models/);
+  assert.doesNotMatch(main, /ipcMain\.handle\(['"]model:/);
+  assert.doesNotMatch(main, /modelsUrl:/);
+  assert.doesNotMatch(main, /callModelBackend/);
+  assert.doesNotMatch(main, /snapshot_download/);
 });
 
 test('P1 设置页与设置 store 统一走主进程 JSON 数据源', async () => {
@@ -983,9 +1053,10 @@ test('P1 设置页与设置 store 统一走主进程 JSON 数据源', async () =
   assert.match(languageSection, /preferredLanguage/);
   assert.match(languageSection, /translationTargetLanguage/);
   assert.match(languageSection, /MenuItem value="zh-CN"/);
+  assert.match(languageSection, /MenuItem value="en-US"/);
   assert.match(languageSection, /TRANSLATION_TARGET_LANGUAGES\.map/);
-  assert.match(languageSection, /language\.displayName/);
-  assert.match(languageSection, /翻译目标语言/);
+  assert.match(languageSection, /settings\.translationTarget\.\$\{language\.id\}/);
+  assert.match(languageSection, /settings\.translationTargetLanguage/);
   assert.doesNotMatch(settingsSurface, /MenuItem value="en">英文 \(en\)<\/MenuItem>/);
   assert.doesNotMatch(settingsSurface, /显示悬浮条/);
   assert.doesNotMatch(settingsSurface, /enableSoundEffects/);
@@ -993,23 +1064,23 @@ test('P1 设置页与设置 store 统一走主进程 JSON 数据源', async () =
   assert.doesNotMatch(settingsSurface, /版本 0\.1（本地版）/);
   assert.doesNotMatch(settingsSurface, /检查更新/);
   assert.doesNotMatch(settingsSurface, /disabled>/);
-  assert.match(llmSection, /大模型/);
-  assert.match(llmSection, /提供商/);
+  assert.match(llmSection, /settings\.llm/);
+  assert.match(llmSection, /settings\.provider/);
   assert.match(llmSection, /API Key/);
-  assert.match(llmSection, /模型/);
+  assert.match(llmSection, /settings\.model/);
   assert.match(llmSection, /Base URL/);
-  assert.match(llmSection, /修改/);
-  assert.match(llmSection, /保存/);
-  assert.match(llmSection, /取消/);
+  assert.match(llmSection, /settings\.edit/);
+  assert.match(llmSection, /settings\.save/);
+  assert.match(llmSection, /settings\.cancel/);
   assert.deepEqual(
     llmProviders.map((provider) => provider.label),
     ['DeepSeek', 'OpenAI', 'Z.AI', 'OpenRouter', 'Anthropic', 'Groq', 'Cerebras', 'Custom'],
   );
   assert.match(llmSection, /type="password"/);
-  assert.match(llmSection, /placeholder="请输入 API Key"/);
+  assert.match(llmSection, /settings\.apiKeyPlaceholder/);
 });
 
-test('P1 设置页不再暴露悬浮条开关，语言固定为简体中文', async () => {
+test('P1 设置页不再暴露悬浮条开关，界面语言由本地设置加载', async () => {
   const appShell = await readProjectFile('src/components/AppShell.tsx');
   const settingsSurface = await readProjectFiles([
     'src/pages/Settings.tsx',
@@ -1026,15 +1097,18 @@ test('P1 设置页不再暴露悬浮条开关，语言固定为简体中文', as
   assert.doesNotMatch(settingsSurface, /page:set-floating-bar-enabled/);
   assert.doesNotMatch(settingsSurface, /显示悬浮条/);
   assert.match(languageSection, /Select/);
-  assert.match(languageSection, /简体中文 \(zh-CN\)/);
+  assert.match(languageSection, /settings\.zhCn/);
+  assert.match(languageSection, /settings\.enUs/);
   assert.match(languageSection, /TRANSLATION_TARGET_LANGUAGES/);
   assert.doesNotMatch(appShell, /page:set-floating-bar-enabled/);
-  assert.doesNotMatch(appShell, /loadSettings/);
+  assert.match(appShell, /loadSettings/);
+  assert.match(appShell, /setLanguage\(settings\.preferredLanguage\)/);
 });
 
 test('P1 首页四项统计来自真实历史统计，不再展示硬编码指标', async () => {
   const dashboard = await readProjectFile('src/pages/Dashboard.tsx');
   const historyStore = await readProjectFile('src/services/historyStore.ts');
+  const i18n = await readProjectFile('src/i18n.tsx');
 
   assert.match(historyStore, /HAND_TYPED_CHARS_PER_MINUTE\s*=\s*60/);
   assert.match(historyStore, /formatDurationMinutes/);
@@ -1045,11 +1119,16 @@ test('P1 首页四项统计来自真实历史统计，不再展示硬编码指�
   assert.match(dashboard, /stats\.totalTextLength/);
   assert.match(dashboard, /stats\.savedMs/);
   assert.match(dashboard, /stats\.averageCharsPerMinute/);
-  assert.match(dashboard, /总听写时长/);
-  assert.match(dashboard, /累计听写字数/);
-  assert.match(dashboard, /节省时间/);
-  assert.match(dashboard, /平均速度/);
-  assert.match(dashboard, /暂未启用/);
+  assert.match(dashboard, /t\(['"]dashboard\.stats\.totalDuration['"]\)/);
+  assert.match(dashboard, /t\(['"]dashboard\.stats\.totalTextLength['"]\)/);
+  assert.match(dashboard, /t\(['"]dashboard\.stats\.savedTime['"]\)/);
+  assert.match(dashboard, /t\(['"]dashboard\.stats\.averageSpeed['"]\)/);
+  assert.match(dashboard, /t\(['"]dashboard\.personalization\.value['"]\)/);
+  assert.match(i18n, /['"]dashboard\.stats\.totalDuration['"]:\s*['"]总听写时长['"]/);
+  assert.match(i18n, /['"]dashboard\.stats\.totalTextLength['"]:\s*['"]累计听写字数['"]/);
+  assert.match(i18n, /['"]dashboard\.stats\.savedTime['"]:\s*['"]节省时间['"]/);
+  assert.match(i18n, /['"]dashboard\.stats\.averageSpeed['"]:\s*['"]平均速度['"]/);
+  assert.match(i18n, /['"]dashboard\.personalization\.value['"]:\s*['"]暂未启用['"]/);
   assert.doesNotMatch(dashboard, /23\.4%/);
   assert.doesNotMatch(dashboard, /conic-gradient\(#44bedf 0% 23\.4%/);
 });
@@ -1132,17 +1211,23 @@ test('首页壳层和用户可见文案符合 SpeakMore 中文化要求', async 
   const appShell = await readProjectFile('src/components/AppShell.tsx');
   const dashboard = await readProjectFile('src/pages/Dashboard.tsx');
   const floatingBar = await readProjectFile('public/floating-bar.html');
+  const i18n = await readProjectFile('src/i18n.tsx');
   const main = await readMainProcessSurface();
 
-  assert.match(navigation, /首页/);
-  assert.match(navigation, /历史记录/);
-  assert.match(navigation, /设置/);
+  assert.match(navigation, /labelKey:\s*['"]nav\.home['"]/);
+  assert.match(navigation, /labelKey:\s*['"]nav\.history['"]/);
+  assert.match(navigation, /labelKey:\s*['"]nav\.settings['"]/);
+  assert.match(i18n, /['"]nav\.home['"]:\s*['"]首页['"]/);
+  assert.match(i18n, /['"]nav\.history['"]:\s*['"]历史记录['"]/);
+  assert.match(i18n, /['"]nav\.settings['"]:\s*['"]设置['"]/);
   assert.match(sidebar, /SpeakMore/);
   assert.doesNotMatch(sidebar, /bgcolor:\s*['"]#000['"]/);
   assert.doesNotMatch(sidebar, /Voice dictation/);
   assert.doesNotMatch(appShell, /Typeless Local/);
-  assert.match(dashboard, /首页/);
-  assert.match(dashboard, /最近结果/);
+  assert.match(dashboard, /t\(['"]dashboard\.title['"]\)/);
+  assert.match(dashboard, /t\(['"]dashboard\.recentResults['"]\)/);
+  assert.match(i18n, /['"]dashboard\.title['"]:\s*['"]首页['"]/);
+  assert.match(i18n, /['"]dashboard\.recentResults['"]:\s*['"]最近结果['"]/);
   assert.match(floatingBar, /正在听写/);
   assert.doesNotMatch(floatingBar, /Listening\.\.\./);
   assert.match(main, /title:\s*['"]SpeakMore['"]/);
@@ -1155,7 +1240,6 @@ test('主页面一级标题复用设置页的左上基准和字号', async () =>
     'src/pages/Dashboard.tsx',
     'src/pages/History.tsx',
     'src/pages/Dictionary.tsx',
-    'src/pages/Models.tsx',
     'src/pages/Settings.tsx',
   ];
 
@@ -1180,7 +1264,6 @@ test('除悬浮粒子外主前端页面不使用蓝色状态色', async () => {
     'src/pages/Dashboard.tsx',
     'src/pages/History.tsx',
     'src/pages/Dictionary.tsx',
-    'src/pages/Models.tsx',
     'src/pages/Settings.tsx',
     'src/uiTokens.ts',
     'public/floating-panel.html',

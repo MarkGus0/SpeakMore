@@ -2,7 +2,6 @@ const { registerClipboardUserIpcHandlers } = require('./clipboard-user-ipc');
 const { registerHistoryIpcHandlers } = require('./history-ipc');
 const { registerSettingsIpcHandlers } = require('./settings-ipc');
 const { registerDictionaryIpcHandlers } = require('./dictionary-ipc');
-const { registerModelIpcHandlers } = require('./model-ipc');
 const { registerAudioIpcHandlers } = require('./audio-ipc');
 const { registerFocusedContextIpcHandlers } = require('./focused-context-ipc');
 const { registerFileIpcHandlers } = require('./file-ipc');
@@ -20,7 +19,6 @@ const defaultRegisters = {
   registerFocusedContextIpcHandlers,
   registerHistoryIpcHandlers,
   registerKeyboardIpcHandlers,
-  registerModelIpcHandlers,
   registerPageIpcHandlers,
   registerPermissionIpcHandlers,
   registerSettingsIpcHandlers,
@@ -29,7 +27,6 @@ const defaultRegisters = {
 function createMainIpcRegistry({
   app,
   calculateDirectorySize,
-  callModelBackend,
   callVoiceFlowBackend,
   checkVoiceServerReady,
   clipboard,
@@ -118,10 +115,6 @@ function createMainIpcRegistry({
     registers.registerDictionaryIpcHandlers({
       ipcMain,
       dictionaryRepository,
-    });
-    registers.registerModelIpcHandlers({
-      ipcMain,
-      callModelBackend,
     });
     registers.registerAudioIpcHandlers({
       ipcMain,

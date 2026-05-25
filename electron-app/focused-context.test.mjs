@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  detectAppCompatTextTarget,
   isSameFocusedContext,
   normalizeFocusedTextTargetResult,
   normalizeSelectedTextResult,
@@ -88,6 +89,63 @@ test('normalizeFocusedTextTargetResult 只接受可输入文本目标', () => {
   }).success, false);
 });
 
+test('normalizeFocusedTextTargetResult 接受 Win32 caret 和弱可信应用族来源', () => {
+  assert.deepEqual(normalizeFocusedTextTargetResult({
+    success: true,
+    source: 'win32_caret',
+    confidence: 'confirmed',
+    reason: 'caret',
+    focus_hwnd: '200',
+    caret_hwnd: '201',
+    foreground_hwnd: '100',
+  }), {
+    success: true,
+    source: 'win32_caret',
+    confidence: 'confirmed',
+    reason: 'caret',
+    valuePattern: false,
+    textPattern: false,
+    isReadOnly: false,
+    controlType: '',
+    appFamily: '',
+    foregroundHwnd: '100',
+    focusHwnd: '200',
+    caretHwnd: '201',
+    matchedSignals: [],
+  });
+
+  assert.deepEqual(normalizeFocusedTextTargetResult({
+    success: true,
+    source: 'app_compat',
+    confidence: 'weak',
+    reason: 'app_compat_match',
+    app_family: 'wechat',
+    foreground_hwnd: '300',
+    matched_signals: ['process:wechat', 'class:MMUIRenderSubWindowHW'],
+  }), {
+    success: true,
+    source: 'app_compat',
+    confidence: 'weak',
+    reason: 'app_compat_match',
+    valuePattern: false,
+    textPattern: false,
+    isReadOnly: false,
+    controlType: '',
+    appFamily: 'wechat',
+    foregroundHwnd: '300',
+    focusHwnd: '',
+    caretHwnd: '',
+    matchedSignals: ['process:wechat', 'class:MMUIRenderSubWindowHW'],
+  });
+
+  assert.equal(normalizeFocusedTextTargetResult({
+    success: true,
+    source: 'foreground_window',
+    confidence: 'weak',
+    reason: 'too_broad',
+  }).success, false);
+});
+
 test('readFocusedTextTarget 在 UIA 探测失败时返回不可粘贴目标', async () => {
   const result = await readFocusedTextTarget({
     readTextTarget: async () => {
@@ -97,6 +155,115 @@ test('readFocusedTextTarget 在 UIA 探测失败时返回不可粘贴目标', as
 
   assert.equal(result.success, false);
   assert.equal(result.reason, 'text_target_failed');
+});
+
+test('readFocusedTextTarget 在 UIA 不可用时接受 Win32 caret 目标', async () => {
+  const result = await readFocusedTextTarget({
+    readTextTarget: async () => ({
+      success: false,
+      source: 'none',
+      confidence: 'none',
+      reason: 'text_target_unavailable',
+    }),
+    readCaretTarget: async () => ({
+      success: true,
+      source: 'win32_caret',
+      confidence: 'confirmed',
+      reason: 'caret',
+      foreground_hwnd: '100',
+      focus_hwnd: '101',
+      caret_hwnd: '101',
+    }),
+    readWindowTree: async () => ({
+      success: false,
+      reason: 'not_needed',
+    }),
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.source, 'win32_caret');
+  assert.equal(result.caretHwnd, '101');
+});
+
+test('detectAppCompatTextTarget 只允许已知聊天应用族的弱信号组合', () => {
+  const wechat = detectAppCompatTextTarget({
+    success: true,
+    process_name: 'WeChat',
+    foreground_hwnd: '500',
+    window_title: '微信',
+    class_names: ['Qt51514QWindowIcon', 'MMUIRenderSubWindowHW'],
+    start_foreground_hwnd: '500',
+  });
+
+  assert.equal(wechat.success, true);
+  assert.equal(wechat.source, 'app_compat');
+  assert.equal(wechat.app_family, 'wechat');
+  assert.deepEqual(wechat.matched_signals, [
+    'process:wechat',
+    'same_foreground_hwnd',
+    'class:MMUIRenderSubWindowHW',
+  ]);
+
+  const desktop = detectAppCompatTextTarget({
+    success: true,
+    process_name: 'explorer',
+    foreground_hwnd: '600',
+    window_title: 'Desktop',
+    class_names: ['WorkerW'],
+    start_foreground_hwnd: '600',
+  });
+
+  assert.equal(desktop.success, false);
+  assert.equal(desktop.reason, 'app_family_not_allowed');
+
+  const switchedWindow = detectAppCompatTextTarget({
+    success: true,
+    process_name: 'WeChat',
+    foreground_hwnd: '501',
+    window_title: '微信',
+    class_names: ['MMUIRenderSubWindowHW'],
+    start_foreground_hwnd: '500',
+  });
+
+  assert.equal(switchedWindow.success, false);
+  assert.equal(switchedWindow.reason, 'foreground_changed');
+});
+
+test('readFocusedTextTarget 在 UIA 和 caret 都失败时接受 app_compat 目标', async () => {
+  const result = await readFocusedTextTarget({
+    startFocusInfo: {
+      appInfo: { app_metadata: { hwnd: '500' } },
+    },
+    readTextTarget: async () => ({
+      success: false,
+      source: 'none',
+      confidence: 'none',
+      reason: 'text_target_unavailable',
+    }),
+    readCaretTarget: async () => ({
+      success: false,
+      source: 'none',
+      confidence: 'none',
+      reason: 'caret_unavailable',
+      foreground_hwnd: '500',
+    }),
+    readWindowTree: async () => ({
+      success: true,
+      process_name: 'WeChat',
+      foreground_hwnd: '500',
+      window_title: '微信',
+      class_names: ['Qt51514QWindowIcon', 'MMUIRenderSubWindowHW'],
+    }),
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.source, 'app_compat');
+  assert.equal(result.appFamily, 'wechat');
+  assert.deepEqual(result.matchedSignals, [
+    'process:wechat',
+    'same_foreground_hwnd',
+    'class:MMUIRenderSubWindowHW',
+  ]);
 });
 
 test('readSelectedTextByClipboard 会恢复 HTML、RTF 和图片剪贴板内容', async () => {

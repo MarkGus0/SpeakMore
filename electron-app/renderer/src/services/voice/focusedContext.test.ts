@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { afterEach, test } from 'node:test'
 import {
+  getFocusedInfoSnapshot,
   getFocusedSelectedText,
   getFocusedSelectionSnapshot,
   isFocusedSelectionStillActive,
@@ -10,7 +11,7 @@ import {
 
 type WindowWithIpc = typeof globalThis & {
   ipcRenderer?: {
-    invoke: <T = unknown>(channel: string, payload?: unknown) => Promise<T>
+    invoke: <T = unknown>(channel: string, ...payload: unknown[]) => Promise<T>
     send: (channel: string, payload?: unknown) => void
     on: (channel: string, listener: (...args: unknown[]) => void) => void
   }
@@ -86,6 +87,40 @@ test('getFocusedSelectionSnapshot 通过 IPC 读取选区快照', async () => {
   assert.equal(snapshot.source, 'uia')
   assert.equal(snapshot.confidence, 'confirmed')
   assert.equal(snapshot.focusInfo?.appInfo.app_identifier, 'notepad.exe')
+})
+
+test('getFocusedInfoSnapshot 通过 IPC 读取当前前台窗口快照', async () => {
+  const windowLike = globalThis as WindowWithIpc
+  windowLike.ipcRenderer = {
+    invoke: async (channel: string) => {
+      assert.equal(channel, 'focused-context:get-last-focused-info')
+      return {
+        appInfo: {
+          app_name: 'WeChat',
+          app_identifier: 'WeChat.exe',
+          window_title: '微信',
+          app_type: 'native_app',
+          app_metadata: { hwnd: '700' },
+          browser_context: null,
+        },
+        elementInfo: {
+          role: '',
+          focused: true,
+          editable: true,
+          selected: false,
+          bounds: { x: 0, y: 0, width: 0, height: 0 },
+        },
+      } as never
+    },
+    send: () => undefined,
+    on: () => undefined,
+  }
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: windowLike })
+
+  const snapshot = await getFocusedInfoSnapshot()
+
+  assert.equal(snapshot?.appInfo.app_identifier, 'WeChat.exe')
+  assert.equal(snapshot?.elementInfo.focused, true)
 })
 
 test('normalizeSelectionSnapshot 只接受 UIA confirmed 选区', () => {

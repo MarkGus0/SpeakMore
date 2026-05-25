@@ -1,0 +1,207 @@
+import { createContext, useContext, useMemo, type ReactNode } from 'react'
+import { type InterfaceLanguage } from './services/settingsStore'
+
+const defaultLanguage: InterfaceLanguage = 'zh-CN'
+
+export const translations = {
+  'zh-CN': {
+    'nav.home': '首页',
+    'nav.history': '历史记录',
+    'nav.dictionary': '词典',
+    'nav.settings': '设置',
+    'dashboard.title': '首页',
+    'dashboard.shortcut.prefix': '请短按',
+    'dashboard.shortcut.orPress': '或按',
+    'dashboard.shortcut.suffix': '开始听写',
+    'dashboard.personalization.value': '暂未启用',
+    'dashboard.personalization.label': '整体个性化',
+    'dashboard.stats.totalDuration': '总听写时长',
+    'dashboard.stats.totalTextLength': '累计听写字数',
+    'dashboard.stats.savedTime': '节省时间',
+    'dashboard.stats.averageSpeed': '平均速度',
+    'dashboard.recentResults': '最近结果',
+    'dashboard.copyRecentResult': '复制最近结果',
+    'history.title': '历史记录',
+    'history.searchPlaceholder': '搜索历史记录...',
+    'history.empty': '暂无历史记录',
+    'history.clearAll': '清除所有历史',
+    'history.copyResult': '复制历史结果',
+    'dictionary.title': '词典',
+    'dictionary.correctLabel': '正确写法',
+    'dictionary.correctHelper': '填写正确写法后可保存',
+    'dictionary.aliasLabel': '错误写法或别名',
+    'dictionary.aliasPlaceholder': '多个写法可用逗号或换行分隔',
+    'dictionary.saveEntry': '保存词条',
+    'dictionary.saveError': '保存失败，请检查词条内容',
+    'dictionary.filterAll': '全部',
+    'dictionary.filterAuto': '自动添加',
+    'dictionary.filterManual': '手动添加',
+    'dictionary.filterCandidate': '候选',
+    'dictionary.searchPlaceholder': '搜索词条...',
+    'dictionary.candidate': '候选',
+    'dictionary.seenCount': '出现',
+    'dictionary.times': '次',
+    'dictionary.lastLearned': '最近学习',
+    'dictionary.confirmCandidate': '确认候选词',
+    'dictionary.ignoreCandidate': '忽略候选词',
+    'dictionary.autoAdded': '自动添加',
+    'dictionary.manualAdded': '手动添加',
+    'dictionary.disabled': '已停用',
+    'dictionary.aliases': '别名',
+    'dictionary.noAliases': '暂无别名',
+    'dictionary.hit': '命中',
+    'dictionary.updated': '更新',
+    'dictionary.enabled': '启用',
+    'dictionary.deleteEntry': '删除词条',
+    'dictionary.empty': '暂无词条',
+    'settings.title': '设置',
+    'settings.shortcuts': '快捷键',
+    'settings.shortcut.dictation': '按下开始和停止语音输入。',
+    'settings.shortcut.ask': '按下开始和停止自由提问。',
+    'settings.shortcut.translate': '按下开始和停止翻译。',
+    'settings.microphone': '麦克风',
+    'settings.systemDefault': '系统默认',
+    'settings.inputDevice': '输入设备',
+    'settings.other': '其他设置',
+    'settings.autoLaunch': '开机启动',
+    'settings.language': '语言',
+    'settings.interfaceLanguage': '界面语言',
+    'settings.zhCn': '简体中文 (zh-CN)',
+    'settings.enUs': 'English (en-US)',
+    'settings.translationTargetLanguage': '翻译目标语言',
+    'settings.translationTarget.en': '英文 (en)',
+    'settings.translationTarget.ja': '日语 (ja)',
+    'settings.llm': '大模型',
+    'settings.cancel': '取消',
+    'settings.save': '保存',
+    'settings.edit': '修改',
+    'settings.saved': '已保存',
+    'settings.backendReloadFailed': '后端重载失败',
+    'settings.unknownError': '未知错误',
+    'settings.provider': '提供商',
+    'settings.openAiBaseUrlPlaceholder': '请输入兼容 OpenAI 的 Base URL',
+    'settings.apiKeyPlaceholder': '请输入 API Key',
+    'settings.model': '模型',
+    'settings.modelPlaceholder': '请输入模型名称',
+  },
+  'en-US': {
+    'nav.home': 'Dashboard',
+    'nav.history': 'History',
+    'nav.dictionary': 'Dictionary',
+    'nav.settings': 'Settings',
+    'dashboard.title': 'Dashboard',
+    'dashboard.shortcut.prefix': 'Press',
+    'dashboard.shortcut.orPress': 'or press',
+    'dashboard.shortcut.suffix': 'to start dictation',
+    'dashboard.personalization.value': 'Not enabled',
+    'dashboard.personalization.label': 'Personalization',
+    'dashboard.stats.totalDuration': 'Total dictation time',
+    'dashboard.stats.totalTextLength': 'Total dictated characters',
+    'dashboard.stats.savedTime': 'Time saved',
+    'dashboard.stats.averageSpeed': 'Average speed',
+    'dashboard.recentResults': 'Recent results',
+    'dashboard.copyRecentResult': 'Copy recent result',
+    'history.title': 'History',
+    'history.searchPlaceholder': 'Search history...',
+    'history.empty': 'No history yet',
+    'history.clearAll': 'Clear all history',
+    'history.copyResult': 'Copy history result',
+    'dictionary.title': 'Dictionary',
+    'dictionary.correctLabel': 'Correct spelling',
+    'dictionary.correctHelper': 'Enter the correct spelling to save',
+    'dictionary.aliasLabel': 'Wrong spelling or alias',
+    'dictionary.aliasPlaceholder': 'Separate multiple values with commas or new lines',
+    'dictionary.saveEntry': 'Save entry',
+    'dictionary.saveError': 'Save failed. Check the entry content.',
+    'dictionary.filterAll': 'All',
+    'dictionary.filterAuto': 'Auto added',
+    'dictionary.filterManual': 'Manual',
+    'dictionary.filterCandidate': 'Candidates',
+    'dictionary.searchPlaceholder': 'Search entries...',
+    'dictionary.candidate': 'Candidate',
+    'dictionary.seenCount': 'seen',
+    'dictionary.times': 'times',
+    'dictionary.lastLearned': 'last learned',
+    'dictionary.confirmCandidate': 'Confirm candidate',
+    'dictionary.ignoreCandidate': 'Ignore candidate',
+    'dictionary.autoAdded': 'Auto added',
+    'dictionary.manualAdded': 'Manual',
+    'dictionary.disabled': 'Disabled',
+    'dictionary.aliases': 'Aliases',
+    'dictionary.noAliases': 'No aliases',
+    'dictionary.hit': 'Hit',
+    'dictionary.updated': 'Updated',
+    'dictionary.enabled': 'Enabled',
+    'dictionary.deleteEntry': 'Delete entry',
+    'dictionary.empty': 'No entries yet',
+    'settings.title': 'Settings',
+    'settings.shortcuts': 'Shortcuts',
+    'settings.shortcut.dictation': 'Start and stop dictation.',
+    'settings.shortcut.ask': 'Start and stop ask-anything mode.',
+    'settings.shortcut.translate': 'Start and stop translation.',
+    'settings.microphone': 'Microphone',
+    'settings.systemDefault': 'System default',
+    'settings.inputDevice': 'Input device',
+    'settings.other': 'Other settings',
+    'settings.autoLaunch': 'Launch at startup',
+    'settings.language': 'Language',
+    'settings.interfaceLanguage': 'Interface language',
+    'settings.zhCn': '简体中文 (zh-CN)',
+    'settings.enUs': 'English (en-US)',
+    'settings.translationTargetLanguage': 'Translation target language',
+    'settings.translationTarget.en': 'English (en)',
+    'settings.translationTarget.ja': 'Japanese (ja)',
+    'settings.llm': 'LLM',
+    'settings.cancel': 'Cancel',
+    'settings.save': 'Save',
+    'settings.edit': 'Edit',
+    'settings.saved': 'Saved',
+    'settings.backendReloadFailed': 'Backend reload failed',
+    'settings.unknownError': 'Unknown error',
+    'settings.provider': 'Provider',
+    'settings.openAiBaseUrlPlaceholder': 'Enter an OpenAI-compatible Base URL',
+    'settings.apiKeyPlaceholder': 'Enter API Key',
+    'settings.model': 'Model',
+    'settings.modelPlaceholder': 'Enter model name',
+  },
+} as const
+
+export type TranslationKey = keyof typeof translations['zh-CN']
+
+type I18nContextValue = {
+  language: InterfaceLanguage
+  setLanguage: (language: InterfaceLanguage) => void
+  t: (key: TranslationKey) => string
+}
+
+const I18nContext = createContext<I18nContextValue>({
+  language: defaultLanguage,
+  setLanguage: () => undefined,
+  t: (key) => translations[defaultLanguage][key],
+})
+
+export function createTranslator(language: InterfaceLanguage) {
+  return (key: TranslationKey) => translations[language][key] ?? translations[defaultLanguage][key]
+}
+
+export function I18nProvider({
+  children,
+  language,
+  setLanguage,
+}: {
+  children: ReactNode
+  language: InterfaceLanguage
+  setLanguage: (language: InterfaceLanguage) => void
+}) {
+  const value = useMemo(() => ({
+    language,
+    setLanguage,
+    t: createTranslator(language),
+  }), [language, setLanguage])
+
+  return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>
+}
+
+export function useI18n() {
+  return useContext(I18nContext)
+}

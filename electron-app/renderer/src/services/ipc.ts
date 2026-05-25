@@ -7,7 +7,7 @@ type IpcListener = (event: unknown, payload: unknown) => void
 
 // 这里把 preload 注入到 window 上的 ipcRenderer 能力显式收口成一个最小接口，避免 renderer 直接依赖 Electron 类型。
 type ElectronIpcRenderer = {
-  invoke: <T = unknown>(channel: string, payload?: unknown) => Promise<T>
+  invoke: <T = unknown>(channel: string, ...payload: unknown[]) => Promise<T>
   send: (channel: string, payload?: unknown) => void
   on: (channel: string, listener: IpcListener) => void
   off?: (channel: string, listener: IpcListener) => void
@@ -26,13 +26,13 @@ export const ipcClient = {
   },
 
   // 需要返回 Promise 的请求走 invoke，适合一问一答型 IPC，例如读取设置、查询状态、获取上下文。
-  invoke<T = unknown>(channel: string, payload?: unknown): Promise<T> {
+  invoke<T = unknown>(channel: string, ...payload: unknown[]): Promise<T> {
     const ipc = getIpcRenderer()
     if (!ipc) {
       // 没有 preload 注入时直接拒绝，让上层明确知道 IPC 不可用，而不是卡在未定义访问上。
       return Promise.reject(new Error(`IPC 不可用: ${channel}`))
     }
-    return ipc.invoke<T>(channel, payload)
+    return ipc.invoke<T>(channel, ...payload)
   },
 
   // 不需要返回结果的通知型消息走 send，例如触发一次主进程动作或广播状态变化。

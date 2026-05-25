@@ -3,7 +3,6 @@
 import asyncio
 import json
 import os
-import subprocess
 import tempfile
 import uuid
 from contextlib import asynccontextmanager
@@ -16,18 +15,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from asr import (
     create_streaming_asr_session,
     preload_asr_model,
-    reload_asr_model,
     transcribe_audio,
-)
-from model_manager import (
-    FALLBACK_MODEL_ID,
-    cancel_download_task,
-    create_models_state,
-    delete_model_files,
-    find_cached_model_snapshot,
-    find_cached_model_snapshot_for_state,
-    get_model_definition,
-    start_download_task,
 )
 from refiner import refine_text, reload_refiner_runtime_config
 from runtime_config import (
@@ -61,27 +49,9 @@ def detect_realtime_audio_suffix(audio_data: bytes) -> str:
     return ".webm"
 
 
-def convert_audio_to_wav_if_needed(source_path: str, suffix: str) -> str:
-    if suffix == ".wav":
-        return source_path
-
-    wav_path = source_path + ".wav"
-    subprocess.run(
-        ["ffmpeg", "-y", "-i", source_path, "-ar", "16000", "-ac", "1", wav_path],
-        capture_output=True,
-        timeout=30,
-        check=True,
-    )
-    return wav_path
-
-
 async def transcribe_audio_with_wav_conversion(source_path: str, suffix: str) -> str:
-    wav_path = convert_audio_to_wav_if_needed(source_path, suffix)
-    try:
-        return await transcribe_audio(wav_path)
-    finally:
-        if wav_path != source_path and os.path.exists(wav_path):
-            os.unlink(wav_path)
+    del suffix
+    return await transcribe_audio(source_path)
 
 
 def create_ws_message(message_type: str, payload: dict | None = None) -> dict:
@@ -610,78 +580,6 @@ def create_app(preload_model=preload_asr_model, exit_scheduler=schedule_startup_
     async def reload_config():
         reload_refiner_runtime_config()
         return {"status": "ok", "detail": "大模型配置已重载"}
-
-    @app.get("/models")
-    async def list_models():
-        return create_models_state()
-
-    @app.post("/models/{model_id}/download")
-    async def download_model_endpoint(model_id: str):
-        try:
-            start_download_task(model_id)
-        except ValueError as error:
-            raise HTTPException(status_code=404, detail=str(error)) from error
-        return create_models_state()
-
-    @app.post("/models/{model_id}/cancel")
-    async def cancel_model_download_endpoint(model_id: str):
-        try:
-            cancel_download_task(model_id)
-        except ValueError as error:
-            raise HTTPException(status_code=404, detail=str(error)) from error
-        return create_models_state()
-
-    @app.delete("/models/{model_id}")
-    async def delete_model_endpoint(model_id: str):
-        try:
-            model = get_model_definition(model_id)
-        except ValueError as error:
-            raise HTTPException(status_code=404, detail=str(error)) from error
-
-        state = create_models_state()
-        if state["selectionLocked"]:
-            raise HTTPException(status_code=409, detail="WHISPER_MODEL_DIR 已覆盖当前模型选择")
-
-        current_model_id = state["currentModelId"]
-        if current_model_id == model["id"]:
-            if model["id"] == FALLBACK_MODEL_ID:
-                raise HTTPException(status_code=409, detail="不能删除当前使用的回退模型")
-            if not find_cached_model_snapshot(FALLBACK_MODEL_ID):
-                raise HTTPException(status_code=409, detail="base 模型未下载，不能删除当前模型")
-            try:
-                reload_asr_model(FALLBACK_MODEL_ID)
-                set_voice_service_state(app, "ready", "ASR 模型已完成预热")
-            except Exception as error:
-                set_voice_service_state(app, "failed", str(error))
-                raise HTTPException(status_code=500, detail=str(error)) from error
-
-        deleted = delete_model_files(model["id"])
-        state = create_models_state()
-        state["deleted"] = deleted
-        return state
-
-    @app.post("/models/{model_id}/select")
-    async def select_model_endpoint(model_id: str):
-        state = create_models_state()
-        if state["selectionLocked"]:
-            raise HTTPException(status_code=409, detail="WHISPER_MODEL_DIR 已覆盖当前模型选择")
-
-        try:
-            model = get_model_definition(model_id)
-        except ValueError as error:
-            raise HTTPException(status_code=404, detail=str(error)) from error
-
-        snapshot, _cache_source = find_cached_model_snapshot_for_state(model["id"])
-        if not snapshot:
-            raise HTTPException(status_code=409, detail="模型尚未下载")
-
-        try:
-            reload_asr_model(model["id"])
-            set_voice_service_state(app, "ready", "ASR 模型已完成预热")
-        except Exception as error:
-            raise HTTPException(status_code=500, detail=str(error)) from error
-
-        return create_models_state()
 
     @app.post("/ai/voice_flow")
     async def voice_flow(

@@ -4,54 +4,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from asr import (
-    DEFAULT_WHISPER_MODEL,
-    DIR_SOURCE,
-    DOWNLOAD_SOURCE,
-    FunAsrModelSource,
-    HF_CACHE_SOURCE,
-    MANAGED_CACHE_SOURCE,
-    ParaformerStreamingModelSource,
-    WhisperModelSource,
-    resolve_paraformer_streaming_model_source,
-    resolve_funasr_model_source,
-    resolve_whisper_model_source,
-)
-from main import should_enable_reload
-
-def create_snapshot(cache_root: Path, snapshot_name: str = "test-snapshot", model_id: str = "base") -> Path:
-    repo_dir = f"models--Systran--faster-whisper-{model_id}"
-    snapshot_dir = cache_root / repo_dir / "snapshots" / snapshot_name
-    snapshot_dir.mkdir(parents=True, exist_ok=True)
-    (snapshot_dir / "model.bin").write_bytes(b"model")
-    (snapshot_dir / "config.json").write_text("{}", encoding="utf-8")
-    return snapshot_dir
+import asr
+from model_manager import PARAFORMER_STREAMING_MODEL_ID, get_hf_cache_root, repo_cache_dir_name
 
 
-def create_explicit_model_dir(root: Path) -> Path:
-    root.mkdir(parents=True, exist_ok=True)
-    (root / "model.bin").write_bytes(b"model")
-    (root / "config.json").write_text("{}", encoding="utf-8")
-    return root
-
-
-def create_funasr_snapshot(cache_root: Path, snapshot_name: str = "funasr") -> Path:
-    repo_dir = "models--FunAudioLLM--Fun-ASR-Nano-2512"
-    snapshot_dir = cache_root / repo_dir / "snapshots" / snapshot_name
-    snapshot_dir.mkdir(parents=True, exist_ok=True)
-    (snapshot_dir / "model.pt").write_bytes(b"model")
-    (snapshot_dir / "config.yaml").write_text("model: FunASRNano", encoding="utf-8")
-    (snapshot_dir / "configuration.json").write_text("{}", encoding="utf-8")
-    (snapshot_dir / "multilingual.tiktoken").write_text("token", encoding="utf-8")
-    qwen_dir = snapshot_dir / "Qwen3-0.6B"
-    qwen_dir.mkdir()
-    (qwen_dir / "config.json").write_text("{}", encoding="utf-8")
-    return snapshot_dir
-
-
-def create_paraformer_streaming_snapshot(cache_root: Path, snapshot_name: str = "paraformer") -> Path:
-    repo_dir = "models--funasr--paraformer-zh-streaming"
-    snapshot_dir = cache_root / repo_dir / "snapshots" / snapshot_name
+def create_paraformer_snapshot(cache_root: Path, snapshot_name: str = "paraformer") -> Path:
+    snapshot_dir = cache_root / repo_cache_dir_name("funasr/paraformer-zh-streaming") / "snapshots" / snapshot_name
     snapshot_dir.mkdir(parents=True, exist_ok=True)
     (snapshot_dir / "model.pt").write_bytes(b"model")
     (snapshot_dir / "config.yaml").write_text("model: paraformer", encoding="utf-8")
@@ -61,378 +19,87 @@ def create_paraformer_streaming_snapshot(cache_root: Path, snapshot_name: str = 
 
 
 class AsrConfigTest(unittest.TestCase):
-    def test_requirements_include_funasr_package_for_streaming_runtime(self):
-        requirements = (Path(__file__).parent / "requirements.txt").read_text(encoding="utf-8")
-
-        self.assertRegex(requirements, r"(?m)^funasr>=")
-
     def test_resolve_paraformer_streaming_model_source_uses_hf_cache_by_default(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             local_app_data = Path(temp_dir) / "LocalAppData"
             user_profile = Path(temp_dir) / "UserProfile"
             hf_root = user_profile / ".cache" / "huggingface" / "hub"
-            snapshot = create_paraformer_streaming_snapshot(hf_root)
+            snapshot = create_paraformer_snapshot(hf_root)
 
             with patch.dict(
                 os.environ,
                 {
-                    "WHISPER_MODEL": "",
-                    "WHISPER_MODEL_DIR": "",
                     "PARAFORMER_STREAMING_MODEL_DIR": "",
                     "LOCALAPPDATA": str(local_app_data),
                     "USERPROFILE": str(user_profile),
                 },
                 clear=False,
             ):
-                source = resolve_paraformer_streaming_model_source()
+                source = asr.resolve_paraformer_streaming_model_source()
 
         self.assertEqual(
             source,
-            ParaformerStreamingModelSource(
-                kind=HF_CACHE_SOURCE,
+            asr.ParaformerStreamingModelSource(
+                kind=asr.HF_CACHE_SOURCE,
                 model_ref=str(snapshot),
                 download_root=None,
-                model_id="paraformer-zh-streaming",
+                model_id=PARAFORMER_STREAMING_MODEL_ID,
             ),
         )
 
-    def test_resolve_funasr_model_source_uses_hf_cache_by_default(self):
+    def test_resolve_paraformer_streaming_model_source_prefers_explicit_dir(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            local_app_data = Path(temp_dir) / "LocalAppData"
-            user_profile = Path(temp_dir) / "UserProfile"
-            hf_root = user_profile / ".cache" / "huggingface" / "hub"
-            snapshot = create_funasr_snapshot(hf_root)
+            explicit_dir = Path(temp_dir) / "explicit-paraformer"
+            explicit_dir.mkdir(parents=True, exist_ok=True)
+            (explicit_dir / "model.pt").write_bytes(b"model")
+            (explicit_dir / "config.yaml").write_text("model: paraformer", encoding="utf-8")
+            (explicit_dir / "tokens.json").write_text("[]", encoding="utf-8")
+            (explicit_dir / "am.mvn").write_bytes(b"mvn")
 
             with patch.dict(
                 os.environ,
                 {
-                    "WHISPER_MODEL": "",
-                    "WHISPER_MODEL_DIR": "",
-                    "LOCALAPPDATA": str(local_app_data),
-                    "USERPROFILE": str(user_profile),
-                },
-                clear=False,
-            ):
-                source = resolve_funasr_model_source()
-
-        self.assertEqual(
-            source,
-            FunAsrModelSource(
-                kind=HF_CACHE_SOURCE,
-                model_ref=str(snapshot),
-                download_root=None,
-                model_id="fun-asr-nano-2512",
-            ),
-        )
-
-    def test_resolve_whisper_model_source_prefers_explicit_dir(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            explicit_dir = create_explicit_model_dir(Path(temp_dir) / "explicit-model")
-            local_app_data = Path(temp_dir) / "LocalAppData"
-            user_profile = Path(temp_dir) / "UserProfile"
-
-            with patch.dict(
-                os.environ,
-                {
-                    "WHISPER_MODEL": DEFAULT_WHISPER_MODEL,
-                    "WHISPER_MODEL_DIR": str(explicit_dir),
-                    "LOCALAPPDATA": str(local_app_data),
-                    "USERPROFILE": str(user_profile),
-                },
-                clear=False,
-            ):
-                source = resolve_whisper_model_source()
-
-        self.assertEqual(
-            source,
-            WhisperModelSource(
-                kind=DIR_SOURCE,
-                model_ref=str(explicit_dir),
-                download_root=None,
-                model_id=DEFAULT_WHISPER_MODEL,
-            ),
-        )
-
-    def test_resolve_whisper_model_source_rejects_invalid_explicit_dir(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            invalid_dir = Path(temp_dir) / "invalid-model"
-            invalid_dir.mkdir(parents=True, exist_ok=True)
-
-            with patch.dict(
-                os.environ,
-                {
-                    "WHISPER_MODEL": DEFAULT_WHISPER_MODEL,
-                    "WHISPER_MODEL_DIR": str(invalid_dir),
+                    "PARAFORMER_STREAMING_MODEL_DIR": str(explicit_dir),
                     "LOCALAPPDATA": str(Path(temp_dir) / "LocalAppData"),
                     "USERPROFILE": str(Path(temp_dir) / "UserProfile"),
                 },
                 clear=False,
             ):
-                with self.assertRaisesRegex(ValueError, "WHISPER_MODEL_DIR"):
-                    resolve_whisper_model_source()
-
-    def test_resolve_whisper_model_source_prefers_managed_cache_over_hf_cache(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            local_app_data = Path(temp_dir) / "LocalAppData"
-            user_profile = Path(temp_dir) / "UserProfile"
-            managed_root = local_app_data / "Typeless" / "models" / "faster-whisper"
-            hf_root = user_profile / ".cache" / "huggingface" / "hub"
-            managed_snapshot = create_snapshot(managed_root, "managed-snapshot")
-            create_snapshot(hf_root, "hf-snapshot")
-
-            with patch.dict(
-                os.environ,
-                {
-                    "WHISPER_MODEL": DEFAULT_WHISPER_MODEL,
-                    "WHISPER_MODEL_DIR": "",
-                    "LOCALAPPDATA": str(local_app_data),
-                    "USERPROFILE": str(user_profile),
-                },
-                clear=False,
-            ):
-                source = resolve_whisper_model_source()
+                source = asr.resolve_paraformer_streaming_model_source()
 
         self.assertEqual(
             source,
-            WhisperModelSource(
-                kind=MANAGED_CACHE_SOURCE,
-                model_ref=str(managed_snapshot),
+            asr.ParaformerStreamingModelSource(
+                kind=asr.DIR_SOURCE,
+                model_ref=str(explicit_dir),
                 download_root=None,
-                model_id=DEFAULT_WHISPER_MODEL,
+                model_id=PARAFORMER_STREAMING_MODEL_ID,
             ),
         )
 
-    def test_resolve_whisper_model_source_uses_selected_small_managed_cache(self):
+    def test_resolve_paraformer_streaming_model_source_rejects_invalid_explicit_dir(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            local_app_data = Path(temp_dir) / "LocalAppData"
-            user_profile = Path(temp_dir) / "UserProfile"
-            managed_root = local_app_data / "Typeless" / "models" / "faster-whisper"
-            managed_snapshot = create_snapshot(managed_root, "managed-small", model_id="small")
+            invalid_dir = Path(temp_dir) / "invalid-paraformer"
+            invalid_dir.mkdir(parents=True, exist_ok=True)
 
             with patch.dict(
                 os.environ,
                 {
-                    "WHISPER_MODEL": "",
-                    "WHISPER_MODEL_DIR": "",
-                    "LOCALAPPDATA": str(local_app_data),
-                    "USERPROFILE": str(user_profile),
-                },
-                clear=False,
-            ), patch("asr.get_runtime_model_id", return_value="small"):
-                source = resolve_whisper_model_source()
-
-        self.assertEqual(
-            source,
-            WhisperModelSource(
-                kind=MANAGED_CACHE_SOURCE,
-                model_ref=str(managed_snapshot),
-                download_root=None,
-                model_id="small",
-            ),
-        )
-
-    def test_resolve_whisper_model_source_uses_hf_cache_when_managed_cache_missing(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            local_app_data = Path(temp_dir) / "LocalAppData"
-            user_profile = Path(temp_dir) / "UserProfile"
-            hf_root = user_profile / ".cache" / "huggingface" / "hub"
-            hf_snapshot = create_snapshot(hf_root, "hf-snapshot")
-
-            with patch.dict(
-                os.environ,
-                {
-                    "WHISPER_MODEL": DEFAULT_WHISPER_MODEL,
-                    "WHISPER_MODEL_DIR": "",
-                    "LOCALAPPDATA": str(local_app_data),
-                    "USERPROFILE": str(user_profile),
-                },
-                clear=False,
-            ):
-                source = resolve_whisper_model_source()
-
-        self.assertEqual(
-            source,
-            WhisperModelSource(
-                kind=HF_CACHE_SOURCE,
-                model_ref=str(hf_snapshot),
-                download_root=None,
-                model_id=DEFAULT_WHISPER_MODEL,
-            ),
-        )
-
-    def test_resolve_whisper_model_source_falls_back_to_managed_download_root(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            local_app_data = Path(temp_dir) / "LocalAppData"
-            user_profile = Path(temp_dir) / "UserProfile"
-            expected_download_root = local_app_data / "Typeless" / "models" / "faster-whisper"
-
-            with patch.dict(
-                os.environ,
-                {
-                    "WHISPER_MODEL": DEFAULT_WHISPER_MODEL,
-                    "WHISPER_MODEL_DIR": "",
-                    "LOCALAPPDATA": str(local_app_data),
-                    "USERPROFILE": str(user_profile),
-                },
-                clear=False,
-            ):
-                source = resolve_whisper_model_source()
-
-        self.assertEqual(
-            source,
-            WhisperModelSource(
-                kind=DOWNLOAD_SOURCE,
-                model_ref=DEFAULT_WHISPER_MODEL,
-                download_root=str(expected_download_root),
-                model_id=DEFAULT_WHISPER_MODEL,
-            ),
-        )
-
-    def test_resolve_whisper_model_source_skips_hf_snapshot_when_stat_fails(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            local_app_data = Path(temp_dir) / "LocalAppData"
-            user_profile = Path(temp_dir) / "UserProfile"
-            hf_root = user_profile / ".cache" / "huggingface" / "hub"
-            broken_snapshot = create_snapshot(hf_root, "broken-stat")
-            expected_download_root = local_app_data / "Typeless" / "models" / "faster-whisper"
-            original_stat = Path.stat
-
-            def stat_or_fail(path, *args, **kwargs):
-                if path == broken_snapshot:
-                    raise OSError("stat 失败")
-                return original_stat(path, *args, **kwargs)
-
-            with patch.dict(
-                os.environ,
-                {
-                    "WHISPER_MODEL": DEFAULT_WHISPER_MODEL,
-                    "WHISPER_MODEL_DIR": "",
-                    "LOCALAPPDATA": str(local_app_data),
-                    "USERPROFILE": str(user_profile),
-                },
-                clear=False,
-            ), patch.object(Path, "stat", stat_or_fail):
-                source = resolve_whisper_model_source()
-
-        self.assertEqual(
-            source,
-            WhisperModelSource(
-                kind=DOWNLOAD_SOURCE,
-                model_ref=DEFAULT_WHISPER_MODEL,
-                download_root=str(expected_download_root),
-                model_id=DEFAULT_WHISPER_MODEL,
-            ),
-        )
-
-    def test_resolve_whisper_model_source_ignores_legacy_env_variables(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            local_app_data = Path(temp_dir) / "LocalAppData"
-            user_profile = Path(temp_dir) / "UserProfile"
-            expected_download_root = local_app_data / "Typeless" / "models" / "faster-whisper"
-
-            with patch.dict(
-                os.environ,
-                {
-                    "WHISPER_MODEL": DEFAULT_WHISPER_MODEL,
-                    "WHISPER_MODEL_DIR": "",
-                    "WHISPER_MODEL_PATH": "C:/legacy/ggml-base.bin",
-                    "SENSEVOICE_MODEL_DIR": "C:/legacy/sense-voice",
-                    "LOCALAPPDATA": str(local_app_data),
-                    "USERPROFILE": str(user_profile),
-                },
-                clear=False,
-            ):
-                source = resolve_whisper_model_source()
-
-        self.assertEqual(
-            source,
-            WhisperModelSource(
-                kind=DOWNLOAD_SOURCE,
-                model_ref=DEFAULT_WHISPER_MODEL,
-                download_root=str(expected_download_root),
-                model_id=DEFAULT_WHISPER_MODEL,
-            ),
-        )
-
-    def test_resolve_whisper_model_source_accepts_supported_legacy_model_name(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            local_app_data = Path(temp_dir) / "LocalAppData"
-            expected_download_root = local_app_data / "Typeless" / "models" / "faster-whisper"
-
-            with patch.dict(
-                os.environ,
-                {
-                    "WHISPER_MODEL": "small",
-                    "WHISPER_MODEL_DIR": "",
-                    "LOCALAPPDATA": str(local_app_data),
+                    "PARAFORMER_STREAMING_MODEL_DIR": str(invalid_dir),
+                    "LOCALAPPDATA": str(Path(temp_dir) / "LocalAppData"),
                     "USERPROFILE": str(Path(temp_dir) / "UserProfile"),
                 },
                 clear=False,
             ):
-                source = resolve_whisper_model_source()
+                with self.assertRaisesRegex(ValueError, "PARAFORMER_STREAMING_MODEL_DIR"):
+                    asr.resolve_paraformer_streaming_model_source()
 
-        self.assertEqual(
-            source,
-            WhisperModelSource(
-                kind=DOWNLOAD_SOURCE,
-                model_ref="small",
-                download_root=str(expected_download_root),
-                model_id="small",
-            ),
-        )
-
-    def test_asr_uses_model_manager_runtime_model_id_when_env_model_is_set(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            local_app_data = Path(temp_dir) / "LocalAppData"
-            with patch.dict(
-                os.environ,
-                {
-                    "WHISPER_MODEL": "small",
-                    "WHISPER_MODEL_DIR": "",
-                    "LOCALAPPDATA": str(local_app_data),
-                    "USERPROFILE": str(Path(temp_dir) / "UserProfile"),
-                },
-                clear=False,
-            ):
-                source = resolve_whisper_model_source()
-
-        self.assertEqual(source.model_id, "small")
-        self.assertEqual(source.model_ref, "small")
-
-    def test_resolve_whisper_model_source_normalizes_invalid_legacy_model_name_to_base(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            local_app_data = Path(temp_dir) / "LocalAppData"
-            expected_download_root = local_app_data / "Typeless" / "models" / "faster-whisper"
-
-            with patch.dict(
-                os.environ,
-                {
-                    "WHISPER_MODEL": "invalid",
-                    "WHISPER_MODEL_DIR": "",
-                    "LOCALAPPDATA": str(local_app_data),
-                    "USERPROFILE": str(Path(temp_dir) / "UserProfile"),
-                },
-                clear=False,
-            ):
-                source = resolve_whisper_model_source()
-
-        self.assertEqual(
-            source,
-            WhisperModelSource(
-                kind=DOWNLOAD_SOURCE,
-                model_ref=DEFAULT_WHISPER_MODEL,
-                download_root=str(expected_download_root),
-                model_id=DEFAULT_WHISPER_MODEL,
-            ),
-        )
-
-    def test_should_enable_reload_defaults_to_false(self):
-        with patch.dict(os.environ, {}, clear=False):
-            self.assertFalse(should_enable_reload())
-
-    def test_should_enable_reload_reads_truthy_env_value(self):
-        with patch.dict(os.environ, {"UVICORN_RELOAD": "true"}, clear=False):
-            self.assertTrue(should_enable_reload())
+    def test_asr_module_no_longer_exposes_whisper_helpers(self):
+        self.assertFalse(hasattr(asr, "WhisperModelSource"))
+        self.assertFalse(hasattr(asr, "FunAsrModelSource"))
+        self.assertFalse(hasattr(asr, "resolve_whisper_model_source"))
+        self.assertFalse(hasattr(asr, "preload_whisper_model"))
+        self.assertFalse(hasattr(asr, "reload_whisper_model"))
 
 
 if __name__ == "__main__":

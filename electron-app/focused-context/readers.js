@@ -5,10 +5,13 @@ const {
   normalizeUiaSelectionResult,
 } = require('./normalizers');
 const { readSelectedTextByClipboard } = require('./clipboard');
+const { detectAppCompatTextTarget } = require('./app-compat');
 const {
   FOCUSED_TEXT_TARGET_SCRIPT,
   FOCUSED_WINDOW_SCRIPT,
+  FOCUSED_WINDOW_TREE_SCRIPT,
   UIA_SELECTION_SCRIPT,
+  WIN32_CARET_TARGET_SCRIPT,
 } = require('./scripts');
 const { powershellJsonCommand } = require('./powershell');
 
@@ -66,10 +69,35 @@ async function readSelectedTextByUia({
 
 async function readFocusedTextTarget({
   readTextTarget = powershellJsonCommand(FOCUSED_TEXT_TARGET_SCRIPT),
+  readCaretTarget = powershellJsonCommand(WIN32_CARET_TARGET_SCRIPT),
+  readWindowTree = powershellJsonCommand(FOCUSED_WINDOW_TREE_SCRIPT),
+  startFocusInfo = null,
 } = {}) {
   try {
     // 这个结果只描述当前焦点控件是否适合输入，不直接承诺一定能粘贴。
-    return normalizeFocusedTextTargetResult(await readTextTarget());
+    const uiaTarget = normalizeFocusedTextTargetResult(await readTextTarget());
+    if (uiaTarget.success) return uiaTarget;
+
+    const caretTarget = normalizeFocusedTextTargetResult(await readCaretTarget());
+    if (caretTarget.success) return caretTarget;
+
+    if (typeof readWindowTree === 'function') {
+      const startForegroundHwnd = String(startFocusInfo?.appInfo?.app_metadata?.hwnd || '');
+      const compatTarget = normalizeFocusedTextTargetResult(detectAppCompatTextTarget({
+        ...(await readWindowTree()),
+        start_foreground_hwnd: startForegroundHwnd,
+      }));
+      if (compatTarget.success) return compatTarget;
+      return {
+        ...compatTarget,
+        reason: compatTarget.reason || caretTarget.reason || uiaTarget.reason || 'text_target_unavailable',
+      };
+    }
+
+    return {
+      ...caretTarget,
+      reason: caretTarget.reason || uiaTarget.reason || 'text_target_unavailable',
+    };
   } catch (error) {
     // 这里也要返回结构化失败，避免调用方把异常当成“可以输入”。
     return {
@@ -81,7 +109,14 @@ async function readFocusedTextTarget({
       textPattern: false,
       isReadOnly: false,
       controlType: '',
+      appFamily: '',
+      foregroundHwnd: '',
+      focusHwnd: '',
+      caretHwnd: '',
+      matchedSignals: [],
       detail: error instanceof Error ? error.message : String(error),
+      startFocusInfo,
+      readWindowTree: typeof readWindowTree === 'function',
     };
   }
 }

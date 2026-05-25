@@ -4,6 +4,7 @@
  * 需要展示固定快捷键说明时看这里。
  */
 import { Box, Typography } from '@mui/material'
+import { useI18n } from '../../i18n'
 
 const keybindChip = {
   borderRadius: '6px',
@@ -34,19 +35,21 @@ function KeyChips({ keys }: { keys: string[] }) {
 }
 
 export default function ShortcutSettingsSection() {
+  const { t } = useI18n()
+
   return (
     <>
-      <Typography sx={sectionTitle}>快捷键</Typography>
+      <Typography sx={sectionTitle}>{t('settings.shortcuts')}</Typography>
       <Box sx={rowSx}>
-        <Typography>按下开始和停止语音输入。</Typography>
+        <Typography>{t('settings.shortcut.dictation')}</Typography>
         <KeyChips keys={['Right Alt']} />
       </Box>
       <Box sx={rowSx}>
-        <Typography>按下开始和停止自由提问。</Typography>
+        <Typography>{t('settings.shortcut.ask')}</Typography>
         <KeyChips keys={['Right Alt', 'Space']} />
       </Box>
       <Box sx={rowSx}>
-        <Typography>按下开始和停止翻译。</Typography>
+        <Typography>{t('settings.shortcut.translate')}</Typography>
         <KeyChips keys={['Right Alt', 'Right Shift']} />
       </Box>
     </>

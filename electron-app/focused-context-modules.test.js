@@ -18,9 +18,11 @@ const {
   readSelectionSnapshot,
 } = require('./focused-context/readers');
 const {
+  FOCUSED_WINDOW_TREE_SCRIPT,
   FOCUSED_WINDOW_SCRIPT,
   UIA_SELECTION_SCRIPT,
   FOCUSED_TEXT_TARGET_SCRIPT,
+  WIN32_CARET_TARGET_SCRIPT,
 } = require('./focused-context/scripts');
 
 function createRichClipboard() {
@@ -70,6 +72,27 @@ test('normalizers 模块归一化 UIA 选区和焦点上下文', () => {
   const first = normalizeFocusedInfo({ appInfo: { app_identifier: 'A', app_metadata: { hwnd: '1' } } });
   const second = normalizeFocusedInfo({ appInfo: { app_identifier: 'B', app_metadata: { hwnd: '1' } } });
   assert.equal(isSameFocusedContext(first, second), true);
+});
+
+test('normalizers 模块归一化 Win32 caret 和 app_compat 输入目标', () => {
+  assert.equal(normalizeFocusedTextTargetResult({
+    success: true,
+    source: 'win32_caret',
+    confidence: 'confirmed',
+    reason: 'caret',
+    foreground_hwnd: '100',
+    focus_hwnd: '200',
+    caret_hwnd: '201',
+  }).success, true);
+
+  assert.equal(normalizeFocusedTextTargetResult({
+    success: true,
+    source: 'app_compat',
+    confidence: 'weak',
+    reason: 'app_compat_match',
+    app_family: 'wechat',
+    matched_signals: ['process:wechat'],
+  }).success, true);
 });
 
 test('clipboard 模块快照和恢复富剪贴板内容', async () => {
@@ -170,7 +193,9 @@ test('readers 模块组合 PowerShell reader 和归一化函数', async () => {
 });
 
 test('scripts 模块导出三段 PowerShell 脚本', () => {
+  assert.match(FOCUSED_WINDOW_TREE_SCRIPT, /EnumChildWindows/);
   assert.match(FOCUSED_WINDOW_SCRIPT, /GetForegroundWindow/);
   assert.match(UIA_SELECTION_SCRIPT, /TextPattern/);
   assert.match(FOCUSED_TEXT_TARGET_SCRIPT, /ValuePattern/);
+  assert.match(WIN32_CARET_TARGET_SCRIPT, /GetGUIThreadInfo/);
 });

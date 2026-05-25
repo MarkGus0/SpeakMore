@@ -22,7 +22,7 @@ SpeakMore 是一个 Windows 本地语音输入工具。它用 Electron 提供桌
 - 自动学习只在 SpeakMore 本轮粘贴后短时观察当前焦点输入控件；目标应用不支持 Windows UIA 文本读取时，本轮不会学习。
 - 主窗口关闭后隐藏到后台，托盘“退出”才真正结束 Electron。
 - 录音期间在 Windows 上尝试静音后台音频，结束后恢复本轮主动静音的会话。
-- 首页展示累计统计和最近结果，历史页展示最近 200 条记录，词典和模型页管理本地语音辅助数据。
+- 首页展示累计统计和最近结果，历史页展示最近 200 条记录，词典页管理本地语音辅助数据。
 
 ## 项目结构
 
@@ -30,7 +30,7 @@ SpeakMore 是一个 Windows 本地语音输入工具。它用 Electron 提供桌
 .
 ├── server/                         # 本地 FastAPI 后端
 │   ├── main.py                     # HTTP / WebSocket 接口、就绪状态、音频转码
-│   ├── asr.py                      # faster-whisper base 模型加载与转写
+│   ├── asr.py                      # paraformer 中文实时流式模型加载与转写
 │   ├── refiner.py                  # DeepSeek 文本清洗、提问、翻译
 │   ├── runtime_config.py           # .env、HOST、PORT、CORS 配置
 │   └── .env.example                # 后端环境变量模板
@@ -58,7 +58,7 @@ SpeakMore 是一个 Windows 本地语音输入工具。它用 Electron 提供桌
 - `ffmpeg` 已安装并在 `PATH` 中，后端需要它把 `webm/ogg/mp3/m4a/opus` 转成 `wav`。
 - 可用麦克风。
 - DeepSeek API Key。
-- 首次自动下载 `faster-whisper base` 模型时需要可访问 Hugging Face；离线环境请提前准备模型目录并配置 `WHISPER_MODEL_DIR`。
+- 首次自动下载 `paraformer-zh-streaming` 模型时需要可访问 Hugging Face；离线环境请提前准备模型目录并配置 `PARAFORMER_STREAMING_MODEL_DIR`。
 
 ## 安装
 
@@ -103,8 +103,7 @@ copy server\.env.example server\.env
 ```env
 DEEPSEEK_API_KEY=你的 DeepSeek API Key
 DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
-WHISPER_MODEL=base
-WHISPER_MODEL_DIR=
+PARAFORMER_STREAMING_MODEL_DIR=
 HOST=127.0.0.1
 PORT=8000
 CORS_ALLOWED_ORIGINS=null,http://127.0.0.1:5173,http://localhost:5173
@@ -113,20 +112,20 @@ CORS_ALLOWED_ORIGINS=null,http://127.0.0.1:5173,http://localhost:5173
 注意：
 
 - `server/.env` 已被 `.gitignore` 忽略，不要提交真实密钥。
-- 当前后端只支持 `WHISPER_MODEL=base`。
+- 当前后端只支持 `paraformer-zh-streaming`，不提供模型切换、下载或删除入口。
 - 设置页里的 `DeepSeek API Key` 输入目前只是界面入口，不会自动写入 `server/.env`；真实运行仍以 `server/.env` 为准。
 - 开发态热重载需要显式设置 `UVICORN_RELOAD=true`，代码不会默认开启 reload。
 
-### Whisper 模型位置
+### Paraformer 模型位置
 
-后端唯一使用 `faster-whisper base`。模型查找顺序为：
+后端唯一使用 `paraformer-zh-streaming`。模型查找顺序为：
 
-1. `WHISPER_MODEL_DIR`
-2. `%LOCALAPPDATA%\Typeless\models\faster-whisper`
+1. `PARAFORMER_STREAMING_MODEL_DIR`
+2. `%LOCALAPPDATA%\Typeless\models\funasr`
 3. `%USERPROFILE%\.cache\huggingface\hub`
-4. 都未命中时，首次运行自动下载到 `%LOCALAPPDATA%\Typeless\models\faster-whisper`
+4. 都未命中时，首次运行自动下载到 `%LOCALAPPDATA%\Typeless\models\funasr`
 
-如果手动配置 `WHISPER_MODEL_DIR`，目录内必须包含 `model.bin` 和 `config.json`。
+如果手动配置 `PARAFORMER_STREAMING_MODEL_DIR`，目录内必须包含 `model.pt`、`config.yaml`、`tokens.json` 和 `am.mvn`。
 
 ## 启动
 
@@ -291,11 +290,11 @@ npm run server
 Invoke-WebRequest http://127.0.0.1:8000/ready | Select-Object StatusCode
 ```
 
-如果 `/ready` 仍是 503，通常是模型还在加载、模型下载失败或 `WHISPER_MODEL_DIR` 配置错误。
+如果 `/ready` 仍是 503，通常是模型还在加载、模型下载失败或 `PARAFORMER_STREAMING_MODEL_DIR` 配置错误。
 
 ### 首次启动很慢
 
-第一次没有本地 `faster-whisper base` 模型时，后端会下载模型。网络慢或无法访问 Hugging Face 时，建议提前下载模型并设置 `WHISPER_MODEL_DIR`。
+第一次没有本地 `paraformer-zh-streaming` 模型时，后端会下载模型。网络慢或无法访问 Hugging Face 时，建议提前准备模型目录并设置 `PARAFORMER_STREAMING_MODEL_DIR`。
 
 ### 转写时报 ffmpeg 错误
 
@@ -305,7 +304,7 @@ Invoke-WebRequest http://127.0.0.1:8000/ready | Select-Object StatusCode
 ffmpeg -version
 ```
 
-后端实时音频通常是 `webm/opus`，没有 `ffmpeg` 就无法稳定转成 ASR 需要的 `wav`。
+主录音链路现在固定发送 `PCM16`；兼容入口上传的 `webm/opus`、`mp3` 等音频仍需要 `ffmpeg` 才能稳定转成后端可识别格式。
 
 ### DeepSeek 没有生效
 

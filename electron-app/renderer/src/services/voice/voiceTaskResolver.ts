@@ -5,6 +5,7 @@
  */
 import type { ShortcutIntent } from '../shortcutGuard'
 import {
+  getFocusedInfoSnapshot,
   getFocusedSelectionSnapshot,
   type FocusedInfo,
   type FocusedSelectionSnapshot,
@@ -24,6 +25,7 @@ export type VoiceTask = {
 }
 
 type SelectionSnapshotReader = () => Promise<FocusedSelectionSnapshot>
+type FocusedInfoReader = () => Promise<FocusedInfo | null>
 
 // 听写和语音翻译不依赖选区，避免有选中文本时误改业务模式。
 const NO_SELECTION_SNAPSHOT: FocusedSelectionSnapshot = {
@@ -59,18 +61,29 @@ function createNoSelectionSnapshot(snapshot: FocusedSelectionSnapshot): FocusedS
   }
 }
 
+async function createPasteTaskWithoutSelection(
+  mode: VoiceMode,
+  readFocusedInfoSnapshot: FocusedInfoReader,
+): Promise<VoiceTask> {
+  return createTask(mode, {
+    ...NO_SELECTION_SNAPSHOT,
+    focusInfo: await readFocusedInfoSnapshot(),
+  }, 'paste')
+}
+
 export async function resolveVoiceTask(
   intent: ShortcutIntent,
   readSelectionSnapshot: SelectionSnapshotReader = getFocusedSelectionSnapshot,
+  readFocusedInfoSnapshot: FocusedInfoReader = getFocusedInfoSnapshot,
 ): Promise<VoiceTask> {
   // 翻译快捷键是显式语音翻译，不能因为当前有选区就变成选区翻译。
   if (intent === 'TranslateShortcut') {
-    return createTask('Translate', NO_SELECTION_SNAPSHOT, 'paste')
+    return createPasteTaskWithoutSelection('Translate', readFocusedInfoSnapshot)
   }
 
   // 普通听写始终优先自动粘贴，不读取 UIA 选区，避免选区状态影响听写语义。
   if (intent !== 'AskShortcut') {
-    return createTask('Dictate', NO_SELECTION_SNAPSHOT, 'paste')
+    return createPasteTaskWithoutSelection('Dictate', readFocusedInfoSnapshot)
   }
 
   // 只有自由提问需要选区上下文；UIA confirmed 优先，UIA 不可用时接受剪贴板 fallback。

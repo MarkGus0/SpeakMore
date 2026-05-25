@@ -41,6 +41,7 @@ docs/
 .tmp-dotnet-home/
 .tmp-nuget-packages/
 .tmp-appdata/
+.tmp-electron-profile/
 
 # 系统与编辑器文件
 .DS_Store

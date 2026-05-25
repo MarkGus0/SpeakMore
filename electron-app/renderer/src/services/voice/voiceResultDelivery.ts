@@ -10,9 +10,11 @@ import type { VoiceMode } from './voiceTypes'
 
 export { hideFloatingPanel }
 
-export async function pasteResultOrShowPanel(resultText: string) {
+export async function pasteResultOrShowPanel(resultText: string, task: VoiceTask | null = null) {
   try {
-    const result = await ipcClient.invoke('keyboard:type-transcript', resultText)
+    const result = await ipcClient.invoke('keyboard:type-transcript', resultText, {
+      startFocusInfo: task?.focusInfo ?? null,
+    })
     if (result === false || (result && typeof result === 'object' && (result as { success?: unknown }).success === false)) {
       // 自动粘贴失败时必须保底展示结果，不能让用户丢失本轮文本。
       showFreeAskResult(resultText)
@@ -33,5 +35,5 @@ export async function deliverVoiceResult(
     return
   }
 
-  await pasteResultOrShowPanel(resultText)
+  await pasteResultOrShowPanel(resultText, task)
 }

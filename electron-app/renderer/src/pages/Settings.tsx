@@ -5,8 +5,10 @@ import LanguageSettingsSection from './settings/LanguageSettingsSection'
 import LlmSettingsSection from './settings/LlmSettingsSection'
 import ShortcutSettingsSection from './settings/ShortcutSettingsSection'
 import { useSettingsPageState } from './settings/useSettingsPageState'
+import { useI18n } from '../i18n'
 
 export default function Settings() {
+  const { t } = useI18n()
   const {
     settings,
     llmView,
@@ -27,7 +29,7 @@ export default function Settings() {
 
   return (
     <Box sx={{ ...pageSx, maxWidth: 680 }}>
-      <Typography sx={{ ...pageTitleSx, mb: 2 }}>设置</Typography>
+      <Typography sx={{ ...pageTitleSx, mb: 2 }}>{t('settings.title')}</Typography>
       <ShortcutSettingsSection />
       <AudioSettingsSection
         settings={settings}

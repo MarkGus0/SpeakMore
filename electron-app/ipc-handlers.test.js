@@ -4,7 +4,6 @@ const { registerClipboardUserIpcHandlers } = require('./clipboard-user-ipc');
 const { registerHistoryIpcHandlers } = require('./history-ipc');
 const { registerSettingsIpcHandlers } = require('./settings-ipc');
 const { registerDictionaryIpcHandlers } = require('./dictionary-ipc');
-const { registerModelIpcHandlers } = require('./model-ipc');
 const { registerAudioIpcHandlers } = require('./audio-ipc');
 const { registerFocusedContextIpcHandlers } = require('./focused-context-ipc');
 const { registerFileIpcHandlers } = require('./file-ipc');
@@ -187,23 +186,6 @@ test('registerDictionaryIpcHandlers 注册词典通道', async () => {
   assert.deepEqual(await ipcMain.invoke('dictionary:candidates-list'), ['candidate']);
   assert.deepEqual(await ipcMain.invoke('dictionary:prompt-terms'), ['term']);
   assert.deepEqual(calls[0], ['create', { id: 1 }]);
-});
-
-test('registerModelIpcHandlers 注册模型通道', async () => {
-  const ipcMain = createFakeIpcMain();
-  const calls = [];
-
-  registerModelIpcHandlers({
-    ipcMain,
-    callModelBackend: async (pathname, options) => {
-      calls.push([pathname, options]);
-      return { success: true };
-    },
-  });
-
-  assert.deepEqual(await ipcMain.invoke('model:list'), { success: true });
-  assert.deepEqual(await ipcMain.invoke('model:download', 'abc/123'), { success: true });
-  assert.deepEqual(calls[1], ['/abc%2F123/download', { method: 'POST' }]);
 });
 
 test('registerAudioIpcHandlers 注册音频通道', async () => {

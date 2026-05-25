@@ -6,7 +6,6 @@
 import { getAudioStream, stopStreamTracks, type RecordingTransport } from './audioCapture'
 import { loadPromptDictionaryTerms, type PromptDictionaryTerm } from '../dictionaryStore'
 import { ipcClient } from '../ipc'
-import { loadModelsState } from '../modelStore'
 import {
   getCurrentLlmConfig,
   getTranslationTargetLanguage,
@@ -45,7 +44,7 @@ export async function prepareRecordingStart(
   try {
     // 启动前资源可以并行准备，但失败时必须把已经打开的麦克风和连接收掉。
     const readyPromise = ensureVoiceServerReady()
-    const transportPromise = resolveRecordingTransport()
+    const transportPromise = Promise.resolve<RecordingTransport>('pcm16')
     const socketPromise = socketControls.ensureOpenWebSocket()
     const parameterInputsPromise = prepareStartAudioParameterInputs(task.mode)
     const streamPromise = getAudioStream().then((stream) => {
@@ -83,18 +82,6 @@ export function cleanupPreparedStart(
   socketControls.closeWebSocketSilently()
 }
 
-export async function resolveRecordingTransport(): Promise<RecordingTransport> {
-  try {
-    const state = await loadModelsState()
-    const currentModel = state.models.find((model) => model.isCurrent)
-      ?? state.models.find((model) => model.id === state.currentModelId)
-    // 只有真正的流式 FunASR 模型需要浏览器侧直接推 PCM chunk。
-    return currentModel?.engine === 'funasr-streaming' ? 'pcm16' : 'webm'
-  } catch {
-    return 'webm'
-  }
-}
-
 export async function prepareStartAudioParameterInputs(mode: VoiceMode): Promise<StartAudioParameterInputs> {
   const translationTargetLanguagePromise = mode === 'Translate'
     ? getTranslationTargetLanguage()
@@ -111,16 +98,17 @@ export async function prepareStartAudioParameterInputs(mode: VoiceMode): Promise
 export function getStartAudioParameters(
   mode: VoiceMode,
   selectedText = '',
-  transport: RecordingTransport = 'webm',
+  _transport: RecordingTransport = 'pcm16',
   inputs: StartAudioParameterInputs,
 ): Record<string, unknown> {
   // 词典和 LLM 配置是本轮请求参数，必须在 start_audio 前固定下来，避免录音中途变化。
   const { dictionaryTerms, llm, translationTargetLanguage } = inputs
   const dictionaryParameters = dictionaryTerms.length ? { dictionary_terms: dictionaryTerms } : {}
-  const audioFormatParameters = transport === 'pcm16'
-    ? { audio_format: { type: 'pcm_s16le', sample_rate: 16000, channels: 1 } }
-    : {}
-  const baseParameters = { llm, ...dictionaryParameters, ...audioFormatParameters }
+  const baseParameters = {
+    llm,
+    ...dictionaryParameters,
+    audio_format: { type: 'pcm_s16le', sample_rate: 16000, channels: 1 },
+  }
 
   // 自由提问只在有可信选区时把选区文本作为上下文发给后端。
   if (mode === 'Ask') {

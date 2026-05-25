@@ -1,9 +1,10 @@
-export type Page = 'home' | 'history' | 'dictionary' | 'models' | 'settings'
+import { type TranslationKey } from './i18n'
 
-export const pages: { label: string; page: Page }[] = [
-  { label: '首页', page: 'home' },
-  { label: '历史记录', page: 'history' },
-  { label: '词典', page: 'dictionary' },
-  { label: '模型', page: 'models' },
-  { label: '设置', page: 'settings' },
+export type Page = 'home' | 'history' | 'dictionary' | 'settings'
+
+export const pages: { labelKey: TranslationKey; page: Page }[] = [
+  { labelKey: 'nav.home', page: 'home' },
+  { labelKey: 'nav.history', page: 'history' },
+  { labelKey: 'nav.dictionary', page: 'dictionary' },
+  { labelKey: 'nav.settings', page: 'settings' },
 ]

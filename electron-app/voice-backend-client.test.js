@@ -22,8 +22,8 @@ test('createVoiceBackendUrls 统一生成后端接口 URL', () => {
   assert.equal(urls.healthUrl, 'http://localhost:9000/health');
   assert.equal(urls.readyUrl, 'http://localhost:9000/ready');
   assert.equal(urls.voiceFlowUrl, 'http://localhost:9000/ai/voice_flow');
-  assert.equal(urls.modelsUrl, 'http://localhost:9000/models');
   assert.equal(urls.configReloadUrl, 'http://localhost:9000/config/reload');
+  assert.equal('modelsUrl' in urls, false);
 });
 
 test('resolveVoiceServerProbeDetail 优先使用后端 detail 或 status', () => {
@@ -84,7 +84,7 @@ test('buildVoiceFlowFormData 组装音频文件和参数', () => {
   assert.equal(formData.get('device_name'), '');
 });
 
-test('createVoiceBackendClient 的模型接口失败时返回 backend_unavailable', async () => {
+test('createVoiceBackendClient 不再暴露模型接口', async () => {
   const client = createVoiceBackendClient({
     fetchImpl: async () => {
       throw new Error('network down');
@@ -93,10 +93,7 @@ test('createVoiceBackendClient 的模型接口失败时返回 backend_unavailabl
     normalizeLlmRequestConfig: (value) => value,
   });
 
-  const result = await client.callModelBackend();
-
-  assert.equal(result.success, false);
-  assert.equal(result.code, 'backend_unavailable');
+  assert.equal('callModelBackend' in client, false);
 });
 
 test('createVoiceBackendClient 的语音接口在后端未就绪时返回 backend_not_ready', async () => {

@@ -5,7 +5,7 @@ import sharedLlmProviders from '../../../../shared/llm-providers.json'
 
 type WindowWithIpc = typeof globalThis & {
   ipcRenderer?: {
-    invoke: <T = unknown>(channel: string, payload?: unknown) => Promise<T>
+    invoke: <T = unknown>(channel: string, ...payload: unknown[]) => Promise<T>
     send: (channel: string, payload?: unknown) => void
     on: (channel: string, listener: (...args: unknown[]) => void) => void
     off: (channel: string, listener: (...args: unknown[]) => void) => void
@@ -164,4 +164,22 @@ test('loadSettings 遇到未知翻译目标语言会回退默认英文', async (
   const settings = await settingsStore.loadSettings()
 
   assert.equal(settings.translationTargetLanguage, 'en')
+})
+
+test('loadSettings 会保留英文界面语言', async () => {
+  installSettingsResponse({ preferredLanguage: 'en-US' })
+  const settingsStore = await loadSettingsStore('interface-language-en')
+
+  const settings = await settingsStore.loadSettings()
+
+  assert.equal(settings.preferredLanguage, 'en-US')
+})
+
+test('loadSettings 遇到未知界面语言会回退简体中文', async () => {
+  installSettingsResponse({ preferredLanguage: 'xx' })
+  const settingsStore = await loadSettingsStore('interface-language-unknown')
+
+  const settings = await settingsStore.loadSettings()
+
+  assert.equal(settings.preferredLanguage, 'zh-CN')
 })
