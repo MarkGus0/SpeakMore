@@ -154,7 +154,11 @@ function normalizeFocusedTextTargetResult(value) {
     && (confidence === 'weak' || confidence === 'app_specific')
     && Boolean(appFamily)
     && matchedSignals.length > 0;
-  const success = Boolean(value.success) && (isUiaSuccess || isCaretSuccess || isAppCompatSuccess);
+  const isForegroundWindowSuccess = source === 'foreground_window'
+    && (confidence === 'weak' || confidence === 'confirmed')
+    && matchedSignals.length > 0
+    && Boolean(foregroundHwnd);
+  const success = Boolean(value.success) && (isUiaSuccess || isCaretSuccess || isAppCompatSuccess || isForegroundWindowSuccess);
 
   return {
     success,
