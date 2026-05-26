@@ -1,22 +1,31 @@
+/**
+ * 词典纯数据算法
+ *
+ * 需要理解词条规范化、候选计数、自动提升和 prompt 词典裁剪策略时看这里。
+ */
 const crypto = require('crypto');
 
 const MAX_PROMPT_DICTIONARY_TERMS = 100;
+// 三次相同修正才自动提升，避免用户一次偶然改写就污染正式词典。
 const AUTO_PROMOTE_THRESHOLD = 3;
 const ENTRY_SOURCES = new Set(['manual', 'auto']);
 const ENTRY_STATUSES = new Set(['active', 'disabled']);
 const CANDIDATE_STATUSES = new Set(['candidate', 'ignored', 'promoted']);
 
 function createId(prefix) {
+  // 词典存在本地 JSON 中，稳定 id 让前端列表操作不依赖词条文本本身。
   return `${prefix}_${typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex')}`;
 }
 
 function normalizePhrase(value) {
+  // 统一空白能让“同一个词条的不同空格写法”落到同一个比较维度。
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
 function uniqueAliases(aliases, phrase = '') {
   const normalizedPhrase = normalizePhrase(phrase).toLowerCase();
   const seen = new Set();
+  // 别名不能和正确写法相同，也不能重复；否则 prompt 会出现没有信息量的规则。
   return (Array.isArray(aliases) ? aliases : [])
     .map(normalizePhrase)
     .filter(Boolean)
@@ -32,6 +41,7 @@ function uniqueAliases(aliases, phrase = '') {
 function normalizeDictionaryEntry(value = {}, now = new Date().toISOString()) {
   const phrase = normalizePhrase(value.phrase);
   const createdAt = typeof value.createdAt === 'string' && value.createdAt ? value.createdAt : now;
+  // 读本地 JSON 时也走规范化，防止旧数据或手改文件里的坏字段扩散到 UI 和后端 prompt。
   return {
     id: typeof value.id === 'string' && value.id ? value.id : createId('dict'),
     phrase,
@@ -47,6 +57,7 @@ function normalizeDictionaryEntry(value = {}, now = new Date().toISOString()) {
 
 function normalizeDictionaryCandidate(value = {}, now = new Date().toISOString()) {
   const firstSeenAt = typeof value.firstSeenAt === 'string' && value.firstSeenAt ? value.firstSeenAt : now;
+  // 候选保留 wrong/correct/count/status，足够表达“用户重复把某个写法改成另一个写法”。
   return {
     id: typeof value.id === 'string' && value.id ? value.id : createId('candidate'),
     wrong: normalizePhrase(value.wrong),
@@ -59,6 +70,7 @@ function normalizeDictionaryCandidate(value = {}, now = new Date().toISOString()
 }
 
 function sameEntry(left, right) {
+  // 正式词条按正确写法合并，避免同一术语因为大小写差异生成多条。
   return normalizePhrase(left.phrase).toLowerCase() === normalizePhrase(right.phrase).toLowerCase();
 }
 
@@ -72,6 +84,7 @@ function upsertDictionaryEntry(entries, entry, now = new Date().toISOString()) {
 
   return normalizedEntries.map((item, index) => {
     if (index !== existingIndex) return item;
+    // 手动词条代表用户明确配置，自动学习只能补充别名和命中信息，不能把来源覆盖成 auto。
     return normalizeDictionaryEntry({
       ...item,
       ...normalized,
@@ -87,6 +100,7 @@ function upsertDictionaryEntry(entries, entry, now = new Date().toISOString()) {
 }
 
 function buildPromptDictionaryTerms(entries, limit = MAX_PROMPT_DICTIONARY_TERMS) {
+  // 传给后端的 prompt 词典只包含启用词条，并按“更常命中、更近期更新”优先，控制上下文长度。
   return (Array.isArray(entries) ? entries : [])
     .map((entry) => normalizeDictionaryEntry(entry))
     .filter((entry) => entry.status === 'active' && entry.phrase)
@@ -96,6 +110,7 @@ function buildPromptDictionaryTerms(entries, limit = MAX_PROMPT_DICTIONARY_TERMS
 }
 
 function learnDictionaryCandidate(candidates, correction, now = new Date().toISOString()) {
+  // correction 来自“粘贴文本”和“用户改后文本”的差异，不在这里重新做文本 diff。
   const normalizedCandidates = (Array.isArray(candidates) ? candidates : [])
     .map((candidate) => normalizeDictionaryCandidate(candidate, now));
   const normalized = normalizeDictionaryCandidate({
@@ -106,21 +121,25 @@ function learnDictionaryCandidate(candidates, correction, now = new Date().toISO
     lastSeenAt: now,
   }, now);
 
+  // 空值、自我映射都没有学习价值，直接保留现有候选。
   if (!normalized.wrong || !normalized.correct || normalized.wrong.toLowerCase() === normalized.correct.toLowerCase()) {
     return { candidates: normalizedCandidates, promotedEntry: null };
   }
 
   let promotedEntry = null;
+  // 同一组 wrong -> correct 才累计次数；反向修改或改到其它正确写法应当是另一条候选。
   const key = `${normalized.wrong.toLowerCase()}\n${normalized.correct.toLowerCase()}`;
   const index = normalizedCandidates.findIndex((candidate) => (
     `${candidate.wrong.toLowerCase()}\n${candidate.correct.toLowerCase()}` === key
   ));
 
   if (index === -1) {
+    // 第一次出现只进入候选，不立即影响后端 prompt。
     return { candidates: [normalized, ...normalizedCandidates], promotedEntry };
   }
 
   if (normalizedCandidates[index].status === 'ignored') {
+    // 用户忽略过的候选不再自动累加，避免已经拒绝的学习结果反复回来。
     return { candidates: normalizedCandidates, promotedEntry };
   }
 
@@ -132,6 +151,7 @@ function learnDictionaryCandidate(candidates, correction, now = new Date().toISO
 
   if (updated.count >= AUTO_PROMOTE_THRESHOLD) {
     updated.status = 'promoted';
+    // 达到阈值后才生成正式词条；wrong 成为别名，correct 成为后端 prompt 的正确写法。
     promotedEntry = normalizeDictionaryEntry({
       phrase: updated.correct,
       aliases: [updated.wrong],

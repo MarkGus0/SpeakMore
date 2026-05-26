@@ -222,3 +222,44 @@ test('registerKeyboardIpcHandlers 将粘贴上下文传给焦点目标检测', a
   assert.deepEqual(await ipcMain.invoke('keyboard:type-transcript', 'hello', { startFocusInfo }), { success: true });
   assert.deepEqual(receivedOptions, { startFocusInfo });
 });
+
+test('registerKeyboardIpcHandlers 在自动学习启动异常时仍静默完成粘贴', async () => {
+  const ipcMain = createFakeIpcMain();
+  const child = createFakeChildProcess();
+  const clipboardWrites = [];
+  const clipboard = {
+    writeText: (text) => clipboardWrites.push(text),
+  };
+  const restoreCalls = [];
+  const spawnCalls = [];
+
+  registerKeyboardIpcHandlers({
+    ipcMain,
+    clipboard,
+    spawnProcess: (...args) => {
+      spawnCalls.push(args);
+      setImmediate(() => child.emit('exit', 0));
+      return child;
+    },
+    readFocusedTextTarget: async () => ({ success: true }),
+    createClipboardSnapshot: () => ({ text: 'before' }),
+    restoreClipboardSnapshot: (clipboard, snapshot) => {
+      restoreCalls.push([clipboard, snapshot]);
+    },
+    readFocusedInfo: async () => ({ success: true }),
+    textObservationManager: {
+      start: async () => {
+        throw new Error('observer failed');
+      },
+    },
+    randomUUID: () => 'audio-1',
+  });
+
+  await assert.doesNotReject(async () => {
+    assert.deepEqual(await ipcMain.invoke('keyboard:type-transcript', 'hello'), { success: true });
+  });
+
+  assert.deepEqual(clipboardWrites, ['hello']);
+  assert.equal(spawnCalls.length, 1);
+  assert.deepEqual(restoreCalls, [[clipboard, { text: 'before' }]]);
+});

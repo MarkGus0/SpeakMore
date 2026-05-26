@@ -24,6 +24,22 @@ function createFakeProcess() {
   return process;
 }
 
+async function waitForHelperWrite(child) {
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(child.stdin.writes.length > 0, true);
+}
+
+function emitObserveStarted(child, audioId, overrides = {}) {
+  child.stdout.emit('data', `${JSON.stringify({
+    type: 'observe-started',
+    audioId,
+    success: true,
+    code: null,
+    text: null,
+    ...overrides,
+  })}\n`);
+}
+
 test('createTextObserverService 启动时向 helper 发送 observe-start', async () => {
   const child = createFakeProcess();
   const spawnCalls = [];
@@ -38,11 +54,15 @@ test('createTextObserverService 启动时向 helper 发送 observe-start', async
     createSessionManager: undefined,
   });
 
-  const result = await service.textObservationManager.start({
+  const startPromise = service.textObservationManager.start({
     audioId: 'audio-1',
     pastedText: 'hello',
     focusInfo: null,
   });
+
+  await waitForHelperWrite(child);
+  emitObserveStarted(child, 'audio-1');
+  const result = await startPromise;
 
   assert.equal(result.success, true);
   assert.equal(spawnCalls.length, 1);
@@ -65,11 +85,14 @@ test('createTextObserverService 观察到文本修改后会调用 learnCorrectio
     emitDictionaryChanged: (payload) => dictionaryChanges.push(payload),
   });
 
-  await service.textObservationManager.start({
+  const startPromise = service.textObservationManager.start({
     audioId: 'audio-2',
     pastedText: 'client to api',
     focusInfo: null,
   });
+  await waitForHelperWrite(child);
+  emitObserveStarted(child, 'audio-2');
+  await startPromise;
   const result = await service.textObservationManager.handleObservedText({
     audioId: 'audio-2',
     text: 'Client2API',
@@ -95,11 +118,14 @@ test('createTextObserverService 没有提取到纠错候选时不广播词典变
     emitDictionaryChanged: (payload) => dictionaryChanges.push(payload),
   });
 
-  await service.textObservationManager.start({
+  const startPromise = service.textObservationManager.start({
     audioId: 'audio-3',
     pastedText: 'hello',
     focusInfo: null,
   });
+  await waitForHelperWrite(child);
+  emitObserveStarted(child, 'audio-3');
+  await startPromise;
   const result = await service.textObservationManager.handleObservedText({
     audioId: 'audio-3',
     text: 'hello',
@@ -108,5 +134,100 @@ test('createTextObserverService 没有提取到纠错候选时不广播词典变
   assert.equal(result.success, true);
   assert.deepEqual(result.candidates, []);
   assert.deepEqual(dictionaryChanges, []);
+  await service.textObservationManager.stop('test');
+});
+
+test('createTextObserverService 写入 helper stdin 失败时降级为观察不可用', async () => {
+  const child = createFakeProcess();
+  child.stdin.write = () => {
+    const error = new Error('write EPIPE');
+    error.code = 'EPIPE';
+    throw error;
+  };
+  const errors = [];
+  const service = createTextObserverService({
+    processPlatform: 'win32',
+    exePath: 'C:\\helper.exe',
+    spawnProcess: () => child,
+    logger: { error: (...args) => errors.push(args) },
+  });
+
+  const result = await service.textObservationManager.start({
+    audioId: 'audio-4',
+    pastedText: 'Using Superpower',
+    focusInfo: null,
+  });
+
+  assert.deepEqual(result, { success: false, code: 'native_observer_unavailable' });
+  assert.equal(service.getProcess(), null);
+  assert.equal(errors.length, 1);
+});
+
+test('createTextObserverService 等待 helper 返回真实 observe-started 失败结果', async () => {
+  const child = createFakeProcess();
+  const service = createTextObserverService({
+    processPlatform: 'win32',
+    exePath: 'C:\\helper.exe',
+    spawnProcess: () => child,
+  });
+
+  const startPromise = service.textObservationManager.start({
+    audioId: 'audio-start-failed',
+    pastedText: '微信输入',
+    focusInfo: null,
+  });
+
+  try {
+    await waitForHelperWrite(child);
+    emitObserveStarted(child, 'audio-start-failed', {
+      success: false,
+      code: 'text_pattern_unavailable',
+    });
+
+    assert.deepEqual(await startPromise, {
+      success: false,
+      code: 'text_pattern_unavailable',
+    });
+  } finally {
+    await service.textObservationManager.stop('test');
+  }
+});
+
+test('createTextObserverService 启动 helper 时注入本地 dotnet runtime', async () => {
+  const child = createFakeProcess();
+  const spawnCalls = [];
+  const service = createTextObserverService({
+    processPlatform: 'win32',
+    exePath: 'C:\\helper.exe',
+    dotnetRoot: 'D:\\CodeWorkSpace\\typeless\\.tmp-dotnet',
+    processEnv: {
+      PATH: 'C:\\Windows\\System32',
+      SystemRoot: 'C:\\Windows',
+    },
+    fileExists: (targetPath) => (
+      targetPath === 'C:\\helper.exe'
+      || targetPath === 'D:\\CodeWorkSpace\\typeless\\.tmp-dotnet'
+    ),
+    spawnProcess: (...args) => {
+      spawnCalls.push(args);
+      return child;
+    },
+  });
+
+  const startPromise = service.textObservationManager.start({
+    audioId: 'audio-5',
+    pastedText: 'hello',
+    focusInfo: null,
+  });
+
+  await waitForHelperWrite(child);
+  emitObserveStarted(child, 'audio-5');
+  const result = await startPromise;
+
+  assert.equal(result.success, true);
+  assert.equal(spawnCalls.length, 1);
+  assert.equal(spawnCalls[0][2].env.DOTNET_ROOT, 'D:\\CodeWorkSpace\\typeless\\.tmp-dotnet');
+  assert.equal(spawnCalls[0][2].env['DOTNET_ROOT(x64)'], 'D:\\CodeWorkSpace\\typeless\\.tmp-dotnet');
+  assert.match(spawnCalls[0][2].env.PATH, /^D:\\CodeWorkSpace\\typeless\\.tmp-dotnet;/);
   await service.textObservationManager.stop('test');
 });

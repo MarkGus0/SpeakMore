@@ -27,6 +27,7 @@ function createAppPaths({
     rightAltListenerPath: () => path.join(baseDir, 'right-alt-listener.ps1'),
     audioSessionControlPath: () => path.join(baseDir, 'audio-session-control.ps1'),
     textObserverExecutablePath: () => path.join(baseDir, 'windows-text-observer', 'bin', 'Debug', 'net8.0-windows', 'WindowsTextObserver.exe'),
+    dotnetRootPath: () => path.join(baseDir, '..', '.tmp-dotnet'),
     extractedPath,
     extractedRendererPath: (fileName) => extractedPath('dist', 'renderer', fileName),
   };
