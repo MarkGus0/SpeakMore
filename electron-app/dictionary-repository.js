@@ -15,6 +15,7 @@ function createDictionaryRepository({
   writeJsonFile,
   dictionaryFileName = 'dictionary.json',
   candidatesFileName = 'dictionary-candidates.json',
+  logger = null,
 } = {}) {
   if (typeof readJsonFile !== 'function') {
     throw new Error('readJsonFile is required');
@@ -26,26 +27,46 @@ function createDictionaryRepository({
   function readDictionaryEntries() {
     const value = readJsonFile(dictionaryFileName, []);
     if (!Array.isArray(value)) return [];
-    return value.map(normalizeDictionaryEntry).filter((entry) => entry.phrase);
+    const entries = value.map(normalizeDictionaryEntry).filter((entry) => entry.phrase);
+    logger?.info?.('[auto-learning][dictionary] 读取正式词条', {
+      fileName: dictionaryFileName,
+      count: entries.length,
+    });
+    return entries;
   }
 
   function writeDictionaryEntries(entries) {
+    const nextEntries = entries.map(normalizeDictionaryEntry).filter((entry) => entry.phrase);
+    logger?.info?.('[auto-learning][dictionary] 写入正式词条', {
+      fileName: dictionaryFileName,
+      count: nextEntries.length,
+    });
     return writeJsonFile(
       dictionaryFileName,
-      entries.map(normalizeDictionaryEntry).filter((entry) => entry.phrase),
+      nextEntries,
     );
   }
 
   function readDictionaryCandidates() {
     const value = readJsonFile(candidatesFileName, []);
     if (!Array.isArray(value)) return [];
-    return value.map(normalizeDictionaryCandidate).filter((candidate) => candidate.wrong && candidate.correct);
+    const candidates = value.map(normalizeDictionaryCandidate).filter((candidate) => candidate.wrong && candidate.correct);
+    logger?.info?.('[auto-learning][dictionary] 读取候选词条', {
+      fileName: candidatesFileName,
+      count: candidates.length,
+    });
+    return candidates;
   }
 
   function writeDictionaryCandidates(candidates) {
+    const nextCandidates = candidates.map(normalizeDictionaryCandidate).filter((candidate) => candidate.wrong && candidate.correct);
+    logger?.info?.('[auto-learning][dictionary] 写入候选词条', {
+      fileName: candidatesFileName,
+      count: nextCandidates.length,
+    });
     return writeJsonFile(
       candidatesFileName,
-      candidates.map(normalizeDictionaryCandidate).filter((candidate) => candidate.wrong && candidate.correct),
+      nextCandidates,
     );
   }
 
@@ -54,11 +75,21 @@ function createDictionaryRepository({
   }
 
   function learnDictionaryCorrection(candidate) {
+    logger?.info?.('[auto-learning][dictionary] 开始学习候选', {
+      wrong: candidate?.wrong,
+      correct: candidate?.correct,
+    });
     const result = learnDictionaryCandidate(readDictionaryCandidates(), candidate);
     writeDictionaryCandidates(result.candidates);
     if (result.promotedEntry) {
       writeDictionaryEntries(upsertDictionaryEntry(readDictionaryEntries(), result.promotedEntry));
     }
+    logger?.info?.('[auto-learning][dictionary] 学习候选结束', {
+      wrong: candidate?.wrong,
+      correct: candidate?.correct,
+      candidateCount: result.candidates.length,
+      promoted: Boolean(result.promotedEntry),
+    });
     return result;
   }
 
@@ -97,14 +128,21 @@ function createDictionaryRepository({
     ));
     writeDictionaryEntries(entries);
     writeDictionaryCandidates(nextCandidates);
+    logger?.info?.('[auto-learning][dictionary] 候选已提升为正式词条', {
+      id,
+      wrong: candidate.wrong,
+      correct: candidate.correct,
+    });
     const promoted = entries.find((entry) => entry.phrase.toLowerCase() === candidate.correct.toLowerCase()) || entries[0] || null;
     return { success: Boolean(promoted), data: promoted };
   }
 
   function ignoreCandidate(id) {
-    writeDictionaryCandidates(readDictionaryCandidates().map((item) => (
+    const nextCandidates = readDictionaryCandidates().map((item) => (
       item.id === id ? normalizeDictionaryCandidate({ ...item, status: 'ignored' }) : item
-    )));
+    ));
+    writeDictionaryCandidates(nextCandidates);
+    logger?.info?.('[auto-learning][dictionary] 候选已忽略', { id });
     return { success: true };
   }
 

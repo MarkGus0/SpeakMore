@@ -51,6 +51,7 @@ const { createDictionaryRepository } = require('./dictionary-repository');
 const { createTextObserverService } = require('./text-observer-service');
 const { createLocalCompatState } = require('./local-compat-state');
 const { createMainIpcRegistry } = require('./main-ipc-registry');
+const { createAutoLearningDebugLogger } = require('./auto-learning-debug-logger');
 
 let quitAfterBackgroundAudioRestore = false;
 let appIsQuitting = false;
@@ -80,9 +81,16 @@ const localJsonStore = createLocalJsonStore({
 
 function localDataDir() { return appPaths.localDataDir(); }
 function logFilePath() { return appPaths.logFilePath(); }
+function autoLearningDebugLogPath() { return appPaths.localDataPath('auto-learning-debug.log'); }
 function recordingsDir() { return appPaths.recordingsDir(); }
 function readJsonFile(fileName, fallback) { return localJsonStore.readJsonFile(fileName, fallback); }
 function writeJsonFile(fileName, value) { return localJsonStore.writeJsonFile(fileName, value); }
+
+const autoLearningLogger = createAutoLearningDebugLogger({
+  fs,
+  logFilePath: autoLearningDebugLogPath,
+  consoleLogger: console,
+});
 
 const localCompatState = createLocalCompatState({
   defaultLanguage: DEFAULT_LANGUAGE,
@@ -153,6 +161,7 @@ const dictionaryRepository = createDictionaryRepository({
   writeJsonFile,
   dictionaryFileName: DICTIONARY_FILE_NAME,
   candidatesFileName: DICTIONARY_CANDIDATES_FILE_NAME,
+  logger: autoLearningLogger,
 });
 
 function readHistoryItems() {
@@ -182,11 +191,13 @@ function learnDictionaryCorrection(candidate) {
 const textObserverService = createTextObserverService({
   exePath: appPaths.textObserverExecutablePath(),
   processPlatform: process.platform,
+  processEnv: process.env,
   spawnProcess: spawn,
   fileExists: fs.existsSync,
+  dotnetRoot: appPaths.dotnetRootPath(),
   learnCorrection: async (candidate) => learnDictionaryCorrection(candidate),
   emitDictionaryChanged,
-  logger: console,
+  logger: autoLearningLogger,
 });
 
 const textObservationManager = textObserverService.textObservationManager;
@@ -339,7 +350,7 @@ const mainIpcRegistry = createMainIpcRegistry({
   localCompatState,
   localDataDir,
   logFilePath,
-  logger: console,
+  logger: autoLearningLogger,
   muteBackgroundSessionsForRecording,
   normalizeHistoryItem,
   openExternalUrl,

@@ -94,11 +94,19 @@ function createWindowManager({
     floatingPanelWindow.setBounds(resolveFloatingPanelBounds(), false);
   }
 
+  function showWindowWithoutActivation(window) {
+    if (typeof window.showInactive === 'function') {
+      window.showInactive();
+      return;
+    }
+    window.show();
+  }
+
   function showFloatingBar() {
     if (!floatingBar || floatingBar.isDestroyed()) return;
     positionFloatingBar();
     floatingBar.setIgnoreMouseEvents(false);
-    floatingBar.show();
+    showWindowWithoutActivation(floatingBar);
   }
 
   function hideFloatingBar() {
@@ -112,7 +120,7 @@ function createWindowManager({
     if (!floatingPanelWindow || floatingPanelWindow.isDestroyed()) return;
     positionFloatingPanel();
     floatingPanelWindow.setIgnoreMouseEvents(false);
-    floatingPanelWindow.show();
+    showWindowWithoutActivation(floatingPanelWindow);
   }
 
   function hideFloatingPanel() {

@@ -5,10 +5,10 @@
 边界：
 
 - 只监听启动观察时的当前焦点控件。
-- 只返回该控件通过 UIA TextPattern 暴露的文本。
+- 只返回该控件通过 UIA TextPattern 或 ValuePattern 暴露的文本。
 - 不监听键盘输入。
 - 不做全局文本采集。
-- 不支持 UIA TextPattern 的应用会返回 `text_pattern_unavailable`。
+- 不支持 UIA TextPattern / ValuePattern 的应用会返回 `text_pattern_unavailable`。
 
 本地构建：
 

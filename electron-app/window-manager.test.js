@@ -21,6 +21,8 @@ function createFakeBrowserWindowClass() {
       this.hidden = options.show === false;
       this.shown = options.show !== false;
       this.focused = false;
+      this.showCallCount = 0;
+      this.showInactiveCallCount = 0;
       this.loadFilePath = null;
       this.bounds = null;
       this.ignoreMouseEvents = null;
@@ -49,6 +51,13 @@ function createFakeBrowserWindowClass() {
     }
 
     show() {
+      this.showCallCount += 1;
+      this.shown = true;
+      this.hidden = false;
+    }
+
+    showInactive() {
+      this.showInactiveCallCount += 1;
       this.shown = true;
       this.hidden = false;
     }
@@ -258,6 +267,50 @@ test('createWindowManager 创建悬浮条、悬浮面板和托盘', () => {
 
   tray.emit('click');
   assert.equal(manager.getMainWindow().shown, true);
+});
+
+test('显示悬浮窗口时使用非激活显示，避免抢占外部输入焦点', () => {
+  const BrowserWindow = createFakeBrowserWindowClass();
+  const manager = createWindowManager({
+    app: { quit: () => undefined },
+    BrowserWindow,
+    Tray: createFakeTrayClass(),
+    Menu: { buildFromTemplate: (template) => template },
+    nativeImage: { createFromPath: (filePath) => ({ filePath, resize: () => ({ filePath }) }) },
+    session: { fromPartition: (partition) => ({ partition }) },
+    screen: {
+      getCursorScreenPoint: () => ({ x: 0, y: 0 }),
+      getDisplayNearestPoint: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }),
+      getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }),
+    },
+    path,
+    baseDir: 'D:\\CodeWorkSpace\\typeless\\electron-app',
+    preloadPath: () => 'D:\\CodeWorkSpace\\typeless\\electron-app\\preload.js',
+    iconPath: () => 'D:\\CodeWorkSpace\\typeless\\app-extracted\\build\\icons\\png\\32x32.png',
+    trayIconPath: () => 'D:\\CodeWorkSpace\\typeless\\app-extracted\\build\\tray-win32.png',
+    resolveBottomCenterBounds: (_, windowSize) => ({ x: 11, y: 22, width: windowSize.width, height: windowSize.height }),
+    isActiveVoiceState,
+    isErrorVoiceState,
+    isTerminalVoiceState,
+    shouldShowShortcutHint,
+    sendToMain: () => undefined,
+    sendToFloatingBar: () => undefined,
+    sendToFloatingPanel: () => undefined,
+    getAppIsQuitting: () => false,
+  });
+
+  const floatingBar = manager.createFloatingBar();
+  const floatingPanel = manager.createFloatingPanelWindow();
+
+  manager.showFloatingBar();
+  manager.showFloatingPanel();
+
+  assert.equal(floatingBar.showInactiveCallCount, 1);
+  assert.equal(floatingBar.showCallCount, 0);
+  assert.equal(floatingBar.shown, true);
+  assert.equal(floatingPanel.showInactiveCallCount, 1);
+  assert.equal(floatingPanel.showCallCount, 0);
+  assert.equal(floatingPanel.shown, true);
 });
 
 test('handleVoiceState 对终态会显示悬浮条并安排自动隐藏', () => {
