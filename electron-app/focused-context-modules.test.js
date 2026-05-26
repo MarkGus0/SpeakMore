@@ -93,6 +93,15 @@ test('normalizers 模块归一化 Win32 caret 和 app_compat 输入目标', () =
     app_family: 'wechat',
     matched_signals: ['process:wechat'],
   }).success, true);
+
+  assert.equal(normalizeFocusedTextTargetResult({
+    success: true,
+    source: 'foreground_window',
+    confidence: 'weak',
+    reason: 'same_foreground_window',
+    foreground_hwnd: '300',
+    matched_signals: ['same_foreground_hwnd'],
+  }).success, true);
 });
 
 test('clipboard 模块快照和恢复富剪贴板内容', async () => {

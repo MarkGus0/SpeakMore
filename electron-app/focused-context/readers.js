@@ -82,12 +82,31 @@ async function readFocusedTextTarget({
     if (caretTarget.success) return caretTarget;
 
     if (typeof readWindowTree === 'function') {
+      const windowTree = await readWindowTree();
       const startForegroundHwnd = String(startFocusInfo?.appInfo?.app_metadata?.hwnd || '');
       const compatTarget = normalizeFocusedTextTargetResult(detectAppCompatTextTarget({
-        ...(await readWindowTree()),
+        ...windowTree,
         start_foreground_hwnd: startForegroundHwnd,
       }));
       if (compatTarget.success) return compatTarget;
+
+      const currentForegroundHwnd = String(windowTree?.foreground_hwnd || '');
+      const startEditable = startFocusInfo?.elementInfo?.editable !== false;
+      const sameForegroundWindow = Boolean(startForegroundHwnd)
+        && Boolean(currentForegroundHwnd)
+        && startForegroundHwnd === currentForegroundHwnd;
+
+      if (sameForegroundWindow && startEditable) {
+        return normalizeFocusedTextTargetResult({
+          success: true,
+          source: 'foreground_window',
+          confidence: 'weak',
+          reason: 'same_foreground_window',
+          foreground_hwnd: currentForegroundHwnd,
+          matched_signals: ['same_foreground_hwnd'],
+        });
+      }
+
       return {
         ...compatTarget,
         reason: compatTarget.reason || caretTarget.reason || uiaTarget.reason || 'text_target_unavailable',
