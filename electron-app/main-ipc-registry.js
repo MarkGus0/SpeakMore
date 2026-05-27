@@ -133,6 +133,7 @@ function createMainIpcRegistry({
       readSelectedTextByClipboard,
       readSelectionSnapshot,
       isSameFocusedContext,
+      logger,
     });
     registers.registerFileIpcHandlers({
       ipcMain,

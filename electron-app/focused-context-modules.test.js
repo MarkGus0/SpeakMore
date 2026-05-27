@@ -6,6 +6,7 @@ const {
   normalizeUiaSelectionResult,
   isSameFocusedContext,
 } = require('./focused-context/normalizers');
+const { detectAppCompatTextTarget } = require('./focused-context/app-compat');
 const {
   createClipboardSnapshot,
   restoreClipboardSnapshot,
@@ -54,11 +55,15 @@ test('normalizers 模块归一化 UIA 选区和焦点上下文', () => {
     text: ' selected ',
     source: 'uia',
     confidence: 'confirmed',
+    selection_scope: 'foreground_descendant',
+    scanned: 8,
   }), {
     success: true,
     text: 'selected',
     source: 'uia',
     confidence: 'confirmed',
+    selectionScope: 'foreground_descendant',
+    foregroundScanned: 8,
   });
 
   assert.equal(normalizeFocusedTextTargetResult({
@@ -93,6 +98,21 @@ test('normalizers 模块归一化 Win32 caret 和 app_compat 输入目标', () =
     app_family: 'wechat',
     matched_signals: ['process:wechat'],
   }).success, true);
+});
+
+test('app_compat 模块允许常见桌面文本应用族', () => {
+  const result = detectAppCompatTextTarget({
+    success: true,
+    process_name: 'Cursor',
+    foreground_hwnd: '900',
+    window_title: 'Cursor',
+    class_names: ['Chrome_WidgetWin_1'],
+    start_foreground_hwnd: '900',
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.source, 'app_compat');
+  assert.equal(result.app_family, 'cursor');
 });
 
 test('clipboard 模块快照和恢复富剪贴板内容', async () => {
@@ -196,6 +216,9 @@ test('scripts 模块导出三段 PowerShell 脚本', () => {
   assert.match(FOCUSED_WINDOW_TREE_SCRIPT, /EnumChildWindows/);
   assert.match(FOCUSED_WINDOW_SCRIPT, /GetForegroundWindow/);
   assert.match(UIA_SELECTION_SCRIPT, /TextPattern/);
+  assert.match(UIA_SELECTION_SCRIPT, /Find-ForegroundSelection/);
+  assert.match(UIA_SELECTION_SCRIPT, /IsTextPatternAvailableProperty/);
+  assert.match(UIA_SELECTION_SCRIPT, /foreground_descendant/);
   assert.match(FOCUSED_TEXT_TARGET_SCRIPT, /ValuePattern/);
   assert.match(WIN32_CARET_TARGET_SCRIPT, /GetGUIThreadInfo/);
 });

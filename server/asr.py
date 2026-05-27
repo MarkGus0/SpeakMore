@@ -1,7 +1,8 @@
-"""ASR 模块 - 只保留 paraformer 中文实时流式模型。"""
+"""ASR 模块 - 负责加载当前后端启用的 FunASR 语音模型。"""
 
 import asyncio
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -11,11 +12,14 @@ from typing import Any
 
 from model_manager import (
     PARAFORMER_STREAMING_MODEL_ID,
-    PARAFORMER_STREAMING_REPO_ID,
-    PARAFORMER_STREAMING_REQUIRED_MODEL_FILES,
+    SENSEVOICE_SMALL_MODEL_ID,
     find_cached_model_snapshot,
+    get_active_asr_model_id,
     get_hf_cache_root as get_model_hf_cache_root,
     get_managed_model_cache_root,
+    get_model_explicit_dir_env,
+    get_model_repo_id,
+    get_model_required_files,
 )
 from runtime_config import load_server_env
 
@@ -29,20 +33,34 @@ DEFAULT_FUNASR_REPO_DIR = Path("D:/CodeWorkSpace/FunASR")
 
 
 @dataclass(frozen=True)
-class ParaformerStreamingModelSource:
+class StreamingAsrModelSource:
     kind: str
     model_ref: str
     download_root: str | None = None
     model_id: str = PARAFORMER_STREAMING_MODEL_ID
+    repo_id: str = "funasr/paraformer-zh-streaming"
+
+
+ParaformerStreamingModelSource = StreamingAsrModelSource
 
 
 @dataclass
-class ParaformerStreamingRuntime:
+class StreamingAsrRuntime:
     model: Any
-    chunk_size: list[int]
-    encoder_chunk_look_back: int
-    decoder_chunk_look_back: int
+    model_id: str = PARAFORMER_STREAMING_MODEL_ID
+    chunk_size: list[int] | None = None
+    encoder_chunk_look_back: int | None = None
+    decoder_chunk_look_back: int | None = None
+    chunk_ms: int = 600
+    accumulate_audio: bool = False
+    pass_cache: bool = True
+    pass_is_final: bool = True
+    generate_options: dict[str, Any] = field(default_factory=dict)
+    postprocess: str | None = None
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
+
+
+ParaformerStreamingRuntime = StreamingAsrRuntime
 
 
 @dataclass(frozen=True)
@@ -50,7 +68,7 @@ class StreamingAsrResult:
     text: str
 
 
-_model: ParaformerStreamingRuntime | None = None
+_model: StreamingAsrRuntime | None = None
 _model_lock = threading.Lock()
 
 
@@ -81,64 +99,85 @@ def is_valid_model_dir(path: Path, required_files: tuple[str, ...]) -> bool:
 
 
 def is_valid_paraformer_model_dir(path: Path) -> bool:
-    return is_valid_model_dir(path, PARAFORMER_STREAMING_REQUIRED_MODEL_FILES)
+    return is_valid_streaming_model_dir(path, PARAFORMER_STREAMING_MODEL_ID)
 
 
-def get_candidate_paraformer_streaming_model_sources(
+def is_valid_streaming_model_dir(path: Path, model_id: str) -> bool:
+    return is_valid_model_dir(path, get_model_required_files(model_id))
+
+
+def get_candidate_streaming_model_sources(
     model_id: str | None = None,
-) -> list[ParaformerStreamingModelSource]:
-    selected_model_id = PARAFORMER_STREAMING_MODEL_ID if model_id is None else model_id
-    if selected_model_id != PARAFORMER_STREAMING_MODEL_ID:
-        raise ValueError(f"未知 Paraformer streaming 模型: {selected_model_id}")
+) -> list[StreamingAsrModelSource]:
+    selected_model_id = get_active_asr_model_id() if model_id is None else model_id
+    repo_id = get_model_repo_id(selected_model_id)
+    explicit_dir_env = get_model_explicit_dir_env(selected_model_id)
 
-    configured_dir = os.getenv("PARAFORMER_STREAMING_MODEL_DIR", "").strip()
+    configured_dir = os.getenv(explicit_dir_env, "").strip()
     if configured_dir:
         explicit_dir = Path(configured_dir).expanduser()
-        if not is_valid_paraformer_model_dir(explicit_dir):
-            raise ValueError("PARAFORMER_STREAMING_MODEL_DIR 指向的模型权重不完整")
+        if not is_valid_streaming_model_dir(explicit_dir, selected_model_id):
+            raise ValueError(f"{explicit_dir_env} 指向的模型权重不完整")
         return [
-            ParaformerStreamingModelSource(
+            StreamingAsrModelSource(
                 kind=DIR_SOURCE,
                 model_ref=str(explicit_dir),
                 model_id=selected_model_id,
+                repo_id=repo_id,
             )
         ]
 
-    sources: list[ParaformerStreamingModelSource] = []
+    sources: list[StreamingAsrModelSource] = []
     managed_root = get_managed_model_cache_root(selected_model_id)
     managed_snapshot = find_cached_model_snapshot(selected_model_id)
     if managed_snapshot:
         sources.append(
-            ParaformerStreamingModelSource(
+            StreamingAsrModelSource(
                 kind=MANAGED_CACHE_SOURCE,
                 model_ref=str(managed_snapshot),
                 model_id=selected_model_id,
+                repo_id=repo_id,
             )
         )
 
     hf_snapshot = find_cached_model_snapshot(selected_model_id, cache_root=get_hf_cache_root())
     if hf_snapshot:
         sources.append(
-            ParaformerStreamingModelSource(
+            StreamingAsrModelSource(
                 kind=HF_CACHE_SOURCE,
                 model_ref=str(hf_snapshot),
                 model_id=selected_model_id,
+                repo_id=repo_id,
             )
         )
 
     sources.append(
-        ParaformerStreamingModelSource(
+        StreamingAsrModelSource(
             kind=DOWNLOAD_SOURCE,
-            model_ref=PARAFORMER_STREAMING_REPO_ID,
+            model_ref=repo_id,
             download_root=str(managed_root),
             model_id=selected_model_id,
+            repo_id=repo_id,
         )
     )
     return sources
 
 
-def resolve_paraformer_streaming_model_source() -> ParaformerStreamingModelSource:
-    return get_candidate_paraformer_streaming_model_sources()[0]
+def get_candidate_paraformer_streaming_model_sources(
+    model_id: str | None = None,
+) -> list[StreamingAsrModelSource]:
+    selected_model_id = PARAFORMER_STREAMING_MODEL_ID if model_id is None else model_id
+    if selected_model_id != PARAFORMER_STREAMING_MODEL_ID:
+        raise ValueError(f"未知 Paraformer streaming 模型: {selected_model_id}")
+    return get_candidate_streaming_model_sources(selected_model_id)
+
+
+def resolve_streaming_model_source(model_id: str | None = None) -> StreamingAsrModelSource:
+    return get_candidate_streaming_model_sources(model_id)[0]
+
+
+def resolve_paraformer_streaming_model_source() -> StreamingAsrModelSource:
+    return resolve_streaming_model_source(PARAFORMER_STREAMING_MODEL_ID)
 
 
 def resolve_funasr_repo_dir() -> Path | None:
@@ -158,7 +197,47 @@ def ensure_funasr_repo_import_path() -> None:
         sys.path.insert(0, str(repo_dir))
 
 
-def build_paraformer_streaming_model(source: ParaformerStreamingModelSource) -> ParaformerStreamingRuntime:
+def get_auto_model_kwargs(model_id: str) -> dict[str, Any]:
+    if model_id == SENSEVOICE_SMALL_MODEL_ID:
+        return {"disable_pbar": True}
+    return {}
+
+
+def create_streaming_runtime(model: Any, model_id: str) -> StreamingAsrRuntime:
+    if model_id == PARAFORMER_STREAMING_MODEL_ID:
+        return StreamingAsrRuntime(
+            model=model,
+            model_id=model_id,
+            chunk_size=[0, 10, 5],
+            encoder_chunk_look_back=4,
+            decoder_chunk_look_back=1,
+            chunk_ms=600,
+            accumulate_audio=False,
+            pass_cache=True,
+            pass_is_final=True,
+        )
+
+    if model_id == SENSEVOICE_SMALL_MODEL_ID:
+        return StreamingAsrRuntime(
+            model=model,
+            model_id=model_id,
+            chunk_ms=1200,
+            accumulate_audio=True,
+            pass_cache=True,
+            pass_is_final=False,
+            generate_options={
+                "language": "auto",
+                "use_itn": True,
+                "ban_emo_unk": False,
+                "batch_size_s": 60,
+            },
+            postprocess="rich_transcription",
+        )
+
+    raise ValueError(f"未知 streaming ASR 模型: {model_id}")
+
+
+def build_streaming_asr_model(source: StreamingAsrModelSource) -> StreamingAsrRuntime:
     os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
     if source.kind != DOWNLOAD_SOURCE:
         os.environ.setdefault("HF_HUB_OFFLINE", "1")
@@ -168,14 +247,38 @@ def build_paraformer_streaming_model(source: ParaformerStreamingModelSource) -> 
     from funasr import AutoModel
 
     device = resolve_funasr_device()
-    print(f"[ASR] 从 {source.kind} 加载 Paraformer streaming {source.model_id}: {source.model_ref}，设备: {device}")
-    model = AutoModel(model=source.model_ref, hub="hf", device=device, disable_update=True)
-    return ParaformerStreamingRuntime(
-        model=model,
-        chunk_size=[0, 10, 5],
-        encoder_chunk_look_back=4,
-        decoder_chunk_look_back=1,
+    print(f"[ASR] 从 {source.kind} 加载 {source.model_id}: {source.model_ref}，设备: {device}")
+    model = AutoModel(
+        model=source.model_ref,
+        hub="hf",
+        device=device,
+        disable_update=True,
+        **get_auto_model_kwargs(source.model_id),
     )
+    return create_streaming_runtime(model, source.model_id)
+
+
+def build_paraformer_streaming_model(source: ParaformerStreamingModelSource) -> ParaformerStreamingRuntime:
+    return build_streaming_asr_model(source)
+
+
+def _load_streaming_asr_model(model_id: str | None = None):
+    selected_model_id = get_active_asr_model_id() if model_id is None else model_id
+    errors: list[str] = []
+    for source in get_candidate_streaming_model_sources(selected_model_id):
+        try:
+            model = build_streaming_asr_model(source)
+            print(f"[ASR] {selected_model_id} 模型加载完成，来源: {source.kind}")
+            return model
+        except Exception as error:
+            if source.kind == DOWNLOAD_SOURCE:
+                errors.append(
+                    f"{source.kind}: {source.model_ref} -> 下载或加载失败，目标目录: {source.download_root}: {error}"
+                )
+            else:
+                errors.append(f"{source.kind}: {source.model_ref} -> {error}")
+
+    raise RuntimeError(f"{selected_model_id} 模型加载失败: " + " | ".join(errors))
 
 
 def _load_paraformer_streaming_model(model_id: str | None = None):
@@ -205,7 +308,11 @@ def preload_asr_model():
         if _model is not None:
             return _model
 
-        _model = _load_paraformer_streaming_model()
+        selected_model_id = get_active_asr_model_id()
+        if selected_model_id == PARAFORMER_STREAMING_MODEL_ID:
+            _model = _load_paraformer_streaming_model()
+        else:
+            _model = _load_streaming_asr_model(selected_model_id)
         return _model
 
 
@@ -258,37 +365,68 @@ def extract_funasr_text(result: Any) -> str:
     return str(item or "").strip()
 
 
+def normalize_rich_transcription_text(text: str) -> str:
+    try:
+        from funasr.utils.postprocess_utils import rich_transcription_postprocess
+
+        return str(rich_transcription_postprocess(text)).strip()
+    except Exception:
+        return re.sub(r"<\|[^|]+?\|>", "", text).strip()
+
+
+def postprocess_asr_text(text: str, postprocess: str | None) -> str:
+    if postprocess == "rich_transcription":
+        return normalize_rich_transcription_text(text)
+    return text
+
+
+def generate_streaming_asr_chunk(
+    runtime: StreamingAsrRuntime,
+    pcm_bytes: bytes,
+    cache: dict[str, Any],
+    is_final: bool,
+) -> str:
+    audio = pcm16_bytes_to_float32(pcm_bytes)
+    kwargs: dict[str, Any] = {"input": audio}
+    if runtime.pass_cache:
+        kwargs["cache"] = cache
+    if runtime.pass_is_final:
+        kwargs["is_final"] = is_final
+    if runtime.chunk_size is not None:
+        kwargs["chunk_size"] = runtime.chunk_size
+    if runtime.encoder_chunk_look_back is not None:
+        kwargs["encoder_chunk_look_back"] = runtime.encoder_chunk_look_back
+    if runtime.decoder_chunk_look_back is not None:
+        kwargs["decoder_chunk_look_back"] = runtime.decoder_chunk_look_back
+    kwargs.update(runtime.generate_options)
+
+    with runtime.lock:
+        result = runtime.model.generate(**kwargs)
+    return postprocess_asr_text(extract_funasr_text(result), runtime.postprocess)
+
+
 def generate_paraformer_streaming_chunk(
     runtime: ParaformerStreamingRuntime,
     pcm_bytes: bytes,
     cache: dict[str, Any],
     is_final: bool,
 ) -> str:
-    audio = pcm16_bytes_to_float32(pcm_bytes)
-    with runtime.lock:
-        result = runtime.model.generate(
-            input=audio,
-            cache=cache,
-            is_final=is_final,
-            chunk_size=runtime.chunk_size,
-            encoder_chunk_look_back=runtime.encoder_chunk_look_back,
-            decoder_chunk_look_back=runtime.decoder_chunk_look_back,
-        )
-    return extract_funasr_text(result)
+    return generate_streaming_asr_chunk(runtime, pcm_bytes, cache, is_final)
 
 
 class StreamingAsrSession:
     def __init__(
         self,
-        runtime: ParaformerStreamingRuntime,
+        runtime: StreamingAsrRuntime,
         sample_rate: int = 16000,
-        chunk_ms: int = 600,
+        chunk_ms: int | None = None,
     ) -> None:
         self.runtime = runtime
         self.sample_rate = sample_rate
-        self.chunk_ms = chunk_ms
+        self.chunk_ms = runtime.chunk_ms if chunk_ms is None else chunk_ms
         self.cache: dict[str, Any] = {}
         self.pcm_buffer = bytearray()
+        self.full_pcm = bytearray()
         self.chunk_bytes = max(1, int(self.sample_rate * self.chunk_ms / 1000) * 2)
         self.text_parts: list[str] = []
         self.has_audio = False
@@ -299,6 +437,8 @@ class StreamingAsrSession:
 
         self.has_audio = True
         self.pcm_buffer.extend(chunk)
+        if self.runtime.accumulate_audio:
+            self.full_pcm.extend(chunk)
         results: list[StreamingAsrResult] = []
 
         while len(self.pcm_buffer) >= self.chunk_bytes:
@@ -312,24 +452,30 @@ class StreamingAsrSession:
         if not self.has_audio and not self.pcm_buffer:
             return StreamingAsrResult(text="".join(self.text_parts))
 
-        final_chunk = bytes(self.pcm_buffer)
+        final_chunk = bytes(self.full_pcm if self.runtime.accumulate_audio else self.pcm_buffer)
         self.pcm_buffer.clear()
         return self._generate(final_chunk, True)
 
     def _generate(self, pcm_chunk: bytes, is_final: bool) -> StreamingAsrResult:
-        text = generate_paraformer_streaming_chunk(self.runtime, pcm_chunk, self.cache, is_final)
+        source_pcm = bytes(self.full_pcm) if self.runtime.accumulate_audio else pcm_chunk
+        text = generate_streaming_asr_chunk(self.runtime, source_pcm, self.cache, is_final)
+        if self.runtime.accumulate_audio:
+            if text:
+                self.text_parts = [text]
+            return StreamingAsrResult(text="".join(self.text_parts))
+
         if text:
             self.text_parts.append(text)
         return StreamingAsrResult(text="".join(self.text_parts))
 
 
 def is_streaming_asr_model_loaded() -> bool:
-    return isinstance(_model, ParaformerStreamingRuntime)
+    return isinstance(_model, StreamingAsrRuntime)
 
 
 def create_streaming_asr_session(sample_rate: int = 16000) -> StreamingAsrSession:
     model = _get_model()
-    if not isinstance(model, ParaformerStreamingRuntime):
+    if not isinstance(model, StreamingAsrRuntime):
         raise RuntimeError("当前 ASR 模型不支持 streaming 会话")
     return StreamingAsrSession(model, sample_rate=sample_rate)
 

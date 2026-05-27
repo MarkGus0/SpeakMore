@@ -50,6 +50,19 @@ function createTask(
   }
 }
 
+function summarizeSelectedText(text: string) {
+  const normalized = text.trim()
+  return {
+    hasText: Boolean(normalized),
+    length: normalized.length,
+    preview: normalized ? normalized.replace(/\s+/g, ' ').slice(0, 80) : '',
+  }
+}
+
+function logVoiceTask(message: string, details: Record<string, unknown> = {}) {
+  console.info('[voice][task] ' + message, details)
+}
+
 function createNoSelectionSnapshot(snapshot: FocusedSelectionSnapshot): FocusedSelectionSnapshot {
   // 保留结构但清空选区，避免不可信选区被自由提问当成上下文。
   return {
@@ -76,18 +89,43 @@ export async function resolveVoiceTask(
   readSelectionSnapshot: SelectionSnapshotReader = getFocusedSelectionSnapshot,
   readFocusedInfoSnapshot: FocusedInfoReader = getFocusedInfoSnapshot,
 ): Promise<VoiceTask> {
+  logVoiceTask('开始解析快捷键意图', { intent })
   // 翻译快捷键是显式语音翻译，不能因为当前有选区就变成选区翻译。
   if (intent === 'TranslateShortcut') {
-    return createPasteTaskWithoutSelection('Translate', readFocusedInfoSnapshot)
+    const task = await createPasteTaskWithoutSelection('Translate', readFocusedInfoSnapshot)
+    logVoiceTask('解析为语音翻译任务', {
+      intent,
+      mode: task.mode,
+      delivery: task.delivery,
+      focusApp: task.focusInfo?.appInfo.app_identifier || '',
+      focusTitle: task.focusInfo?.appInfo.window_title || '',
+    })
+    return task
   }
 
   // 普通听写始终优先自动粘贴，不读取 UIA 选区，避免选区状态影响听写语义。
   if (intent !== 'AskShortcut') {
-    return createPasteTaskWithoutSelection('Dictate', readFocusedInfoSnapshot)
+    const task = await createPasteTaskWithoutSelection('Dictate', readFocusedInfoSnapshot)
+    logVoiceTask('解析为普通听写任务', {
+      intent,
+      mode: task.mode,
+      delivery: task.delivery,
+      focusApp: task.focusInfo?.appInfo.app_identifier || '',
+      focusTitle: task.focusInfo?.appInfo.window_title || '',
+    })
+    return task
   }
 
   // 只有自由提问需要选区上下文；UIA confirmed 优先，UIA 不可用时接受剪贴板 fallback。
   const snapshot = await readSelectionSnapshot()
+  logVoiceTask('自由提问读取选区快照完成', {
+    source: snapshot.source,
+    confidence: snapshot.confidence,
+    focusApp: snapshot.focusInfo?.appInfo.app_identifier || '',
+    focusTitle: snapshot.focusInfo?.appInfo.window_title || '',
+    ...summarizeSelectedText(snapshot.selectedText),
+  })
+
   const hasSupportedSelection = Boolean(snapshot.selectedText)
     && (
       (snapshot.source === 'uia' && snapshot.confidence === 'confirmed')
@@ -95,5 +133,15 @@ export async function resolveVoiceTask(
     )
 
   // 自由提问的结果永远展示在悬浮面板，不参与自动粘贴或替换。
-  return createTask('Ask', hasSupportedSelection ? snapshot : createNoSelectionSnapshot(snapshot), 'floating-panel')
+  const task = createTask('Ask', hasSupportedSelection ? snapshot : createNoSelectionSnapshot(snapshot), 'floating-panel')
+  logVoiceTask('解析为自由提问任务', {
+    intent,
+    mode: task.mode,
+    delivery: task.delivery,
+    source: task.source,
+    confidence: task.confidence,
+    hasSupportedSelection,
+    ...summarizeSelectedText(task.selectedText),
+  })
+  return task
 }

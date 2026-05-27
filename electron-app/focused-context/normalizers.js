@@ -24,6 +24,17 @@ function normalizeUiaSelectionResult(value) {
   }
 
   const text = typeof value.text === 'string' ? value.text.trim() : '';
+  const selectionScope = typeof value.selection_scope === 'string'
+    ? value.selection_scope
+    : typeof value.selectionScope === 'string'
+      ? value.selectionScope
+      : '';
+  const focusedReason = typeof value.focused_reason === 'string'
+    ? value.focused_reason
+    : typeof value.focusedReason === 'string'
+      ? value.focusedReason
+      : '';
+  const foregroundScanned = Number(value.foreground_scanned ?? value.foregroundScanned ?? value.scanned);
   const isConfirmed = value.success === true
     && value.source === 'uia'
     && value.confidence === 'confirmed'
@@ -36,6 +47,8 @@ function normalizeUiaSelectionResult(value) {
       source: 'none',
       confidence: 'none',
       reason: typeof value.reason === 'string' ? value.reason : 'empty',
+      ...(focusedReason ? { focusedReason } : {}),
+      ...(Number.isFinite(foregroundScanned) ? { foregroundScanned } : {}),
     };
   }
 
@@ -44,6 +57,8 @@ function normalizeUiaSelectionResult(value) {
     text,
     source: 'uia',
     confidence: 'confirmed',
+    ...(selectionScope ? { selectionScope } : {}),
+    ...(Number.isFinite(foregroundScanned) ? { foregroundScanned } : {}),
   };
 }
 
