@@ -3,7 +3,7 @@
  *
  * 需要判断听写、自由提问、翻译触发意图或长按提示时看这里。
  */
-export const LONG_PRESS_MS = 500
+export const LONG_PRESS_MS = 350
 
 type KeyboardLike = {
   keyName?: string

@@ -13,10 +13,10 @@ afterEach(() => {
 })
 
 function installTimerWindow() {
-  const timers: Array<() => void> = []
+  const timers: Array<{ callback: () => void; delay?: number }> = []
   ;(globalThis as { window: unknown }).window = {
-    setTimeout: (callback: () => void) => {
-      timers.push(callback)
+    setTimeout: (callback: () => void, delay?: number) => {
+      timers.push({ callback, delay })
       return timers.length
     },
     clearTimeout: (_timer: number) => {},
@@ -51,11 +51,12 @@ test('空闲短按 RightAlt 在释放边沿触发普通听写意图', () => {
 })
 
 test('空闲长按 RightAlt 会显示提示并阻断释放边沿', () => {
-  installTimerWindow()
+  const timers = installTimerWindow()
   const pressed = reduceShortcutGuard(createInitialShortcutGuardState(), rightAltDown, { voiceStatus: 'idle' }, () => {})
   const blockedState = blockByLongPress(pressed.state)
   const released = reduceShortcutGuard(blockedState, rightAltUp, { voiceStatus: 'idle' }, () => {})
 
+  assert.equal(timers[0]?.delay, 350)
   assert.equal(blockedState.modalVisible, true)
   assert.deepEqual(released.action, { type: 'none' })
 })

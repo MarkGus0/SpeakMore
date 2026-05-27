@@ -721,7 +721,7 @@ test('AppShell 接管全局快捷键，允许 Escape 取消未完成会话，并
   assert.doesNotMatch(shortcutBridge, /ipcClient\.send\(['"]shortcut-hint['"]/);
   assert.doesNotMatch(shortcutBridge, /检测到长按快捷键/);
   assert.doesNotMatch(shortcutBridge, /handleCloseShortcutHint/);
-  assert.match(guard, /LONG_PRESS_MS\s*=\s*500/);
+  assert.match(guard, /LONG_PRESS_MS\s*=\s*350/);
   assert.match(guard, /voiceStatus/);
   assert.match(guard, /isBlocked/);
   assert.match(guard, /modalVisible/);
