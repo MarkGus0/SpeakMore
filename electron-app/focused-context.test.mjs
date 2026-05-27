@@ -9,6 +9,7 @@ import {
   readSelectedTextByClipboard,
   readFocusedTextTarget,
   readSelectedTextByUia,
+  UIA_SELECTION_SCRIPT,
 } from './focused-context.js';
 
 function createFakeClipboard(initialText = 'old clipboard') {
@@ -187,7 +188,7 @@ test('readFocusedTextTarget 在 UIA 不可用时接受 Win32 caret 目标', asyn
   assert.equal(result.caretHwnd, '101');
 });
 
-test('detectAppCompatTextTarget 只允许已知聊天应用族的弱信号组合', () => {
+test('detectAppCompatTextTarget 只允许已知聊天和桌面文本应用族的弱信号组合', () => {
   const wechat = detectAppCompatTextTarget({
     success: true,
     process_name: 'WeChat',
@@ -217,6 +218,62 @@ test('detectAppCompatTextTarget 只允许已知聊天应用族的弱信号组合
 
   assert.equal(desktop.success, false);
   assert.equal(desktop.reason, 'app_family_not_allowed');
+
+  const allowedChromiumApps = [
+    { appFamily: 'codex', processName: 'Codex' },
+    { appFamily: 'claude_code', processName: 'Claude Code' },
+    { appFamily: 'claude_code', processName: 'claude-code' },
+    { appFamily: 'chatgpt', processName: 'ChatGPT' },
+    { appFamily: 'vscode', processName: 'Code' },
+    { appFamily: 'cursor', processName: 'Cursor' },
+    { appFamily: 'slack', processName: 'Slack' },
+    { appFamily: 'notion', processName: 'Notion' },
+    { appFamily: 'spotify', processName: 'Spotify' },
+  ];
+
+  for (const app of allowedChromiumApps) {
+    const result = detectAppCompatTextTarget({
+      success: true,
+      process_name: app.processName,
+      foreground_hwnd: '700',
+      window_title: `${app.processName} main`,
+      class_names: ['Chrome_WidgetWin_1'],
+      start_foreground_hwnd: '700',
+    });
+
+    assert.equal(result.success, true, app.appFamily);
+    assert.equal(result.source, 'app_compat', app.appFamily);
+    assert.equal(result.app_family, app.appFamily, app.appFamily);
+    assert.deepEqual(result.matched_signals, [
+      `process:${app.appFamily}`,
+      'same_foreground_hwnd',
+      'class:Chrome_WidgetWin_1',
+    ], app.appFamily);
+  }
+
+  const blockedWindow = detectAppCompatTextTarget({
+    success: true,
+    process_name: 'Slack',
+    foreground_hwnd: '701',
+    window_title: 'Slack Settings',
+    class_names: ['Chrome_WidgetWin_1'],
+    start_foreground_hwnd: '701',
+  });
+
+  assert.equal(blockedWindow.success, false);
+  assert.equal(blockedWindow.reason, 'blocked_window_title');
+
+  const extensionFileWindow = detectAppCompatTextTarget({
+    success: true,
+    process_name: 'Cursor',
+    foreground_hwnd: '702',
+    window_title: 'Extension.ts - typeless - Cursor',
+    class_names: ['Chrome_WidgetWin_1'],
+    start_foreground_hwnd: '702',
+  });
+
+  assert.equal(extensionFileWindow.success, true);
+  assert.equal(extensionFileWindow.app_family, 'cursor');
 
   const switchedWindow = detectAppCompatTextTarget({
     success: true,
@@ -395,6 +452,8 @@ test('readSelectedTextByUia 返回 confirmed 选区', async () => {
       text: 'selected by uia',
       source: 'uia',
       confidence: 'confirmed',
+      selection_scope: 'foreground_descendant',
+      scanned: 3,
     }),
   });
 
@@ -403,6 +462,8 @@ test('readSelectedTextByUia 返回 confirmed 选区', async () => {
     text: 'selected by uia',
     source: 'uia',
     confidence: 'confirmed',
+    selectionScope: 'foreground_descendant',
+    foregroundScanned: 3,
   });
 });
 
@@ -582,4 +643,13 @@ test('isSameFocusedContext 使用窗口句柄优先比较', () => {
 
   assert.equal(isSameFocusedContext(previous, same), true);
   assert.equal(isSameFocusedContext(previous, different), false);
+});
+
+test('UIA_SELECTION_SCRIPT 会在前台窗口子树中兜底查找 TextPattern 选区', () => {
+  assert.match(UIA_SELECTION_SCRIPT, /Win32SelectionForeground/);
+  assert.match(UIA_SELECTION_SCRIPT, /GetForegroundWindow/);
+  assert.match(UIA_SELECTION_SCRIPT, /Find-ForegroundSelection/);
+  assert.match(UIA_SELECTION_SCRIPT, /IsTextPatternAvailableProperty/);
+  assert.match(UIA_SELECTION_SCRIPT, /ControlType\]::Document/);
+  assert.match(UIA_SELECTION_SCRIPT, /foreground_descendant/);
 });

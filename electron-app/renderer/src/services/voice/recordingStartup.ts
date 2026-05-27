@@ -33,6 +33,15 @@ type StartAudioParameterInputs = {
   translationTargetLanguage: TranslationTargetLanguage | null
 }
 
+function summarizeSelectedText(text: string) {
+  const normalized = text.trim()
+  return {
+    hasSelectedText: Boolean(normalized),
+    selectedTextLength: normalized.length,
+    selectedTextPreview: normalized ? normalized.replace(/\s+/g, ' ').slice(0, 80) : '',
+  }
+}
+
 export async function prepareRecordingStart(
   task: VoiceTask,
   socketControls: RecordingStartSocketControls,
@@ -63,6 +72,12 @@ export async function prepareRecordingStart(
       parameterInputsPromise,
     ])
     const parameters = getStartAudioParameters(task.mode, task.selectedText, transport, parameterInputs)
+    console.info('[voice][startup] start_audio 参数已准备', {
+      mode: task.mode,
+      hasSelectedTextParameter: typeof parameters.selected_text === 'string' && Boolean(String(parameters.selected_text).trim()),
+      parameterKeys: Object.keys(parameters),
+      ...summarizeSelectedText(task.selectedText),
+    })
 
     return { parameters, socket, stream, transport }
   } catch (error) {
@@ -112,7 +127,15 @@ export function getStartAudioParameters(
 
   // 自由提问只在有可信选区时把选区文本作为上下文发给后端。
   if (mode === 'Ask') {
-    return selectedText ? { ...baseParameters, selected_text: selectedText } : baseParameters
+    const parameters: Record<string, unknown> = selectedText
+      ? { ...baseParameters, selected_text: selectedText }
+      : baseParameters
+    console.info('[voice][startup] Ask 参数构造结果', {
+      hasSelectedTextParameter: typeof parameters.selected_text === 'string' && Boolean(String(parameters.selected_text).trim()),
+      parameterKeys: Object.keys(parameters),
+      ...summarizeSelectedText(selectedText),
+    })
+    return parameters
   }
 
   if (mode !== 'Translate') return baseParameters

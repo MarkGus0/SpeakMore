@@ -52,6 +52,15 @@ def load_translation_target_language_names() -> dict[str, str]:
 TRANSLATION_TARGET_LANGUAGE_NAMES = load_translation_target_language_names()
 
 
+def summarize_text_for_log(value: object) -> dict:
+    text = str(value or "").strip()
+    return {
+        "has_text": bool(text),
+        "length": len(text),
+        "preview": " ".join(text.split())[:80] if text else "",
+    }
+
+
 def format_target_language_for_prompt(value: object) -> str:
     language_id = str(value or "").strip()
     return TRANSLATION_TARGET_LANGUAGE_NAMES.get(
@@ -242,8 +251,14 @@ def build_refiner_user_message(
 
     elif mode == "ask_anything" and parameters:
         selected_text = parameters.get("selected_text", "")
+        print(
+            "[Refiner][ask_anything] selected_text 参数",
+            summarize_text_for_log(selected_text),
+        )
         if selected_text:
             user_message = f"[Selected text in editor: {selected_text}]\n\nUser's voice command:\n{raw_text}"
+    elif mode == "ask_anything":
+        print("[Refiner][ask_anything] 未收到 parameters")
 
     if dictionary_context:
         return f"{dictionary_context}\n\n{user_message}"

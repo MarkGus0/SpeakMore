@@ -270,6 +270,7 @@ test('registerFocusedContextIpcHandlers 注册焦点上下文通道', async () =
 
   assert.deepEqual(await ipcMain.invoke('focused-context:get-last-focused-info'), { success: true, title: 'A' });
   assert.deepEqual(await ipcMain.invoke('focused-context:get-selected-text'), { success: true, text: 'clip' });
+  assert.deepEqual(await ipcMain.invoke('focused-context:get-selection-snapshot'), { success: true, text: 'snap' });
   assert.deepEqual(await ipcMain.invoke('focused-context:is-current-focus', { title: 'A' }), {
     success: true,
     same: true,

@@ -1,3 +1,21 @@
+const COMMON_CHROMIUM_CLASS_NAMES = ['Chrome_WidgetWin_1', 'Chrome_WidgetWin_0'];
+
+const COMMON_TEXT_APP_BLOCKED_TITLE_PATTERNS = [
+  /登录/,
+  /设置/,
+  /图片查看/,
+  /文件预览/,
+  /Settings/i,
+  /Preferences/i,
+  /Login/i,
+  /Sign in/i,
+  /Welcome/i,
+  /About/i,
+  /Updater/i,
+  /Installer/i,
+  /Update/i,
+];
+
 const APP_COMPAT_RULES = [
   {
     appFamily: 'wechat',
@@ -14,8 +32,56 @@ const APP_COMPAT_RULES = [
   {
     appFamily: 'discord',
     processNames: ['discord'],
-    requiredClassNames: ['Chrome_WidgetWin_1'],
-    blockedTitlePatterns: [/Settings/i, /Login/i, /Updater/i, /Installer/i],
+    requiredClassNames: COMMON_CHROMIUM_CLASS_NAMES,
+    blockedTitlePatterns: COMMON_TEXT_APP_BLOCKED_TITLE_PATTERNS,
+  },
+  {
+    appFamily: 'codex',
+    processNames: ['codex'],
+    requiredClassNames: COMMON_CHROMIUM_CLASS_NAMES,
+    blockedTitlePatterns: COMMON_TEXT_APP_BLOCKED_TITLE_PATTERNS,
+  },
+  {
+    appFamily: 'claude_code',
+    processNames: ['claude code', 'claude-code', 'claude'],
+    requiredClassNames: COMMON_CHROMIUM_CLASS_NAMES,
+    blockedTitlePatterns: COMMON_TEXT_APP_BLOCKED_TITLE_PATTERNS,
+  },
+  {
+    appFamily: 'chatgpt',
+    processNames: ['chatgpt'],
+    requiredClassNames: COMMON_CHROMIUM_CLASS_NAMES,
+    blockedTitlePatterns: COMMON_TEXT_APP_BLOCKED_TITLE_PATTERNS,
+  },
+  {
+    appFamily: 'vscode',
+    processNames: ['code'],
+    requiredClassNames: COMMON_CHROMIUM_CLASS_NAMES,
+    blockedTitlePatterns: COMMON_TEXT_APP_BLOCKED_TITLE_PATTERNS,
+  },
+  {
+    appFamily: 'cursor',
+    processNames: ['cursor'],
+    requiredClassNames: COMMON_CHROMIUM_CLASS_NAMES,
+    blockedTitlePatterns: COMMON_TEXT_APP_BLOCKED_TITLE_PATTERNS,
+  },
+  {
+    appFamily: 'slack',
+    processNames: ['slack'],
+    requiredClassNames: COMMON_CHROMIUM_CLASS_NAMES,
+    blockedTitlePatterns: COMMON_TEXT_APP_BLOCKED_TITLE_PATTERNS,
+  },
+  {
+    appFamily: 'notion',
+    processNames: ['notion'],
+    requiredClassNames: COMMON_CHROMIUM_CLASS_NAMES,
+    blockedTitlePatterns: COMMON_TEXT_APP_BLOCKED_TITLE_PATTERNS,
+  },
+  {
+    appFamily: 'spotify',
+    processNames: ['spotify'],
+    requiredClassNames: COMMON_CHROMIUM_CLASS_NAMES,
+    blockedTitlePatterns: COMMON_TEXT_APP_BLOCKED_TITLE_PATTERNS,
   },
 ];
 

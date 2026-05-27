@@ -15,6 +15,34 @@ const {
 } = require('./scripts');
 const { powershellJsonCommand } = require('./powershell');
 
+function summarizeText(value) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return {
+    hasText: Boolean(text),
+    length: text.length,
+    preview: text ? text.replace(/\s+/g, ' ').slice(0, 80) : '',
+  };
+}
+
+function summarizeSelectionResult(value = {}) {
+  return {
+    success: Boolean(value.success),
+    source: typeof value.source === 'string' ? value.source : 'unknown',
+    confidence: typeof value.confidence === 'string' ? value.confidence : 'unknown',
+    reason: typeof value.reason === 'string' ? value.reason : '',
+    selectionScope: typeof value.selectionScope === 'string' ? value.selectionScope : '',
+    focusedReason: typeof value.focusedReason === 'string' ? value.focusedReason : '',
+    foregroundScanned: Number.isFinite(Number(value.foregroundScanned)) ? Number(value.foregroundScanned) : null,
+    ...summarizeText(value.text),
+  };
+}
+
+function createSelectionLogger(logger) {
+  return function logSelection(message, details = {}) {
+    logger?.info?.(`[focused-context][selection] ${message}`, details);
+  };
+}
+
 async function readFocusedInfo({
   readWindowInfo = powershellJsonCommand(FOCUSED_WINDOW_SCRIPT),
 } = {}) {
@@ -150,12 +178,22 @@ async function readSelectionSnapshot({
   copyWaitMs,
   copyPollIntervalMs,
   readClipboardSelection = readSelectedTextByClipboard,
+  logger = console,
 } = {}) {
+  const logSelection = createSelectionLogger(logger);
   // 快照要同时保留当前焦点和选区信息，供快捷键和语音任务解析使用。
   const focusInfo = normalizeFocusedInfo(await readFocus());
+  logSelection('开始读取选区快照', {
+    appIdentifier: focusInfo.appInfo.app_identifier,
+    windowTitle: focusInfo.appInfo.window_title,
+    hwnd: focusInfo.appInfo.app_metadata?.hwnd || '',
+  });
+
   const selection = await readSelectedTextByUia({ readUiaSelection });
+  logSelection('UIA 选区读取结果', summarizeSelectionResult(selection));
 
   if (selection.success) {
+    logSelection('选区快照返回 UIA confirmed', summarizeSelectionResult(selection));
     return {
       ...selection,
       focusInfo,
@@ -174,14 +212,18 @@ async function readSelectionSnapshot({
     });
 
     if (clipboardSelection.success) {
+      logSelection('剪贴板 fallback 读取成功', summarizeSelectionResult(clipboardSelection));
       return {
         ...clipboardSelection,
         confidence: 'fallback',
         focusInfo,
       };
     }
+
+    logSelection('剪贴板 fallback 读取失败', summarizeSelectionResult(clipboardSelection));
   }
 
+  logSelection('选区快照返回空选区', summarizeSelectionResult(selection));
   return {
     ...selection,
     // 焦点信息和选区分开保存，避免上层把“当前焦点”误解成“当前有选区”。
@@ -194,4 +236,5 @@ module.exports = {
   readFocusedTextTarget,
   readSelectedTextByUia,
   readSelectionSnapshot,
+  summarizeSelectionResult,
 };

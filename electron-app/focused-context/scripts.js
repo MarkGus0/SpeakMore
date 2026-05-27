@@ -27,50 +27,141 @@ try { $process = Get-Process -Id $processId -ErrorAction Stop } catch {}
 const UIA_SELECTION_SCRIPT = `
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class Win32SelectionForeground {
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+}
+"@
+
+function Read-TextPatternSelection($textPattern) {
+  if ($null -eq $textPattern) { return "" }
+
+  $ranges = $null
+  try {
+    $ranges = $textPattern.GetSelection()
+  } catch {}
+
+  if ($null -eq $ranges -or $ranges.Length -eq 0) { return "" }
+
+  $parts = New-Object System.Collections.Generic.List[string]
+  foreach ($range in $ranges) {
+    try {
+      $text = $range.GetText(-1)
+      if (-not [string]::IsNullOrWhiteSpace($text)) {
+        [void]$parts.Add($text.Trim())
+      }
+    } catch {}
+  }
+
+  return ($parts -join "\\n").Trim()
+}
+
+function Read-ElementSelection($candidate) {
+  if ($null -eq $candidate) {
+    return @{ success = $false; text = ""; reason = "no_focused_element"; has_text_pattern = $false }
+  }
+
+  $textPattern = $null
+  try {
+    $textPattern = $candidate.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)
+  } catch {}
+
+  if ($null -eq $textPattern) {
+    return @{ success = $false; text = ""; reason = "text_pattern_unavailable"; has_text_pattern = $false }
+  }
+
+  $selectedText = Read-TextPatternSelection $textPattern
+  if ([string]::IsNullOrWhiteSpace($selectedText)) {
+    return @{ success = $false; text = ""; reason = "empty"; has_text_pattern = $true }
+  }
+
+  return @{ success = $true; text = $selectedText; reason = ""; has_text_pattern = $true }
+}
+
+function Find-SelectionInElements($elements, $limit) {
+  if ($null -eq $elements -or $elements.Count -eq 0) {
+    return @{ success = $false; text = ""; reason = "foreground_text_pattern_unavailable"; scanned = 0 }
+  }
+
+  $scanned = 0
+  foreach ($candidate in $elements) {
+    if ($scanned -ge $limit) { break }
+    $scanned += 1
+
+    $result = Read-ElementSelection $candidate
+    if ($result.success) {
+      return @{ success = $true; text = $result.text; reason = ""; scanned = $scanned }
+    }
+  }
+
+  return @{ success = $false; text = ""; reason = "foreground_selection_empty"; scanned = $scanned }
+}
+
+function Find-ForegroundSelection() {
+  $foreground = [Win32SelectionForeground]::GetForegroundWindow()
+  if ($foreground -eq [IntPtr]::Zero) {
+    return @{ success = $false; text = ""; reason = "no_foreground_window"; scanned = 0 }
+  }
+
+  $root = $null
+  try {
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle($foreground)
+  } catch {}
+
+  if ($null -eq $root) {
+    return @{ success = $false; text = ""; reason = "foreground_root_unavailable"; scanned = 0 }
+  }
+
+  $textPatternCondition = [System.Windows.Automation.PropertyCondition]::new(
+    [System.Windows.Automation.AutomationElement]::IsTextPatternAvailableProperty,
+    $true
+  )
+  $documentCondition = [System.Windows.Automation.PropertyCondition]::new(
+    [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+    [System.Windows.Automation.ControlType]::Document
+  )
+  $documentTextCondition = [System.Windows.Automation.AndCondition]::new($documentCondition, $textPatternCondition)
+
+  $documents = $null
+  try {
+    $documents = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $documentTextCondition)
+  } catch {}
+
+  $documentResult = Find-SelectionInElements $documents 24
+  if ($documentResult.success) { return $documentResult }
+
+  $textElements = $null
+  try {
+    $textElements = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $textPatternCondition)
+  } catch {}
+
+  $textResult = Find-SelectionInElements $textElements 96
+  if ($textResult.success) { return $textResult }
+
+  if ($documentResult.reason -eq "foreground_selection_empty" -or $textResult.reason -eq "foreground_selection_empty") {
+    return @{ success = $false; text = ""; reason = "foreground_selection_empty"; scanned = ($documentResult.scanned + $textResult.scanned) }
+  }
+
+  return @{ success = $false; text = ""; reason = "foreground_text_pattern_unavailable"; scanned = 0 }
+}
 
 $element = [System.Windows.Automation.AutomationElement]::FocusedElement
-if ($null -eq $element) {
-  [PSCustomObject]@{ success = $false; text = ""; source = "none"; confidence = "none"; reason = "no_focused_element" } | ConvertTo-Json -Compress
+$focusedResult = Read-ElementSelection $element
+if ($focusedResult.success) {
+  [PSCustomObject]@{ success = $true; text = $focusedResult.text; source = "uia"; confidence = "confirmed"; selection_scope = "focused_element" } | ConvertTo-Json -Compress
   exit 0
 }
 
-$textPattern = $null
-try {
-  $textPattern = $element.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)
-} catch {}
-
-if ($null -eq $textPattern) {
-  [PSCustomObject]@{ success = $false; text = ""; source = "none"; confidence = "none"; reason = "text_pattern_unavailable" } | ConvertTo-Json -Compress
+$foregroundResult = Find-ForegroundSelection
+if ($foregroundResult.success) {
+  [PSCustomObject]@{ success = $true; text = $foregroundResult.text; source = "uia"; confidence = "confirmed"; selection_scope = "foreground_descendant"; scanned = $foregroundResult.scanned } | ConvertTo-Json -Compress
   exit 0
 }
 
-$ranges = $null
-try {
-  $ranges = $textPattern.GetSelection()
-} catch {}
-
-if ($null -eq $ranges -or $ranges.Length -eq 0) {
-  [PSCustomObject]@{ success = $false; text = ""; source = "none"; confidence = "none"; reason = "empty" } | ConvertTo-Json -Compress
-  exit 0
-}
-
-$parts = New-Object System.Collections.Generic.List[string]
-foreach ($range in $ranges) {
-  try {
-    $text = $range.GetText(-1)
-    if (-not [string]::IsNullOrWhiteSpace($text)) {
-      [void]$parts.Add($text.Trim())
-    }
-  } catch {}
-}
-
-$selectedText = ($parts -join "\\n").Trim()
-if ([string]::IsNullOrWhiteSpace($selectedText)) {
-  [PSCustomObject]@{ success = $false; text = ""; source = "none"; confidence = "none"; reason = "empty" } | ConvertTo-Json -Compress
-  exit 0
-}
-
-[PSCustomObject]@{ success = $true; text = $selectedText; source = "uia"; confidence = "confirmed" } | ConvertTo-Json -Compress
+$reason = if ($foregroundResult.reason) { $foregroundResult.reason } else { $focusedResult.reason }
+[PSCustomObject]@{ success = $false; text = ""; source = "none"; confidence = "none"; reason = $reason; focused_reason = $focusedResult.reason; foreground_scanned = $foregroundResult.scanned } | ConvertTo-Json -Compress
 `;
 
 const FOCUSED_TEXT_TARGET_SCRIPT = `

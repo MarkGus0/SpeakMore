@@ -21,9 +21,9 @@
 
 - 后端独立启动，Electron 只消费 `http://127.0.0.1:8000`，不负责自动拉起或关闭后端。
 - 后端关键接口为 `GET /health`、`GET /ready`、`POST /config/reload`、`POST /ai/voice_flow` 和 `WebSocket /ws/rt_voice_flow`。
-- `/health` 表示后端进程存活；`/ready` 表示唯一 ASR 模型预热完成，语音链路可接收请求。
+- `/health` 表示后端进程存活；`/ready` 表示当前启用的 ASR 模型预热完成，语音链路可接收请求。
 - 模型管理能力已删除，Electron 不再注册 `model:*` IPC，也不再有模型页面、下载、切换、删除或选择入口。
-- 当前唯一 ASR 模型为 `paraformer-zh-streaming`，后端只负责加载、预热和兼容转写，不保留 whisper 或 FunASR Nano 多模型逻辑。
+- 当前默认 ASR 模型为 `paraformer-zh-streaming`；后端隐藏支持 `sensevoice-small`，通过 `server/model_manager.py` 的 `ACTIVE_ASR_MODEL_ID` 直接改代码切换，不在前端显示入口。
 - `electron-app/main.js` 加载 `electron-app/renderer/dist/index.html`、`floating-bar.html` 和 `floating-panel.html`。
 - `electron-app/main.js` 是 Electron 主进程组合根，主要负责创建服务、依赖接线和生命周期注册；窗口、悬浮状态、IPC、本地数据、后端客户端、音频会话、文本观察和 Right Alt 监听逻辑应放在对应独立模块。
 - `electron-app/main-ipc-registry.js` 负责按上下文注册 IPC，主进程只注入依赖，不在 `main.js` 里直接拼装各通道业务逻辑。
@@ -58,22 +58,23 @@
 - `Right Alt + Right Shift` 是显式语音翻译；不因有选区而直接翻译选区，必须录音，完成后走普通粘贴链路把翻译结果贴到当前光标位置。
 - 三种模式只要粘贴或替换失败，都必须把最终结果展示到悬浮卡片，不能让用户丢失结果。
 - 自动粘贴前必须先确认当前存在可信文本输入目标；找不到光标或输入目标时，不得静默写剪贴板和发送 `Ctrl+V`，必须直接展示悬浮卡片。
-- 自动粘贴前的输入目标判定按四层收敛：`UIA confirmed` -> `Win32 caret confirmed` -> `app_compat` 弱可信应用族兜底 -> 悬浮卡片；不要把“前台窗口存在”当成可粘贴条件，第三层只在 allowlist 应用族且弱信号充分时放行。
+- 自动粘贴前的输入目标判定按四层收敛：`UIA confirmed` -> `Win32 caret confirmed` -> `app_compat` 弱可信应用族兜底 -> 悬浮卡片；不要把“前台窗口存在”当成可粘贴条件，第三层只在 allowlist 应用族且弱信号充分时放行。当前 allowlist 只做显式应用族匹配，包含微信、QQ、Discord、Codex、Claude Code、ChatGPT、VS Code、Cursor、Slack、Notion、Spotify，不把所有 Electron / Chromium 一刀切放开。
 - 自动粘贴成功后必须恢复用户原剪贴板内容，不能让 SpeakMore 的结果长期占用系统剪贴板。
 - 如果同一轮键态里同时存在 `Space` 和 `RightShift`，优先按翻译意图处理，避免自由提问抢占翻译。
-- `focused-context:get-selection-snapshot` 使用 Windows UI Automation 读取 confirmed 选区，并在 UIA 无 confirmed 选区时允许剪贴板 fallback；`focused-context:get-selected-text` 的剪贴板读取只保留为旧兼容能力，必须尽量恢复原剪贴板。
+- `focused-context:get-selection-snapshot` 使用 Windows UI Automation 读取 confirmed 选区；读取顺序为 `FocusedElement` 的 TextPattern、前台窗口 Document/TextPattern 子树扫描、剪贴板 fallback；`focused-context:get-selected-text` 的剪贴板读取只保留为旧兼容能力，必须尽量恢复原剪贴板。
 - 普通听写和语音翻译启动前不得读取 UIA 或剪贴板选区；只有 `Right Alt + Space` 自由提问需要按 UIA 优先、剪贴板 fallback 次之读取选区作为上下文。
 - 自由提问未来如需回答实时问题，必须在后端增加意图分类和工具路由；不要只靠 prompt 假装具备联网、天气或网页检索能力。
 - 翻译录音启动时，renderer 必须从本地设置读取 `translationTargetLanguage`，并通过 WebSocket `start_audio.parameters.output_language` 传给后端；当前支持 `en` 和 `ja`，语言集合以共享翻译目标语言元数据为准。
 - 录音启动时可以并行准备后端 ready、设置和词典、WebSocket、麦克风；但 `start_audio` 只能在 `/ready` 成功和所有启动资源准备完成后发送，ready 失败或取消时必须清理已打开的麦克风和 WebSocket。
 - 长按 `Right Alt` 的快捷键提示也通过 `floating-panel` IPC 和独立悬浮面板展示；提示优先级低于录音、转写、完成、取消和错误状态。
 - 悬浮胶囊和悬浮面板不要依赖本机固定坐标，应基于当前显示器 `workArea` 计算并限制在屏幕内。
-- WebSocket 语音流固定输入来自 `16kHz`、单声道、`pcm_s16le` 二进制 chunk，并在 `start_audio.parameters.audio_format` 声明 `{ type: "pcm_s16le", sample_rate: 16000, channels: 1 }`；`/ai/voice_flow` 兼容入口可以接受上传音频，但后端也必须先转成 PCM16 再喂给 paraformer。
+- WebSocket 语音流固定输入来自 `16kHz`、单声道、`pcm_s16le` 二进制 chunk，并在 `start_audio.parameters.audio_format` 声明 `{ type: "pcm_s16le", sample_rate: 16000, channels: 1 }`；`/ai/voice_flow` 兼容入口可以接受上传音频，但后端也必须先转成 PCM16 再喂给当前启用的 ASR session。
 - `paraformer-zh-streaming` 的 WebSocket 流式链路在用户说话时持续输出 `transcription`，`end_audio` 只 flush streaming 文本并进入 LLM 润色；不要再把整段音频送入 `transcribe_audio_with_wav_conversion()`。
+- `sensevoice-small` 通过 FunASR `SenseVoiceSmall` 接入，官方主路径不是与 `paraformer-zh-streaming` 同级的原生在线 streaming；后端只允许用累计音频伪流式输出维持现有 WebSocket 协议，不能把它描述为原生 streaming。
 - WebSocket 协议入口必须防御非法 JSON 和非对象参数；`parameters`、`audio_context` 等输入进入业务逻辑前必须归一化为对象。
 - WebSocket 单轮音频处理失败也必须清空本轮音频块，不能让下一次 `end_audio` 重复处理旧音频。
-- ASR 后端只支持 `paraformer-zh-streaming`，不要恢复 Handy `ggml`、SenseVoice、Fun-ASR Nano、faster-whisper 或其他旧模型兼容逻辑。
-- `paraformer-zh-streaming` 运行时优先使用 CUDA，当前 PyTorch 不可用 CUDA 时降级到 CPU；模型扫描顺序固定为 `PARAFORMER_STREAMING_MODEL_DIR` → `%LOCALAPPDATA%\Typeless\models\funasr` → `%USERPROFILE%\.cache\huggingface\hub` → 首次下载到 `%LOCALAPPDATA%\Typeless\models\funasr`。
+- ASR 后端只支持 `paraformer-zh-streaming` 和隐藏切换用的 `sensevoice-small`，不要恢复 Handy `ggml`、FunASR Nano、faster-whisper 或其他旧模型兼容逻辑。
+- ASR 运行时优先使用 CUDA，当前 PyTorch 不可用 CUDA 时降级到 CPU；模型扫描顺序固定为模型专属显式目录环境变量（`PARAFORMER_STREAMING_MODEL_DIR` 或 `SENSEVOICE_SMALL_MODEL_DIR`）→ `%LOCALAPPDATA%\Typeless\models\funasr` → `%USERPROFILE%\.cache\huggingface\hub` → 首次下载到 `%LOCALAPPDATA%\Typeless\models\funasr`。
 - 开发态 `uvicorn reload` 必须显式由环境变量 `UVICORN_RELOAD` 开启，不要在代码里默认写死 `reload=True`。
 - 录音期间静音后台声音时，保持“短按开始、再次短按结束”的交互；Windows 上按音频会话静音，结束后只恢复本轮被 SpeakMore 主动静音的会话。
 - 自动学习只能围绕 SpeakMore 本轮粘贴结果短时观察当前焦点控件，不允许做无差别全局文本采集；目标应用不支持 UIA 文本读取时，本轮学习应降级为不可用。
