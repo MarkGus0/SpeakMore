@@ -66,7 +66,7 @@
 - 自由提问未来如需回答实时问题，必须在后端增加意图分类和工具路由；不要只靠 prompt 假装具备联网、天气或网页检索能力。
 - 翻译录音启动时，renderer 必须从本地设置读取 `translationTargetLanguage`，并通过 WebSocket `start_audio.parameters.output_language` 传给后端；当前支持 `en` 和 `ja`，语言集合以共享翻译目标语言元数据为准。
 - 录音启动时可以并行准备后端 ready、设置和词典、WebSocket、麦克风；但 `start_audio` 只能在 `/ready` 成功和所有启动资源准备完成后发送，ready 失败或取消时必须清理已打开的麦克风和 WebSocket。
-- 长按 `Right Alt` 的快捷键提示也通过 `floating-panel` IPC 和独立悬浮面板展示；提示优先级低于录音、转写、完成、取消和错误状态。
+- 长按 `Right Alt` 的判定阈值为 `350ms`；快捷键提示也通过 `floating-panel` IPC 和独立悬浮面板展示，提示优先级低于录音、转写、完成、取消和错误状态。
 - 悬浮胶囊和悬浮面板不要依赖本机固定坐标，应基于当前显示器 `workArea` 计算并限制在屏幕内。
 - WebSocket 语音流固定输入来自 `16kHz`、单声道、`pcm_s16le` 二进制 chunk，并在 `start_audio.parameters.audio_format` 声明 `{ type: "pcm_s16le", sample_rate: 16000, channels: 1 }`；`/ai/voice_flow` 兼容入口可以接受上传音频，但后端也必须先转成 PCM16 再喂给当前启用的 ASR session。
 - `paraformer-zh-streaming` 的 WebSocket 流式链路在用户说话时持续输出 `transcription`，`end_audio` 只 flush streaming 文本并进入 LLM 润色；不要再把整段音频送入 `transcribe_audio_with_wav_conversion()`。
