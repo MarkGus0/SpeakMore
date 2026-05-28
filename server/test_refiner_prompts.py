@@ -183,8 +183,8 @@ class RefinerPromptTest(unittest.TestCase):
         context = refiner.build_dictionary_context(terms)
 
         self.assertIn("alias0 应写作 词0", context)
-        self.assertIn("alias99 应写作 词99", context)
-        self.assertNotIn("alias100 应写作 词100", context)
+        self.assertIn("alias39 应写作 词39", context)
+        self.assertNotIn("alias40 应写作 词40", context)
 
     def test_ask_anything_user_message_keeps_selected_text_context(self):
         fake_client = FakeClient()

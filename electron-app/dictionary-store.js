@@ -5,7 +5,10 @@
  */
 const crypto = require('crypto');
 
-const MAX_PROMPT_DICTIONARY_TERMS = 100;
+const DEFAULT_PROMPT_DICTIONARY_TERMS = 24;
+const MIN_PROMPT_DICTIONARY_TERMS = 8;
+const HARD_MAX_PROMPT_DICTIONARY_TERMS = 40;
+const PROMPT_DICTIONARY_HALF_LIFE_DAYS = 30;
 // 三次相同修正才自动提升，避免用户一次偶然改写就污染正式词典。
 const AUTO_PROMOTE_THRESHOLD = 3;
 const ENTRY_SOURCES = new Set(['manual', 'auto']);
@@ -74,6 +77,59 @@ function sameEntry(left, right) {
   return normalizePhrase(left.phrase).toLowerCase() === normalizePhrase(right.phrase).toLowerCase();
 }
 
+function clampPromptDictionaryLimit(limit = DEFAULT_PROMPT_DICTIONARY_TERMS) {
+  const numeric = Number(limit);
+  if (!Number.isFinite(numeric)) return DEFAULT_PROMPT_DICTIONARY_TERMS;
+  return Math.min(
+    HARD_MAX_PROMPT_DICTIONARY_TERMS,
+    Math.max(MIN_PROMPT_DICTIONARY_TERMS, Math.floor(numeric)),
+  );
+}
+
+function readTimestamp(value, fallback = 0) {
+  const time = Date.parse(value || '');
+  return Number.isFinite(time) ? time : fallback;
+}
+
+function resolveEntryEffectiveTime(entry) {
+  const createdAt = readTimestamp(entry.createdAt, 0);
+  return readTimestamp(entry.lastLearnedAt, readTimestamp(entry.updatedAt, createdAt));
+}
+
+function calculateRecencyWeight(entry, now = new Date().toISOString()) {
+  const nowTime = readTimestamp(now, Date.now());
+  const effectiveTime = resolveEntryEffectiveTime(entry);
+  if (!effectiveTime || effectiveTime >= nowTime) return 1;
+  const ageDays = (nowTime - effectiveTime) / 86400000;
+  return Math.pow(0.5, ageDays / PROMPT_DICTIONARY_HALF_LIFE_DAYS);
+}
+
+function calculateDictionaryTermScore(entry, now = new Date().toISOString()) {
+  const normalized = normalizeDictionaryEntry(entry, now);
+  const typeWeight = normalized.source === 'manual' ? 1.05 : 1;
+  const frequencyWeight = 1 + Math.log1p(normalized.hitCount);
+  return typeWeight * frequencyWeight * calculateRecencyWeight(normalized, now);
+}
+
+function normalizePromptDictionaryOptions(options = {}) {
+  if (typeof options === 'number') {
+    return {
+      limit: clampPromptDictionaryLimit(options),
+      now: new Date().toISOString(),
+    };
+  }
+  if (!options || typeof options !== 'object') {
+    return {
+      limit: DEFAULT_PROMPT_DICTIONARY_TERMS,
+      now: new Date().toISOString(),
+    };
+  }
+  return {
+    limit: clampPromptDictionaryLimit(options.limit),
+    now: typeof options.now === 'string' && options.now ? options.now : new Date().toISOString(),
+  };
+}
+
 function upsertDictionaryEntry(entries, entry, now = new Date().toISOString()) {
   const normalizedEntries = (Array.isArray(entries) ? entries : []).map((item) => normalizeDictionaryEntry(item, now));
   const normalized = normalizeDictionaryEntry({ ...entry, updatedAt: now }, now);
@@ -99,14 +155,25 @@ function upsertDictionaryEntry(entries, entry, now = new Date().toISOString()) {
   });
 }
 
-function buildPromptDictionaryTerms(entries, limit = MAX_PROMPT_DICTIONARY_TERMS) {
-  // 传给后端的 prompt 词典只包含启用词条，并按“更常命中、更近期更新”优先，控制上下文长度。
+function buildPromptDictionaryTerms(entries, options = {}) {
+  const { limit, now } = normalizePromptDictionaryOptions(options);
+  // 传给后端的 prompt 词典只包含启用词条，并按动态分数裁剪，避免无关词条稀释模型注意力。
   return (Array.isArray(entries) ? entries : [])
-    .map((entry) => normalizeDictionaryEntry(entry))
+    .map((entry) => normalizeDictionaryEntry(entry, now))
     .filter((entry) => entry.status === 'active' && entry.phrase)
-    .sort((left, right) => right.hitCount - left.hitCount || right.updatedAt.localeCompare(left.updatedAt))
+    .map((entry) => ({
+      entry,
+      score: calculateDictionaryTermScore(entry, now),
+      effectiveTime: resolveEntryEffectiveTime(entry),
+    }))
+    .sort((left, right) => (
+      right.score - left.score
+      || right.effectiveTime - left.effectiveTime
+      || right.entry.updatedAt.localeCompare(left.entry.updatedAt)
+      || left.entry.phrase.localeCompare(right.entry.phrase)
+    ))
     .slice(0, limit)
-    .map(({ phrase, aliases }) => ({ phrase, aliases }));
+    .map(({ entry }) => ({ phrase: entry.phrase, aliases: entry.aliases }));
 }
 
 function learnDictionaryCandidate(candidates, correction, now = new Date().toISOString()) {
@@ -170,8 +237,13 @@ function learnDictionaryCandidate(candidates, correction, now = new Date().toISO
 }
 
 module.exports = {
-  MAX_PROMPT_DICTIONARY_TERMS,
+  DEFAULT_PROMPT_DICTIONARY_TERMS,
+  MIN_PROMPT_DICTIONARY_TERMS,
+  HARD_MAX_PROMPT_DICTIONARY_TERMS,
+  PROMPT_DICTIONARY_HALF_LIFE_DAYS,
   AUTO_PROMOTE_THRESHOLD,
+  clampPromptDictionaryLimit,
+  calculateDictionaryTermScore,
   normalizeDictionaryEntry,
   normalizeDictionaryCandidate,
   upsertDictionaryEntry,
