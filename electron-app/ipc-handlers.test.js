@@ -238,6 +238,7 @@ test('registerAudioIpcHandlers 注册音频通道', async () => {
     ipcMain,
     callVoiceFlowBackend: async (payload) => ({ success: true, payload }),
     checkVoiceServerReady: async () => ({ success: true }),
+    ensureVoiceServer: async () => ({ success: true, ensured: true }),
     muteBackgroundSessionsForRecording: async () => {
       muted = true;
       return { success: true };
@@ -250,6 +251,7 @@ test('registerAudioIpcHandlers 注册音频通道', async () => {
   });
 
   assert.deepEqual(await ipcMain.invoke('audio:ai-voice-flow', { foo: 'bar' }), { success: true, payload: { foo: 'bar' } });
+  assert.deepEqual(await ipcMain.invoke('audio:ensure-voice-server'), { success: true, ensured: true });
   assert.deepEqual(await ipcMain.invoke('audio:is-muted'), { success: true, isMuted: false });
   await ipcMain.invoke('audio:mute');
   assert.deepEqual(await ipcMain.invoke('audio:is-muted'), { success: true, isMuted: true });

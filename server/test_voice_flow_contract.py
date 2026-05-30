@@ -11,7 +11,7 @@ import main
 class VoiceFlowContractTest(unittest.TestCase):
     def create_ready_app(self):
         self.assertTrue(hasattr(main, "create_app"), "main.create_app 尚未实现")
-        return main.create_app(preload_model=lambda: None, exit_scheduler=lambda _code: None)
+        return main.create_app(preload_model=lambda: None, exit_scheduler=lambda _code: None, auto_preload_model=True)
 
     def wait_until_ready(self, client: TestClient):
         for _ in range(20):
@@ -28,7 +28,7 @@ class VoiceFlowContractTest(unittest.TestCase):
             release.wait(1)
 
         app = (
-            main.create_app(preload_model=slow_preload, exit_scheduler=lambda _code: None)
+            main.create_app(preload_model=slow_preload, exit_scheduler=lambda _code: None, auto_preload_model=True)
             if hasattr(main, "create_app")
             else main.app
         )

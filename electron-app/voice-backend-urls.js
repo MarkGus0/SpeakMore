@@ -4,6 +4,8 @@ function createVoiceBackendUrls(voiceServerUrl = DEFAULT_VOICE_SERVER_URL) {
   return {
     healthUrl: `${voiceServerUrl}/health`,
     readyUrl: `${voiceServerUrl}/ready`,
+    modelStatusUrl: `${voiceServerUrl}/model/status`,
+    modelDownloadUrl: `${voiceServerUrl}/model/download`,
     voiceFlowUrl: `${voiceServerUrl}/ai/voice_flow`,
     configReloadUrl: `${voiceServerUrl}/config/reload`,
   };

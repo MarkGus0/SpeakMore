@@ -1,28 +1,33 @@
 # SpeakMore
 
-SpeakMore 是一个 Windows 本地语音输入工具。它用 Electron 提供桌面壳和全局快捷键，用本地 FastAPI 后端完成语音转写，再调用 DeepSeek 对文本进行清洗、提问或翻译。听写和翻译结果会粘贴回当前焦点应用，自由提问结果会显示在独立悬浮面板里。
+SpeakMore 是一个 Windows 本地语音输入工具。Electron 负责桌面壳、固定快捷键、托盘、本地数据和自动粘贴；本地 FastAPI 后端负责音频转写和大模型文本处理。
 
-当前项目是本地开发版：
+当前正式 ASR 模型只支持 `FunAudioLLM/SenseVoiceSmall`。Windows x64 便携包不内置模型；首次运行进入“初始化”页后，由用户点击下载并加载 SenseVoiceSmall，下载失败时会显示明确错误。
 
-- 后端需要单独启动。
-- Electron 不会自动拉起或关闭后端。
-- 用户数据保存在本机 Electron `userData/local-data/`。
-- 用户可见语言固定为简体中文。
+## 功能
 
-## 功能概览
+- `Right Alt`：听写，把口述内容转成文本并自动粘贴。
+- `Right Alt + Space`：自由提问，结果显示在悬浮面板，不自动粘贴。
+- `Right Alt + Right Shift`：语音翻译，结果粘贴到当前光标位置。
+- `Escape`：取消当前未完成语音会话，或关闭当前悬浮面板。
+- 录音时显示悬浮胶囊和麦克风音量。
+- 主窗口包含初始化、首页、历史记录、词典和设置。
+- 历史、设置、词典和自动学习候选只保存在本机。
 
-- `Right Alt`：听写，把口述内容转成文本并清洗。
-- `Right Alt + Space`：自由提问，把口述问题交给 DeepSeek 生成回答，并在悬浮面板展示。
-- `Right Alt + Right Shift`：翻译模式，当前默认把口述文本翻译成英文。
-- `Escape`：取消当前未完成的语音会话。
-- 录音时显示悬浮胶囊栏和真实麦克风音量柱。
-- 听写和翻译完成后自动粘贴到当前焦点应用。
-- 自由提问录音时胶囊显示“请随意提出问题”，完成后在悬浮面板展示回答。
-- 词典用于提高专有名词、产品名、代码词和个人习惯写法的润色准确度。
-- 自动学习只在 SpeakMore 本轮粘贴后短时观察当前焦点输入控件；目标应用不支持 Windows UIA 文本读取时，本轮不会学习。
-- 主窗口关闭后隐藏到后台，托盘“退出”才真正结束 Electron。
-- 录音期间在 Windows 上尝试静音后台音频，结束后恢复本轮主动静音的会话。
-- 首页展示累计统计和最近结果，历史页展示最近 200 条记录，词典页管理本地语音辅助数据。
+自动粘贴必须先确认可信文本输入目标；不满足条件时显示悬浮卡片，不静默写剪贴板和发送 `Ctrl+V`。
+
+## Windows 便携版
+
+发布目标是 Windows x64 解压即用包。便携包包含：
+
+- `SpeakMore.exe`
+- Electron 运行文件
+- 本地后端可执行文件
+- Windows 文本观察 helper
+- `ffmpeg`
+- Renderer 构建产物
+
+模型不打包。首次运行需要联网下载 SenseVoiceSmall，默认缓存到 `%LOCALAPPDATA%\Typeless\models\funasr`。用户在“初始化”页点击下载后，页面会显示下载/加载状态、耗时、成功或失败结果。离线环境可以提前准备模型目录，并通过 `SENSEVOICE_SMALL_MODEL_DIR` 指向该目录。
 
 ## 项目结构
 
@@ -30,39 +35,37 @@ SpeakMore 是一个 Windows 本地语音输入工具。它用 Electron 提供桌
 .
 ├── server/                         # 本地 FastAPI 后端
 │   ├── main.py                     # HTTP / WebSocket 接口、就绪状态、音频转码
-│   ├── asr.py                      # paraformer 中文实时流式模型加载与转写
-│   ├── refiner.py                  # DeepSeek 文本清洗、提问、翻译
+│   ├── asr.py                      # SenseVoiceSmall 加载与转写
+│   ├── refiner.py                  # 大模型文本清洗、提问、翻译
 │   ├── runtime_config.py           # .env、HOST、PORT、CORS 配置
 │   └── .env.example                # 后端环境变量模板
-├── electron-app/                   # Electron 主进程和本地桌面壳
-│   ├── main.js                     # 窗口、托盘、IPC、快捷键、粘贴、本地数据
+├── electron-app/                   # Electron 主进程和桌面壳
+│   ├── main.js                     # 主进程组合根
 │   ├── preload.js                  # Renderer 安全 IPC 桥接
 │   ├── right-alt-listener.ps1      # Windows 低级键盘监听器
 │   ├── audio-session-control.ps1   # Windows 后台音频会话静音/恢复
-│   ├── windows-text-observer/      # UIA 文本观察 helper，用于本轮粘贴后的自动学习
+│   ├── windows-text-observer/      # UIA 文本观察 helper
 │   └── renderer/                   # Vite + React + MUI + TypeScript 前端
-├── docs/ai/context/                # AI 上下文、设计、计划和决策记录
-├── .github/workflows/ci.yml        # CI：renderer 测试、统计测试、构建
-├── package.json                    # 根启动、构建和后端验证脚本
+├── shared/                         # 前后端共享元数据
+├── scripts/                        # 验证和发布脚本
+├── packaging/                      # 打包配置
+├── package.json                    # 根启动、构建和验证脚本
 └── AGENTS.md                       # 项目协作约定
 ```
 
-`app-extracted/` 如果存在，只是 Typeless 逆向参考资料，不是当前运行入口。
-
 ## 环境要求
 
-- Windows 10/11。
-- Node.js 24 推荐；CI 使用 Node.js 24。
+- Windows 10/11 x64。
+- Node.js 24 推荐。
 - Python 3.10+。
 - PowerShell。
-- `ffmpeg` 已安装并在 `PATH` 中，后端需要它把 `webm/ogg/mp3/m4a/opus` 转成 `wav`。
+- `ffmpeg`。
 - 可用麦克风。
-- DeepSeek API Key。
-- 首次自动下载 `paraformer-zh-streaming` 模型时需要可访问 Hugging Face；离线环境请提前准备模型目录并配置 `PARAFORMER_STREAMING_MODEL_DIR`。
+- 可用的大模型 API Key；默认不包含任何真实 Key。
 
-## 安装
+## 开发安装
 
-在项目根目录安装 Electron 依赖：
+安装根依赖：
 
 ```powershell
 npm install
@@ -84,52 +87,32 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-如果 `ffmpeg` 命令不可用，请先安装并确认：
-
-```powershell
-ffmpeg -version
-```
-
-## 后端配置
-
-复制环境变量模板：
+复制后端环境变量模板：
 
 ```powershell
 copy server\.env.example server\.env
 ```
 
-编辑 `server/.env`：
+示例配置：
 
 ```env
-DEEPSEEK_API_KEY=你的 DeepSeek API Key
+DEEPSEEK_API_KEY=
 DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
-PARAFORMER_STREAMING_MODEL_DIR=
+SENSEVOICE_SMALL_MODEL_DIR=
 HOST=127.0.0.1
 PORT=8000
 CORS_ALLOWED_ORIGINS=null,http://127.0.0.1:5173,http://localhost:5173
 ```
 
-注意：
+`server/.env` 已被忽略，不要提交真实密钥。客户端设置页传入的大模型配置优先；DeepSeek 变量仅作为本地后端回退配置。
 
-- `server/.env` 已被 `.gitignore` 忽略，不要提交真实密钥。
-- 当前后端只支持 `paraformer-zh-streaming`，不提供模型切换、下载或删除入口。
-- 设置页里的 `DeepSeek API Key` 输入目前只是界面入口，不会自动写入 `server/.env`；真实运行仍以 `server/.env` 为准。
-- 开发态热重载需要显式设置 `UVICORN_RELOAD=true`，代码不会默认开启 reload。
+LLM provider、API Key 和模型名由设置页保存到本机 Electron `userData/local-data/settings.json`。
 
-### Paraformer 模型位置
-
-后端唯一使用 `paraformer-zh-streaming`。模型查找顺序为：
-
-1. `PARAFORMER_STREAMING_MODEL_DIR`
-2. `%LOCALAPPDATA%\Typeless\models\funasr`
-3. `%USERPROFILE%\.cache\huggingface\hub`
-4. 都未命中时，首次运行自动下载到 `%LOCALAPPDATA%\Typeless\models\funasr`
-
-如果手动配置 `PARAFORMER_STREAMING_MODEL_DIR`，目录内必须包含 `model.pt`、`config.yaml`、`tokens.json` 和 `am.mvn`。
+未填写当前 provider 的 API Key 时，语音录音会在启动前被拦截，不会打开麦克风或连接语音后端。默认 provider 是 DeepSeek。
 
 ## 启动
 
-先构建 Electron 要加载的前端产物：
+构建前端：
 
 ```powershell
 npm run renderer:build
@@ -141,54 +124,37 @@ npm run renderer:build
 npm run server
 ```
 
-后端启动后检查存活和就绪：
+检查后端状态：
 
 ```powershell
 Invoke-WebRequest http://127.0.0.1:8000/health | Select-Object StatusCode
+Invoke-WebRequest http://127.0.0.1:8000/model/status | Select-Object StatusCode
 Invoke-WebRequest http://127.0.0.1:8000/ready | Select-Object StatusCode
 ```
 
 含义：
 
 - `/health` 返回 200：后端进程存活。
+- `/model/status` 返回 200：模型初始化状态可查询。
 - `/ready` 返回 200：ASR 模型已预热，语音链路可用。
-- `/ready` 返回 503：后端还在加载模型或加载失败。
+- `/ready` 返回 503：模型未开始下载、正在下载/加载，或下载/加载失败。
 
-最后启动 Electron：
+启动 Electron：
 
 ```powershell
 npm start
 ```
 
-启动后 Electron 会打开主窗口，并创建默认隐藏的悬浮胶囊栏、悬浮面板和托盘图标。
+## SenseVoiceSmall 模型
 
-## 使用流程
+模型查找顺序为：
 
-1. 先确认后端 `/ready` 为 200，再启动 Electron。
-2. 打开主窗口的“设置”，选择麦克风；默认使用系统默认输入设备。
-3. 把光标放到要输入文字的应用里，例如编辑器、浏览器输入框或聊天窗口。
-4. 短按 `Right Alt` 开始听写，悬浮胶囊显示录音状态。
-5. 说完后再次短按 `Right Alt` 结束录音。
-6. 等待“正在转写...”完成。听写和翻译结果会自动粘贴到当前焦点应用。
-7. 如果不想提交当前录音，按 `Escape` 取消。
+1. `SENSEVOICE_SMALL_MODEL_DIR`
+2. `%LOCALAPPDATA%\Typeless\models\funasr`
+3. `%USERPROFILE%\.cache\huggingface\hub`
+4. 都未命中时，初始化页点击下载后保存到 `%LOCALAPPDATA%\Typeless\models\funasr`
 
-其他模式：
-
-- `Right Alt + Space`：自由提问。录音时胶囊显示“请随意提出问题”，完成后在悬浮面板展示回答，不自动粘贴。
-- `Right Alt + Right Shift`：翻译。当前默认翻译成英文，完成后粘贴翻译结果。
-- 长按 `Right Alt` 不会开始录音，会在悬浮面板显示快捷键提示；录音中长按不显示提示，释放仍按“再次短按结束”的语义停止录音。
-
-使用听写或翻译时保持目标输入框处于焦点状态。自动粘贴依赖剪贴板和 Windows `SendKeys`，如果焦点切走，结果可能粘贴到错误位置或粘贴失败。自由提问结果不走自动粘贴，直接在悬浮面板查看。
-
-## 主窗口页面
-
-- 首页：显示快捷键提示、累计听写时长、累计字数、节省时间、平均速度和最近结果；最近结果不包含自由提问回答。
-- 历史记录：展示最近 200 条听写记录，支持搜索、复制和清空列表。
-- 词典：管理手动词条、自动添加词条和候选词条。
-- 模型：查看、下载、选择和删除本地 ASR 模型。
-- 设置：选择麦克风、开机启动、查看固定快捷键和本地版版本信息。
-
-历史列表最多保留 200 条；累计统计来自独立统计文件，清空历史列表不会重置累计统计。
+如果手动配置 `SENSEVOICE_SMALL_MODEL_DIR`，目录内必须包含 SenseVoiceSmall 所需文件。
 
 ## 本地数据
 
@@ -205,20 +171,28 @@ Electron userData/local-data/
 - `history-stats.json`：累计统计。
 - `dictionary.json`：正式词典词条。
 - `dictionary-candidates.json`：自动学习候选词条。
-- `recording.log`：录音与本地排查日志。
+- `recording.log`：本地排查日志。
 - `recordings/`：录音相关本地产物目录。
 
-具体 `userData` 路径由 Electron 根据系统和应用名决定。
+这些内容不进入仓库，也不进入便携发布包。
+
+### 词典与自动学习隐私
+
+词典正式词条和自动学习候选只保存在本机 `userData/local-data/`。每轮请求只会把启用词条中按动态分数裁剪后的部分传给本地后端，默认 24 条，后端硬上限 40 条。
+
+自动学习只围绕本轮 SpeakMore 自动粘贴结果做短时观察，只接受短词或短语级纠错，不采集无关全局文本，不学习整句改写、摘要结果、问答命令或无上下文大段替换。
 
 ## 后端接口
 
 - `GET /health`：后端进程存活检查。
+- `GET /model/status`：查询 SenseVoiceSmall 初始化状态。
+- `POST /model/download`：启动 SenseVoiceSmall 下载/加载任务。
 - `GET /ready`：语音链路就绪检查。
+- `POST /config/reload`：刷新后端回退配置。
 - `POST /ai/voice_flow`：上传完整音频并返回处理结果。
-- `WebSocket /ws/rt_voice_flow`：实时录音流接口，Electron Renderer 当前主要使用它。
-- `GET /`：后端自带的简单录音测试页面。
+- `WebSocket /ws/rt_voice_flow`：实时录音流接口。
 
-实时音频默认来自浏览器 `MediaRecorder` 的 `audio/webm;codecs=opus`。后端会识别 `webm/ogg/wav` 头部，非 `wav` 输入先用 `ffmpeg` 转码再交给 ASR。
+WebSocket 语音流固定输入来自 `16kHz`、单声道、`pcm_s16le` 二进制 chunk，并在 `start_audio.parameters.audio_format` 声明音频格式。兼容上传入口会先把音频转成 PCM16 再交给 ASR。
 
 ## 开发验证
 
@@ -259,6 +233,12 @@ node --test electron-app\history-stats-store.test.mjs
 npm run verify:voice
 ```
 
+开源边界验证：
+
+```powershell
+npm run verify:open-source
+```
+
 后端全部测试：
 
 ```powershell
@@ -266,73 +246,48 @@ cd server
 python -m pytest -q
 ```
 
-CI 当前会运行：
-
-- 根依赖安装
-- Renderer 依赖安装
-- Renderer 测试
-- 历史统计测试
-- Renderer 构建
-
 ## 常见问题
 
-### Electron 提示语音后端未启动
+### 语音后端未就绪
 
-先单独运行：
-
-```powershell
-npm run server
-```
-
-再检查：
+先检查：
 
 ```powershell
 Invoke-WebRequest http://127.0.0.1:8000/ready | Select-Object StatusCode
 ```
 
-如果 `/ready` 仍是 503，通常是模型还在加载、模型下载失败或 `PARAFORMER_STREAMING_MODEL_DIR` 配置错误。
+如果 `/ready` 是 503，先打开初始化页查看模型状态；常见原因是还没点击下载、模型还在下载/加载、下载失败，或 `SENSEVOICE_SMALL_MODEL_DIR` 配置错误。
 
 ### 首次启动很慢
 
-第一次没有本地 `paraformer-zh-streaming` 模型时，后端会下载模型。网络慢或无法访问 Hugging Face 时，建议提前准备模型目录并设置 `PARAFORMER_STREAMING_MODEL_DIR`。
+第一次没有本地 SenseVoiceSmall 模型时，需要在初始化页点击下载并等待加载完成。网络慢或无法访问模型源时，语音功能会暂时不可用，页面会保留失败原因。
+
+### 提示未填写 DeepSeek API Key
+
+到设置页的大模型区域填写自己的 API Key 并保存。未填写 API Key 时，录音启动会被拦截。
 
 ### 转写时报 ffmpeg 错误
 
-确认 `ffmpeg` 在 `PATH` 中：
+确认 `ffmpeg` 可用：
 
 ```powershell
 ffmpeg -version
 ```
 
-主录音链路现在固定发送 `PCM16`；兼容入口上传的 `webm/opus`、`mp3` 等音频仍需要 `ffmpeg` 才能稳定转成后端可识别格式。
+主录音链路固定发送 PCM16；兼容入口上传的其他音频仍需要 `ffmpeg` 转码。
 
-### DeepSeek 没有生效
+### 大模型没有生效
 
-检查 `server/.env`：
+优先检查设置页里的 provider、API Key 和模型名。保存后，Electron 会把配置写入本机 `settings.json`，并随语音或文本请求传给本地后端。
 
-```env
-DEEPSEEK_API_KEY=你的 DeepSeek API Key
-DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
-```
-
-修改 `.env` 后需要重启后端。当前设置页不会自动更新后端 `.env`。
-
-### 快捷键没反应
-
-确认运行在 Windows，并检查 Electron 是否成功启动 `electron-app/right-alt-listener.ps1`。如果安全软件拦截 PowerShell 低级键盘监听器，`Right Alt` 事件不会送到 Renderer。
-
-### 自动粘贴失败
-
-自动粘贴依赖剪贴板和 Windows `System.Windows.Forms.SendKeys`。请确认目标输入框仍有焦点，且当前应用允许粘贴。
-
-## Git 忽略边界
+## 开源边界
 
 仓库不会提交以下内容：
 
 - `node_modules/`
-- `electron-app/renderer/dist/`
+- 构建产物
 - `server/.env`
 - 日志文件
 - Python 缓存
-- 逆向参考资料 `app-extracted/`
 - 本地 AI 工作上下文 `docs/ai/context/`
+- Electron `userData/local-data/`

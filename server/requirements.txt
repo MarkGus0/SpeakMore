@@ -24,3 +24,4 @@ jaconv>=0.4.0
 tiktoken>=0.7.0
 accelerate>=0.33.0
 einops>=0.8.0
+pyinstaller==6.11.1

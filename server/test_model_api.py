@@ -10,10 +10,10 @@ class ModelApiRemovalTest(unittest.TestCase):
         app = main.create_app(preload_model=lambda: None, exit_scheduler=lambda _code: None)
         with TestClient(app) as client:
             response = client.get("/models")
-            download_response = client.post("/models/paraformer-zh-streaming/download")
-            cancel_response = client.post("/models/paraformer-zh-streaming/cancel")
-            delete_response = client.delete("/models/paraformer-zh-streaming")
-            select_response = client.post("/models/paraformer-zh-streaming/select")
+            download_response = client.post("/models/sensevoice-small/download")
+            cancel_response = client.post("/models/sensevoice-small/cancel")
+            delete_response = client.delete("/models/sensevoice-small")
+            select_response = client.post("/models/sensevoice-small/select")
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(download_response.status_code, 404)

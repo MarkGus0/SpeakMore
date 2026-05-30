@@ -33,6 +33,12 @@ type StartAudioParameterInputs = {
   translationTargetLanguage: TranslationTargetLanguage | null
 }
 
+function assertLlmConfigReady(llm: LlmRequestConfig) {
+  if (!llm.api_key.trim()) {
+    throw createVoiceError('llm_api_key_missing')
+  }
+}
+
 function summarizeSelectedText(text: string) {
   const normalized = text.trim()
   return {
@@ -51,11 +57,14 @@ export async function prepareRecordingStart(
   let shouldStopPendingStream = false
 
   try {
+    const llm = await getCurrentLlmConfig()
+    assertLlmConfigReady(llm)
+
     // 启动前资源可以并行准备，但失败时必须把已经打开的麦克风和连接收掉。
     const readyPromise = ensureVoiceServerReady()
     const transportPromise = Promise.resolve<RecordingTransport>('pcm16')
     const socketPromise = socketControls.ensureOpenWebSocket()
-    const parameterInputsPromise = prepareStartAudioParameterInputs(task.mode)
+    const parameterInputsPromise = prepareStartAudioParameterInputs(task.mode, llm)
     const streamPromise = getAudioStream().then((stream) => {
       pendingStream = stream
       if (shouldStopPendingStream) {
@@ -97,15 +106,19 @@ export function cleanupPreparedStart(
   socketControls.closeWebSocketSilently()
 }
 
-export async function prepareStartAudioParameterInputs(mode: VoiceMode): Promise<StartAudioParameterInputs> {
+export async function prepareStartAudioParameterInputs(
+  mode: VoiceMode,
+  currentLlm?: LlmRequestConfig,
+): Promise<StartAudioParameterInputs> {
   const translationTargetLanguagePromise = mode === 'Translate'
     ? getTranslationTargetLanguage()
     : Promise.resolve(null)
   const [dictionaryTerms, llm, translationTargetLanguage] = await Promise.all([
     loadPromptDictionaryTerms(),
-    getCurrentLlmConfig(),
+    currentLlm ? Promise.resolve(currentLlm) : getCurrentLlmConfig(),
     translationTargetLanguagePromise,
   ])
+  assertLlmConfigReady(llm)
 
   return { dictionaryTerms, llm, translationTargetLanguage }
 }
@@ -152,9 +165,9 @@ export async function ensureVoiceServerReady() {
 
   try {
     // /ready 才代表当前 ASR 模型可接收请求，/health 只说明后端进程存在。
-    result = await ipcClient.invoke('audio:check-voice-server-ready') as { success?: boolean; detail?: string; status?: string }
-  } catch {
     result = await ipcClient.invoke('audio:ensure-voice-server') as { success?: boolean; detail?: string; status?: string }
+  } catch {
+    result = await ipcClient.invoke('audio:check-voice-server-ready') as { success?: boolean; detail?: string; status?: string }
   }
 
   if (!result?.success) {

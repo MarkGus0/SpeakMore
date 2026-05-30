@@ -543,7 +543,7 @@ test('cancelRecording 在 transcribing 态会忽略迟到完成消息且不会�
   }
 })
 
-test('startRecording 会先通过新 IPC 检查 ready，并连接集中定义的 WebSocket 地址', async () => {
+test('startRecording 会先通过新 IPC 确保 ready，并连接集中定义的 WebSocket 地址', async () => {
   const env = createTestEnvironment()
   let recorder: Awaited<ReturnType<typeof loadRecorderModule>> | null = null
 
@@ -551,7 +551,7 @@ test('startRecording 会先通过新 IPC 检查 ready，并连接集中定义的
     recorder = await loadRecorderModule('ready-check')
     await recorder.startRecording('Dictate')
 
-    const readyCheckIndex = env.invokeCalls.findIndex((call) => call.channel === 'audio:check-voice-server-ready')
+    const readyCheckIndex = env.invokeCalls.findIndex((call) => call.channel === 'audio:ensure-voice-server')
     const settingsGetIndex = env.invokeCalls.findIndex((call) => call.channel === 'settings:get')
     const socket = env.sockets[0]
 
@@ -565,7 +565,45 @@ test('startRecording 会先通过新 IPC 检查 ready，并连接集中定义的
   }
 })
 
-test('paraformer streaming 模型启动时通过 WebSocket 发送 PCM16 音频块', async () => {
+test('未填写 DeepSeek API Key 时拦截录音启动且不打开麦克风', async () => {
+  const env = createTestEnvironment({
+    settingsPromise: Promise.resolve({
+      selectedAudioDeviceId: 'default',
+      translationTargetLanguage: 'en',
+      launchAtSystemStartup: false,
+      llm: {
+        providerId: 'deepseek',
+        apiKeys: { deepseek: '' },
+        models: { deepseek: testLlmConfig.model },
+        providers: [{
+          id: 'deepseek',
+          label: 'DeepSeek',
+          baseUrl: testLlmConfig.base_url,
+          defaultModel: testLlmConfig.model,
+          allowBaseUrlEdit: false,
+          authType: 'bearer',
+        }],
+      },
+    }),
+  })
+  let recorder: Awaited<ReturnType<typeof loadRecorderModule>> | null = null
+
+  try {
+    recorder = await loadRecorderModule('missing-api-key')
+    await recorder.startRecording('Dictate')
+
+    assert.equal(recorder.getVoiceSession().status, 'error')
+    assert.equal(recorder.getVoiceSession().error?.code, 'llm_api_key_missing')
+    assert.equal(env.getUserMediaCalls(), 0)
+    assert.equal(env.sockets.length, 0)
+    assert.equal(env.invokeCalls.some((call) => call.channel === 'audio:ensure-voice-server'), false)
+  } finally {
+    recorder?.disposeRecorder()
+    env.restore()
+  }
+})
+
+test('SenseVoiceSmall 模型启动时通过 WebSocket 发送 PCM16 音频块', async () => {
   const env = createTestEnvironment({
     audioContextSampleRate: 16000,
   })
@@ -605,7 +643,7 @@ test('startRecording 并行准备 ready 和麦克风，减少 connecting 串行�
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     assert.equal(
-      env.invokeCalls.some((call) => call.channel === 'audio:check-voice-server-ready'),
+      env.invokeCalls.some((call) => call.channel === 'audio:ensure-voice-server'),
       true,
     )
     assert.equal(env.sockets.length > 0, true)
@@ -648,7 +686,7 @@ test('startRecording 并行准备参数和启动资源', async () => {
     const dictionaryStartedBeforeReadyResolved = env.invokeCalls.some((call) => call.channel === 'dictionary:prompt-terms')
     const settingsGetCountBeforeReadyResolved = env.invokeCalls.filter((call) => call.channel === 'settings:get').length
 
-    assert.equal(env.invokeCalls.some((call) => call.channel === 'audio:check-voice-server-ready'), true)
+    assert.equal(env.invokeCalls.some((call) => call.channel === 'audio:ensure-voice-server'), true)
     assert.equal(env.sockets.length > 0, true)
     assert.equal(env.getUserMediaCalls() > 0, true)
     assert.equal(dictionaryStartedBeforeReadyResolved, true)

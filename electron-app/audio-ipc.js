@@ -2,6 +2,7 @@ function registerAudioIpcHandlers({
   ipcMain,
   callVoiceFlowBackend,
   checkVoiceServerReady,
+  ensureVoiceServer = checkVoiceServerReady,
   muteBackgroundSessionsForRecording,
   restoreMutedBackgroundSessions,
   isMuted,
@@ -50,7 +51,7 @@ function registerAudioIpcHandlers({
   ipcMain.handle('audio:abort-ai-voice-flow-request', () => true);
   ipcMain.handle('audio:get-devices-async', () => ({ success: true, devices: [], message: 'no devices in shim' }));
   ipcMain.handle('audio:check-voice-server-ready', async () => checkVoiceServerReady());
-  ipcMain.handle('audio:ensure-voice-server', async () => checkVoiceServerReady());
+  ipcMain.handle('audio:ensure-voice-server', async () => ensureVoiceServer());
   ipcMain.handle('audio:mute-background-sessions', async () => muteBackgroundSessionsForRecording());
   ipcMain.handle('audio:restore-background-sessions', async () => restoreMutedBackgroundSessions());
   ipcMain.handle('audio:is-muted', () => ({ success: true, isMuted: isMuted() }));

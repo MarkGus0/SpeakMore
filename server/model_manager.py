@@ -2,14 +2,6 @@ import os
 from pathlib import Path
 
 
-PARAFORMER_STREAMING_MODEL_ID = "paraformer-zh-streaming"
-PARAFORMER_STREAMING_REPO_ID = "funasr/paraformer-zh-streaming"
-PARAFORMER_STREAMING_REQUIRED_MODEL_FILES = (
-    "model.pt",
-    "config.yaml",
-    "tokens.json",
-    "am.mvn",
-)
 SENSEVOICE_SMALL_MODEL_ID = "sensevoice-small"
 SENSEVOICE_SMALL_REPO_ID = "FunAudioLLM/SenseVoiceSmall"
 SENSEVOICE_SMALL_REQUIRED_MODEL_FILES = (
@@ -18,25 +10,17 @@ SENSEVOICE_SMALL_REQUIRED_MODEL_FILES = (
     "am.mvn",
     "chn_jpn_yue_eng_ko_spectok.bpe.model",
 )
-SUPPORTED_ASR_MODEL_IDS = (
-    PARAFORMER_STREAMING_MODEL_ID,
-    SENSEVOICE_SMALL_MODEL_ID,
-)
+SUPPORTED_ASR_MODEL_IDS = (SENSEVOICE_SMALL_MODEL_ID,)
 ASR_MODEL_REPO_IDS = {
-    PARAFORMER_STREAMING_MODEL_ID: PARAFORMER_STREAMING_REPO_ID,
     SENSEVOICE_SMALL_MODEL_ID: SENSEVOICE_SMALL_REPO_ID,
 }
 ASR_MODEL_REQUIRED_FILES = {
-    PARAFORMER_STREAMING_MODEL_ID: PARAFORMER_STREAMING_REQUIRED_MODEL_FILES,
     SENSEVOICE_SMALL_MODEL_ID: SENSEVOICE_SMALL_REQUIRED_MODEL_FILES,
 }
 ASR_MODEL_EXPLICIT_DIR_ENVS = {
-    PARAFORMER_STREAMING_MODEL_ID: "PARAFORMER_STREAMING_MODEL_DIR",
     SENSEVOICE_SMALL_MODEL_ID: "SENSEVOICE_SMALL_MODEL_DIR",
 }
-DEFAULT_MODEL_ID = PARAFORMER_STREAMING_MODEL_ID
-
-# 后端隐藏切换点：需要切回 Paraformer 时把这里改成 DEFAULT_MODEL_ID。
+DEFAULT_MODEL_ID = SENSEVOICE_SMALL_MODEL_ID
 ACTIVE_ASR_MODEL_ID = SENSEVOICE_SMALL_MODEL_ID
 
 
@@ -71,7 +55,7 @@ def get_managed_models_root():
     return base_dir / "Typeless" / "models"
 
 
-def get_managed_model_cache_root(model_id: str = PARAFORMER_STREAMING_MODEL_ID):
+def get_managed_model_cache_root(model_id: str = SENSEVOICE_SMALL_MODEL_ID):
     validate_asr_model_id(model_id)
     return get_managed_models_root() / "funasr"
 
@@ -88,11 +72,11 @@ def repo_cache_dir_name(repo_id: str):
     return f"models--{repo_id.replace('/', '--')}"
 
 
-def is_valid_model_snapshot(path: Path, model_id: str = PARAFORMER_STREAMING_MODEL_ID):
+def is_valid_model_snapshot(path: Path, model_id: str = SENSEVOICE_SMALL_MODEL_ID):
     return path.is_dir() and all((path / relative_path).is_file() for relative_path in get_model_required_files(model_id))
 
 
-def find_cached_model_snapshot(model_id: str = PARAFORMER_STREAMING_MODEL_ID, cache_root=None):
+def find_cached_model_snapshot(model_id: str = SENSEVOICE_SMALL_MODEL_ID, cache_root=None):
     root = Path(cache_root) if cache_root is not None else get_managed_model_cache_root(model_id)
     snapshots_root = root / repo_cache_dir_name(get_model_repo_id(model_id)) / "snapshots"
     try:

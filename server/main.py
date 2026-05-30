@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import tempfile
+import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -13,9 +14,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
 from asr import (
+    DOWNLOAD_SOURCE,
     create_streaming_asr_session,
     preload_asr_model,
+    resolve_streaming_model_source,
     transcribe_audio,
+)
+from model_manager import (
+    SENSEVOICE_SMALL_MODEL_ID,
+    SENSEVOICE_SMALL_REPO_ID,
+    find_cached_model_snapshot,
+    get_managed_model_cache_root,
 )
 from refiner import refine_text, reload_refiner_runtime_config
 from runtime_config import (
@@ -184,12 +193,52 @@ def schedule_startup_failure_exit(exit_code: int = 1) -> None:
     loop.call_later(0.1, os._exit, exit_code)
 
 
-def set_voice_service_state(app: FastAPI, status: str, detail: str = "") -> None:
-    app.state.voice_service_status = {"status": status, "detail": detail}
+def get_model_cache_dir() -> str:
+    return str(get_managed_model_cache_root(SENSEVOICE_SMALL_MODEL_ID))
 
 
-def get_voice_service_state(app: FastAPI) -> dict[str, str]:
-    return getattr(app.state, "voice_service_status", {"status": "starting", "detail": "ASR 模型预热中"})
+def is_sensevoice_cached() -> bool:
+    return find_cached_model_snapshot(SENSEVOICE_SMALL_MODEL_ID) is not None
+
+
+def create_voice_service_state(status: str, detail: str = "", started_at: float | None = None) -> dict[str, str | int | bool | None]:
+    now = time.time()
+    return {
+        "status": status,
+        "detail": detail,
+        "model_id": SENSEVOICE_SMALL_MODEL_ID,
+        "repo_id": SENSEVOICE_SMALL_REPO_ID,
+        "cache_dir": get_model_cache_dir(),
+        "cached": is_sensevoice_cached(),
+        "ready": status == "ready",
+        "started_at": started_at,
+        "updated_at": now,
+        "elapsed_ms": int((now - started_at) * 1000) if started_at else 0,
+    }
+
+
+def set_voice_service_state(app: FastAPI, status: str, detail: str = "", started_at: float | None = None) -> None:
+    current = getattr(app.state, "voice_service_status", None)
+    if started_at is None and isinstance(current, dict) and status in {"downloading", "loading"}:
+        current_started_at = current.get("started_at")
+        started_at = current_started_at if isinstance(current_started_at, float) else time.time()
+    app.state.voice_service_status = create_voice_service_state(status, detail, started_at)
+
+
+def get_voice_service_state(app: FastAPI) -> dict:
+    current = getattr(app.state, "voice_service_status", None)
+    if not isinstance(current, dict):
+        return create_voice_service_state("idle", "SenseVoiceSmall 模型尚未下载或加载")
+
+    started_at = current.get("started_at")
+    if isinstance(started_at, (float, int)):
+        current = {
+            **current,
+            "elapsed_ms": int((time.time() - float(started_at)) * 1000),
+            "cached": is_sensevoice_cached(),
+            "ready": current.get("status") == "ready",
+        }
+    return current
 
 
 def is_voice_service_ready(app: FastAPI) -> bool:
@@ -201,13 +250,45 @@ def require_voice_service_ready(request: Request) -> None:
         raise HTTPException(status_code=503, detail="语音后端尚未就绪")
 
 
-async def preload_voice_service(app: FastAPI, preload_model, exit_scheduler) -> None:
+def get_voice_model_status(app: FastAPI) -> dict:
+    return get_voice_service_state(app)
+
+
+def is_voice_model_task_running(app: FastAPI) -> bool:
+    task = getattr(app.state, "voice_preload_task", None)
+    return bool(task and not task.done())
+
+
+async def preload_voice_service(
+    app: FastAPI,
+    preload_model,
+    exit_scheduler,
+    exit_on_failure: bool = False,
+) -> None:
+    started_at = time.time()
     try:
+        source = resolve_streaming_model_source()
+        if source.kind == DOWNLOAD_SOURCE:
+            set_voice_service_state(app, "downloading", "正在下载 SenseVoiceSmall 模型", started_at)
+        else:
+            set_voice_service_state(app, "loading", "正在加载 SenseVoiceSmall 模型", started_at)
+
         await asyncio.to_thread(preload_model)
         set_voice_service_state(app, "ready", "ASR 模型已完成预热")
     except Exception as error:
         set_voice_service_state(app, "failed", str(error))
-        exit_scheduler(1)
+        if exit_on_failure:
+            exit_scheduler(1)
+
+
+def start_voice_model_task(app: FastAPI, preload_model, exit_scheduler, exit_on_failure: bool = False) -> None:
+    if is_voice_service_ready(app) or is_voice_model_task_running(app):
+        return
+
+    set_voice_service_state(app, "loading", "正在准备 SenseVoiceSmall 模型", time.time())
+    app.state.voice_preload_task = asyncio.create_task(
+        preload_voice_service(app, preload_model, exit_scheduler, exit_on_failure=exit_on_failure),
+    )
 
 
 def create_flow_success_payload(refined_text: str, raw_text: str = "") -> dict:
@@ -544,15 +625,28 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
         pass
 
 
-def create_app(preload_model=preload_asr_model, exit_scheduler=schedule_startup_failure_exit) -> FastAPI:
+def create_app(
+    preload_model=preload_asr_model,
+    exit_scheduler=schedule_startup_failure_exit,
+    auto_preload_model: bool = False,
+    exit_on_preload_failure: bool = False,
+) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        set_voice_service_state(app, "starting", "ASR 模型预热中")
-        preload_task = asyncio.create_task(preload_voice_service(app, preload_model, exit_scheduler))
+        set_voice_service_state(app, "idle", "SenseVoiceSmall 模型尚未下载或加载")
+        if auto_preload_model:
+            start_voice_model_task(
+                app,
+                preload_model,
+                exit_scheduler,
+                exit_on_failure=exit_on_preload_failure,
+            )
         try:
             yield
         finally:
-            preload_task.cancel()
+            preload_task = getattr(app.state, "voice_preload_task", None)
+            if preload_task:
+                preload_task.cancel()
 
     app = FastAPI(title="Typeless Local Server", lifespan=lifespan)
     app.add_middleware(
@@ -575,6 +669,15 @@ def create_app(preload_model=preload_asr_model, exit_scheduler=schedule_startup_
         if is_voice_service_ready(app):
             return payload
         return JSONResponse(status_code=503, content=payload)
+
+    @app.get("/model/status")
+    async def model_status():
+        return get_voice_model_status(app)
+
+    @app.post("/model/download")
+    async def model_download():
+        start_voice_model_task(app, preload_model, exit_scheduler, exit_on_failure=False)
+        return get_voice_model_status(app)
 
     @app.post("/config/reload")
     async def reload_config():

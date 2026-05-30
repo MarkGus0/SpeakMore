@@ -130,15 +130,19 @@ test('buildPromptDictionaryTerms 默认最多返回 24 条', () => {
   const entries = Array.from({ length: 30 }, (_, index) => ({
     phrase: `词${index}`,
     aliases: [`alias${index}`],
+    source: 'auto',
     status: 'active',
     hitCount: index,
+    createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: `2026-05-${String(index % 28 + 1).padStart(2, '0')}T00:00:00.000Z`,
+    lastLearnedAt: '2026-01-01T00:00:00.000Z',
   }));
 
   const terms = buildPromptDictionaryTerms(entries, { now: '2026-05-28T00:00:00.000Z' });
 
   assert.equal(DEFAULT_PROMPT_DICTIONARY_TERMS, 24);
   assert.equal(terms.length, 24);
+  assert.equal(terms[0].phrase, '词29');
 });
 
 test('buildPromptDictionaryTerms 把传入上限限制在 8 到 40 之间', () => {

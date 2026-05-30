@@ -1,14 +1,21 @@
 {
   "name": "typeless-local",
   "version": "1.0.0",
+  "main": "electron-app/main.js",
   "scripts": {
     "start": "electron ./electron-app",
     "start:electron": "electron ./electron-app",
     "server": "cd server && python main.py",
     "renderer:build": "cd electron-app/renderer && npm run build",
-    "verify:voice": "python -m pytest server\\test_runtime_config.py server\\test_service_readiness.py server\\test_asr_runtime.py server\\test_asr_config.py server\\test_voice_flow_contract.py server\\test_ws_protocol_contract.py -q"
+    "verify:voice": "python -m pytest server\\test_runtime_config.py server\\test_service_readiness.py server\\test_model_api.py server\\test_asr_runtime.py server\\test_asr_config.py server\\test_voice_flow_contract.py server\\test_ws_protocol_contract.py -q",
+    "verify:open-source": "powershell -ExecutionPolicy Bypass -File scripts/verify-open-source.ps1",
+    "build:backend:win": "powershell -ExecutionPolicy Bypass -File scripts/build-backend-win.ps1",
+    "build:helper:win": "powershell -ExecutionPolicy Bypass -File scripts/build-helper-win.ps1",
+    "build:portable:win": "powershell -ExecutionPolicy Bypass -File scripts/build-portable-win.ps1",
+    "verify:portable:win": "powershell -ExecutionPolicy Bypass -File scripts/verify-portable-win.ps1"
   },
   "devDependencies": {
-    "electron": "^33.4.11"
+    "electron": "^33.4.11",
+    "electron-builder": "^26.8.1"
   }
 }
