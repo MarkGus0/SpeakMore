@@ -9,6 +9,7 @@ const { registerKeyboardIpcHandlers } = require('./keyboard-ipc');
 const { registerPageIpcHandlers } = require('./page-ipc');
 const { registerPermissionIpcHandlers } = require('./permission-ipc');
 const { registerCompatIpcHandlers } = require('./compat-ipc');
+const { registerVoiceModelIpcHandlers } = require('./voice-model-ipc');
 
 const defaultRegisters = {
   registerAudioIpcHandlers,
@@ -22,6 +23,7 @@ const defaultRegisters = {
   registerPageIpcHandlers,
   registerPermissionIpcHandlers,
   registerSettingsIpcHandlers,
+  registerVoiceModelIpcHandlers,
 };
 
 function createMainIpcRegistry({
@@ -37,10 +39,13 @@ function createMainIpcRegistry({
   defaultLanguage,
   dictionaryRepository,
   emitDictionaryChanged = () => undefined,
+  ensureVoiceBackendStarted,
+  ensureVoiceServer,
   fs,
   getFloatingBar,
   getInteractiveCardPayload,
   getMainWindow,
+  getVoiceModelStatus,
   handleFloatingBarSetAlwaysOnTopForWindows,
   handleFloatingBarUpdatePositions,
   handleFloatingPanelEvent,
@@ -76,6 +81,7 @@ function createMainIpcRegistry({
   setInteractiveCardPayload,
   shell,
   spawnProcess,
+  startVoiceModelDownload,
   textObservationManager,
   upsertHistoryItem,
   writeHistoryItems,
@@ -122,9 +128,16 @@ function createMainIpcRegistry({
       ipcMain,
       callVoiceFlowBackend,
       checkVoiceServerReady,
+      ensureVoiceServer,
       muteBackgroundSessionsForRecording,
       restoreMutedBackgroundSessions,
       isMuted,
+    });
+    registers.registerVoiceModelIpcHandlers({
+      ipcMain,
+      ensureVoiceBackendStarted,
+      getVoiceModelStatus,
+      startVoiceModelDownload,
     });
     registers.registerFocusedContextIpcHandlers({
       ipcMain,

@@ -5,6 +5,7 @@ import Dashboard from '../pages/Dashboard'
 import History from '../pages/History'
 import Dictionary from '../pages/Dictionary'
 import Settings from '../pages/Settings'
+import Setup from '../pages/Setup'
 import { type Page } from '../navigation'
 import { I18nProvider } from '../i18n'
 import { defaultSettings, loadSettings, type InterfaceLanguage } from '../services/settingsStore'
@@ -13,7 +14,7 @@ import { useGlobalShortcutBridge } from './useGlobalShortcutBridge'
 import { useVoiceHistoryPersistence } from './useVoiceHistoryPersistence'
 
 export default function AppShell() {
-  const [page, setPage] = useState<Page>('home')
+  const [page, setPage] = useState<Page>('setup')
   const [language, setLanguage] = useState<InterfaceLanguage>(defaultSettings.preferredLanguage)
   useGlobalShortcutBridge()
   useVoiceHistoryPersistence()
@@ -39,6 +40,7 @@ export default function AppShell() {
   }, [])
 
   const content = useMemo(() => ({
+    setup: <Setup onOpenSettings={() => setPage('settings')} />,
     home: <Dashboard />,
     history: <History />,
     dictionary: <Dictionary />,

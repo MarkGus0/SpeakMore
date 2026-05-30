@@ -3,10 +3,12 @@ import HomeIcon from '@mui/icons-material/Home'
 import FormatListBulletedIcon from '@mui/icons-material/FormatListBulleted'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import SettingsIcon from '@mui/icons-material/Settings'
+import CloudDownloadIcon from '@mui/icons-material/CloudDownload'
 import { pages, type Page } from '../navigation'
 import { useI18n } from '../i18n'
 
 const iconByPage: Record<Page, React.ReactNode> = {
+  setup: <CloudDownloadIcon sx={{ fontSize: 18 }} />,
   home: <HomeIcon sx={{ fontSize: 18 }} />,
   history: <FormatListBulletedIcon sx={{ fontSize: 18 }} />,
   dictionary: <AutoAwesomeIcon sx={{ fontSize: 18 }} />,

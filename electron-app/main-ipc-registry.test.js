@@ -9,6 +9,7 @@ function createFakeRegisters(calls) {
     'registerSettingsIpcHandlers',
     'registerDictionaryIpcHandlers',
     'registerAudioIpcHandlers',
+    'registerVoiceModelIpcHandlers',
     'registerFocusedContextIpcHandlers',
     'registerFileIpcHandlers',
     'registerKeyboardIpcHandlers',
@@ -75,6 +76,10 @@ test('createMainIpcRegistry 只注册一次并按固定顺序分发依赖', () =
     emitDictionaryChanged,
     callVoiceFlowBackend: () => undefined,
     checkVoiceServerReady: () => undefined,
+    ensureVoiceBackendStarted: () => undefined,
+    ensureVoiceServer: () => undefined,
+    getVoiceModelStatus: () => undefined,
+    startVoiceModelDownload: () => undefined,
     muteBackgroundSessionsForRecording: () => undefined,
     restoreMutedBackgroundSessions: () => undefined,
     isMuted: () => false,
@@ -103,13 +108,14 @@ test('createMainIpcRegistry 只注册一次并按固定顺序分发依赖', () =
   registry.registerIpcHandlers();
   registry.registerIpcHandlers();
 
-  assert.equal(calls.length, 11);
+  assert.equal(calls.length, 12);
   assert.deepEqual(calls.map(([name]) => name), [
     'registerClipboardUserIpcHandlers',
     'registerHistoryIpcHandlers',
     'registerSettingsIpcHandlers',
     'registerDictionaryIpcHandlers',
     'registerAudioIpcHandlers',
+    'registerVoiceModelIpcHandlers',
     'registerFocusedContextIpcHandlers',
     'registerFileIpcHandlers',
     'registerKeyboardIpcHandlers',
@@ -122,8 +128,10 @@ test('createMainIpcRegistry 只注册一次并按固定顺序分发依赖', () =
   assert.equal(calls[0][1].getLocalUser(), localUser);
   assert.equal(calls[1][1].getDeviceId(), 'device-1');
   assert.equal(calls[3][1].emitDictionaryChanged, emitDictionaryChanged);
-  assert.equal(calls[7][1].randomUUID(), 'uuid-1');
-  assert.equal(calls[8][1].createMainWindow(), 'main-window');
-  assert.equal(calls[10][1].localStores, localCompatState.localStores);
-  assert.equal('getSystemInfo' in calls[10][1], false);
+  assert.equal(typeof calls[4][1].ensureVoiceServer, 'function');
+  assert.equal(typeof calls[5][1].startVoiceModelDownload, 'function');
+  assert.equal(calls[8][1].randomUUID(), 'uuid-1');
+  assert.equal(calls[9][1].createMainWindow(), 'main-window');
+  assert.equal(calls[11][1].localStores, localCompatState.localStores);
+  assert.equal('getSystemInfo' in calls[11][1], false);
 });

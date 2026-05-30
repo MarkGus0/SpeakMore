@@ -37,6 +37,42 @@ function createVoiceBackendClient({
     return probeVoiceServer(urls.readyUrl, { fetchImpl: checkReadyFetchImpl });
   }
 
+  async function getVoiceModelStatus() {
+    const response = await fetchImpl(urls.modelStatusUrl);
+    const payload = await readJsonSafely(response);
+    if (!response.ok || !payload || typeof payload !== 'object') {
+      return {
+        success: false,
+        status: 'unavailable',
+        detail: resolveVoiceServerProbeDetail(urls.modelStatusUrl, response.status, payload),
+        payload,
+      };
+    }
+    return {
+      success: true,
+      ...payload,
+      payload,
+    };
+  }
+
+  async function startVoiceModelDownload() {
+    const response = await fetchImpl(urls.modelDownloadUrl, { method: 'POST' });
+    const payload = await readJsonSafely(response);
+    if (!response.ok || !payload || typeof payload !== 'object') {
+      return {
+        success: false,
+        status: 'unavailable',
+        detail: resolveVoiceServerProbeDetail(urls.modelDownloadUrl, response.status, payload),
+        payload,
+      };
+    }
+    return {
+      success: true,
+      ...payload,
+      payload,
+    };
+  }
+
   async function callVoiceFlowBackend(payload = {}) {
     const readyState = await checkVoiceServerReady();
     if (!readyState.success) {
@@ -91,6 +127,8 @@ function createVoiceBackendClient({
   return {
     urls,
     checkVoiceServerReady,
+    getVoiceModelStatus,
+    startVoiceModelDownload,
     reloadVoiceServerConfig,
     callVoiceFlowBackend,
   };

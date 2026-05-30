@@ -1,0 +1,36 @@
+appId: cn.yui.speakmore
+productName: SpeakMore
+artifactName: SpeakMore-${version}-${os}-${arch}.${ext}
+directories:
+  output: release
+files:
+  - package.json
+  - electron-app/**/*
+  - shared/**/*
+  - "!**/*.log"
+  - "!**/*.err"
+  - "!**/*.pid"
+  - "!**/.env"
+  - "!**/.env.*"
+  - "!docs/**"
+  - "!server/**"
+  - "!release-artifacts/**"
+  - "!node_modules/.cache/**"
+extraResources:
+  - from: release-artifacts/backend
+    to: backend
+  - from: release-artifacts/helper
+    to: helper
+  - from: release-artifacts/assets
+    to: assets
+  - from: release-artifacts/ffmpeg
+    to: ffmpeg
+asar: true
+asarUnpack:
+  - electron-app/right-alt-listener.ps1
+  - electron-app/audio-session-control.ps1
+win:
+  target:
+    - target: zip
+      arch:
+        - x64

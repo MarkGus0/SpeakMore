@@ -14,6 +14,7 @@ const {
 const os = require('os');
 const crypto = require('crypto');
 const fs = require('fs');
+const path = require('path');
 const { spawn } = require('child_process');
 const { createRightAltListenerService } = require('./right-alt-listener-service');
 const {
@@ -52,6 +53,7 @@ const { createTextObserverService } = require('./text-observer-service');
 const { createLocalCompatState } = require('./local-compat-state');
 const { createMainIpcRegistry } = require('./main-ipc-registry');
 const { createAutoLearningDebugLogger } = require('./auto-learning-debug-logger');
+const { createVoiceBackendService } = require('./voice-backend-service');
 
 let quitAfterBackgroundAudioRestore = false;
 let appIsQuitting = false;
@@ -70,6 +72,8 @@ const SHORTCUT_DEBUG_ENABLED = ['1', 'true', 'yes', 'on'].includes(
 
 const appPaths = createAppPaths({
   baseDir: __dirname,
+  resourcesPath: process.resourcesPath,
+  isPackaged: app.isPackaged,
   getUserDataPath: () => app.getPath('userData'),
 });
 
@@ -123,6 +127,16 @@ const voiceBackendClient = createVoiceBackendClient({
   checkReadyFetchImpl: fetch,
   buildCurrentLlmRequestConfig: () => buildCurrentLlmRequestConfig(),
   normalizeLlmRequestConfig,
+});
+
+const voiceBackendService = createVoiceBackendService({
+  isPackaged: app.isPackaged,
+  backendExecutablePath: () => appPaths.backendExecutablePath(),
+  ffmpegBinDir: () => path.dirname(appPaths.ffmpegExecutablePath()),
+  spawnProcess: spawn,
+  probeReady: () => voiceBackendClient.checkVoiceServerReady(),
+  processEnv: process.env,
+  logger: console,
 });
 
 const audioSessionService = createAudioSessionService({
@@ -292,6 +306,22 @@ async function checkVoiceServerReady() {
   return voiceBackendClient.checkVoiceServerReady();
 }
 
+async function ensureVoiceServer() {
+  return voiceBackendService.ensureReady();
+}
+
+async function ensureVoiceBackendStarted() {
+  return voiceBackendService.start();
+}
+
+async function getVoiceModelStatus() {
+  return voiceBackendClient.getVoiceModelStatus();
+}
+
+async function startVoiceModelDownload() {
+  return voiceBackendClient.startVoiceModelDownload();
+}
+
 async function reloadVoiceServerConfig() {
   return voiceBackendClient.reloadVoiceServerConfig();
 }
@@ -336,10 +366,13 @@ const mainIpcRegistry = createMainIpcRegistry({
   defaultLanguage: DEFAULT_LANGUAGE,
   dictionaryRepository,
   emitDictionaryChanged,
+  ensureVoiceBackendStarted,
+  ensureVoiceServer,
   fs,
   getFloatingBar,
   getInteractiveCardPayload: () => pendingInteractiveCardPayload,
   getMainWindow,
+  getVoiceModelStatus,
   handleFloatingBarSetAlwaysOnTopForWindows: () => windowManager.handleFloatingBarSetAlwaysOnTopForWindows(),
   handleFloatingBarUpdatePositions: (payload) => windowManager.handleFloatingBarUpdatePositions(payload),
   handleFloatingPanelEvent: (payload) => windowManager.handleFloatingPanelEvent(payload),
@@ -376,6 +409,7 @@ const mainIpcRegistry = createMainIpcRegistry({
   },
   shell,
   spawnProcess: spawn,
+  startVoiceModelDownload,
   textObservationManager,
   upsertHistoryItem,
   writeHistoryItems,
@@ -434,6 +468,7 @@ app.whenReady().then(() => {
   });
 
   registerIpcHandlers();
+  if (app.isPackaged) void voiceBackendService.start();
   createTray();
   createMainWindow();
   createFloatingBar();
@@ -455,6 +490,7 @@ app.on('before-quit', (event) => {
   });
 });
 app.on('will-quit', () => {
+  voiceBackendService.stop();
   windowManager?.dispose();
   rightAltListenerService.dispose();
   stopRightAltListener();

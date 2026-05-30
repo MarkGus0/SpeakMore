@@ -22,7 +22,7 @@ class ServiceReadinessTest(unittest.TestCase):
         def slow_preload():
             release.wait(1)
 
-        app = main.create_app(preload_model=slow_preload, exit_scheduler=lambda _code: None)
+        app = main.create_app(preload_model=slow_preload, exit_scheduler=lambda _code: None, auto_preload_model=True)
 
         with TestClient(app) as client:
             health = client.get("/health")
@@ -30,9 +30,9 @@ class ServiceReadinessTest(unittest.TestCase):
 
         release.set()
         self.assertEqual(health.status_code, 200)
-        self.assertEqual(health.json()["status"], "starting")
+        self.assertIn(health.json()["status"], {"loading", "downloading"})
         self.assertEqual(ready.status_code, 503)
-        self.assertEqual(ready.json()["status"], "starting")
+        self.assertIn(ready.json()["status"], {"loading", "downloading"})
 
     def test_preload_failure_marks_service_failed_and_requests_exit(self):
         self.assertTrue(hasattr(main, "create_app"), "main.create_app 尚未实现")
@@ -44,7 +44,12 @@ class ServiceReadinessTest(unittest.TestCase):
         def broken_preload():
             raise RuntimeError("boom")
 
-        app = main.create_app(preload_model=broken_preload, exit_scheduler=exit_codes.append)
+        app = main.create_app(
+            preload_model=broken_preload,
+            exit_scheduler=exit_codes.append,
+            auto_preload_model=True,
+            exit_on_preload_failure=True,
+        )
 
         with TestClient(app) as client:
             for _ in range(20):
@@ -64,6 +69,33 @@ class ServiceReadinessTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "ok")
         reload_refiner_runtime_config.assert_called_once_with()
+
+    def test_model_status_is_idle_until_user_starts_download(self):
+        app = main.create_app(preload_model=lambda: None, exit_scheduler=lambda _code: None)
+
+        with TestClient(app) as client:
+            status = client.get("/model/status")
+            ready = client.get("/ready")
+
+        self.assertEqual(status.status_code, 200)
+        self.assertEqual(status.json()["status"], "idle")
+        self.assertEqual(status.json()["model_id"], "sensevoice-small")
+        self.assertEqual(ready.status_code, 503)
+
+    def test_model_download_endpoint_starts_preload_task(self):
+        app = main.create_app(preload_model=lambda: None, exit_scheduler=lambda _code: None)
+
+        with TestClient(app) as client:
+            started = client.post("/model/download")
+            for _ in range(20):
+                ready = client.get("/ready")
+                if ready.status_code == 200:
+                    break
+                time.sleep(0.01)
+
+        self.assertEqual(started.status_code, 200)
+        self.assertEqual(ready.status_code, 200)
+        self.assertEqual(ready.json()["status"], "ready")
 
 
 if __name__ == "__main__":

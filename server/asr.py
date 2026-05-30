@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 from model_manager import (
-    PARAFORMER_STREAMING_MODEL_ID,
     SENSEVOICE_SMALL_MODEL_ID,
     find_cached_model_snapshot,
     get_active_asr_model_id,
@@ -29,7 +28,6 @@ DIR_SOURCE = "dir"
 MANAGED_CACHE_SOURCE = "managed-cache"
 HF_CACHE_SOURCE = "hf-cache"
 DOWNLOAD_SOURCE = "download"
-DEFAULT_FUNASR_REPO_DIR = Path("D:/CodeWorkSpace/FunASR")
 
 
 @dataclass(frozen=True)
@@ -37,17 +35,14 @@ class StreamingAsrModelSource:
     kind: str
     model_ref: str
     download_root: str | None = None
-    model_id: str = PARAFORMER_STREAMING_MODEL_ID
-    repo_id: str = "funasr/paraformer-zh-streaming"
-
-
-ParaformerStreamingModelSource = StreamingAsrModelSource
+    model_id: str = SENSEVOICE_SMALL_MODEL_ID
+    repo_id: str = "FunAudioLLM/SenseVoiceSmall"
 
 
 @dataclass
 class StreamingAsrRuntime:
     model: Any
-    model_id: str = PARAFORMER_STREAMING_MODEL_ID
+    model_id: str = SENSEVOICE_SMALL_MODEL_ID
     chunk_size: list[int] | None = None
     encoder_chunk_look_back: int | None = None
     decoder_chunk_look_back: int | None = None
@@ -58,9 +53,6 @@ class StreamingAsrRuntime:
     generate_options: dict[str, Any] = field(default_factory=dict)
     postprocess: str | None = None
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
-
-
-ParaformerStreamingRuntime = StreamingAsrRuntime
 
 
 @dataclass(frozen=True)
@@ -96,10 +88,6 @@ def resolve_funasr_device() -> str:
 
 def is_valid_model_dir(path: Path, required_files: tuple[str, ...]) -> bool:
     return path.is_dir() and all((path / name).is_file() for name in required_files)
-
-
-def is_valid_paraformer_model_dir(path: Path) -> bool:
-    return is_valid_streaming_model_dir(path, PARAFORMER_STREAMING_MODEL_ID)
 
 
 def is_valid_streaming_model_dir(path: Path, model_id: str) -> bool:
@@ -163,27 +151,13 @@ def get_candidate_streaming_model_sources(
     return sources
 
 
-def get_candidate_paraformer_streaming_model_sources(
-    model_id: str | None = None,
-) -> list[StreamingAsrModelSource]:
-    selected_model_id = PARAFORMER_STREAMING_MODEL_ID if model_id is None else model_id
-    if selected_model_id != PARAFORMER_STREAMING_MODEL_ID:
-        raise ValueError(f"未知 Paraformer streaming 模型: {selected_model_id}")
-    return get_candidate_streaming_model_sources(selected_model_id)
-
-
 def resolve_streaming_model_source(model_id: str | None = None) -> StreamingAsrModelSource:
     return get_candidate_streaming_model_sources(model_id)[0]
-
-
-def resolve_paraformer_streaming_model_source() -> StreamingAsrModelSource:
-    return resolve_streaming_model_source(PARAFORMER_STREAMING_MODEL_ID)
 
 
 def resolve_funasr_repo_dir() -> Path | None:
     configured_repo = os.environ.get("FUNASR_REPO_DIR", "").strip()
     candidates = [Path(configured_repo)] if configured_repo else []
-    candidates.append(DEFAULT_FUNASR_REPO_DIR)
 
     for candidate in candidates:
         if (candidate / "funasr").is_dir():
@@ -203,38 +177,34 @@ def get_auto_model_kwargs(model_id: str) -> dict[str, Any]:
     return {}
 
 
+def resolve_model_ref_for_build(source: StreamingAsrModelSource) -> str:
+    if source.kind != DOWNLOAD_SOURCE or not source.download_root:
+        return source.model_ref
+
+    from huggingface_hub import snapshot_download
+
+    return snapshot_download(source.model_ref, cache_dir=source.download_root)
+
+
 def create_streaming_runtime(model: Any, model_id: str) -> StreamingAsrRuntime:
-    if model_id == PARAFORMER_STREAMING_MODEL_ID:
-        return StreamingAsrRuntime(
-            model=model,
-            model_id=model_id,
-            chunk_size=[0, 10, 5],
-            encoder_chunk_look_back=4,
-            decoder_chunk_look_back=1,
-            chunk_ms=600,
-            accumulate_audio=False,
-            pass_cache=True,
-            pass_is_final=True,
-        )
+    if model_id != SENSEVOICE_SMALL_MODEL_ID:
+        raise ValueError(f"未知 streaming ASR 模型: {model_id}")
 
-    if model_id == SENSEVOICE_SMALL_MODEL_ID:
-        return StreamingAsrRuntime(
-            model=model,
-            model_id=model_id,
-            chunk_ms=1200,
-            accumulate_audio=True,
-            pass_cache=True,
-            pass_is_final=False,
-            generate_options={
-                "language": "auto",
-                "use_itn": True,
-                "ban_emo_unk": False,
-                "batch_size_s": 60,
-            },
-            postprocess="rich_transcription",
-        )
-
-    raise ValueError(f"未知 streaming ASR 模型: {model_id}")
+    return StreamingAsrRuntime(
+        model=model,
+        model_id=model_id,
+        chunk_ms=1200,
+        accumulate_audio=True,
+        pass_cache=True,
+        pass_is_final=False,
+        generate_options={
+            "language": "auto",
+            "use_itn": True,
+            "ban_emo_unk": False,
+            "batch_size_s": 60,
+        },
+        postprocess="rich_transcription",
+    )
 
 
 def build_streaming_asr_model(source: StreamingAsrModelSource) -> StreamingAsrRuntime:
@@ -247,9 +217,10 @@ def build_streaming_asr_model(source: StreamingAsrModelSource) -> StreamingAsrRu
     from funasr import AutoModel
 
     device = resolve_funasr_device()
-    print(f"[ASR] 从 {source.kind} 加载 {source.model_id}: {source.model_ref}，设备: {device}")
+    model_ref = resolve_model_ref_for_build(source)
+    print(f"[ASR] 从 {source.kind} 加载 {source.model_id}: {model_ref}，设备: {device}")
     model = AutoModel(
-        model=source.model_ref,
+        model=model_ref,
         hub="hf",
         device=device,
         disable_update=True,
@@ -258,12 +229,8 @@ def build_streaming_asr_model(source: StreamingAsrModelSource) -> StreamingAsrRu
     return create_streaming_runtime(model, source.model_id)
 
 
-def build_paraformer_streaming_model(source: ParaformerStreamingModelSource) -> ParaformerStreamingRuntime:
-    return build_streaming_asr_model(source)
-
-
-def _load_streaming_asr_model(model_id: str | None = None):
-    selected_model_id = get_active_asr_model_id() if model_id is None else model_id
+def _load_streaming_asr_model():
+    selected_model_id = get_active_asr_model_id()
     errors: list[str] = []
     for source in get_candidate_streaming_model_sources(selected_model_id):
         try:
@@ -281,24 +248,6 @@ def _load_streaming_asr_model(model_id: str | None = None):
     raise RuntimeError(f"{selected_model_id} 模型加载失败: " + " | ".join(errors))
 
 
-def _load_paraformer_streaming_model(model_id: str | None = None):
-    errors: list[str] = []
-    for source in get_candidate_paraformer_streaming_model_sources(model_id):
-        try:
-            model = build_paraformer_streaming_model(source)
-            print(f"[ASR] Paraformer streaming 模型加载完成，来源: {source.kind}")
-            return model
-        except Exception as error:
-            if source.kind == DOWNLOAD_SOURCE:
-                errors.append(
-                    f"{source.kind}: {source.model_ref} -> 下载或加载失败，目标目录: {source.download_root}: {error}"
-                )
-            else:
-                errors.append(f"{source.kind}: {source.model_ref} -> {error}")
-
-    raise RuntimeError("Paraformer streaming 模型加载失败: " + " | ".join(errors))
-
-
 def preload_asr_model():
     global _model
     if _model is not None:
@@ -308,11 +257,7 @@ def preload_asr_model():
         if _model is not None:
             return _model
 
-        selected_model_id = get_active_asr_model_id()
-        if selected_model_id == PARAFORMER_STREAMING_MODEL_ID:
-            _model = _load_paraformer_streaming_model()
-        else:
-            _model = _load_streaming_asr_model(selected_model_id)
+        _model = _load_streaming_asr_model()
         return _model
 
 
@@ -403,15 +348,6 @@ def generate_streaming_asr_chunk(
     with runtime.lock:
         result = runtime.model.generate(**kwargs)
     return postprocess_asr_text(extract_funasr_text(result), runtime.postprocess)
-
-
-def generate_paraformer_streaming_chunk(
-    runtime: ParaformerStreamingRuntime,
-    pcm_bytes: bytes,
-    cache: dict[str, Any],
-    is_final: bool,
-) -> str:
-    return generate_streaming_asr_chunk(runtime, pcm_bytes, cache, is_final)
 
 
 class StreamingAsrSession:

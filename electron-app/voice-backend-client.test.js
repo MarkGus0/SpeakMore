@@ -21,6 +21,8 @@ test('createVoiceBackendUrls 统一生成后端接口 URL', () => {
 
   assert.equal(urls.healthUrl, 'http://localhost:9000/health');
   assert.equal(urls.readyUrl, 'http://localhost:9000/ready');
+  assert.equal(urls.modelStatusUrl, 'http://localhost:9000/model/status');
+  assert.equal(urls.modelDownloadUrl, 'http://localhost:9000/model/download');
   assert.equal(urls.voiceFlowUrl, 'http://localhost:9000/ai/voice_flow');
   assert.equal(urls.configReloadUrl, 'http://localhost:9000/config/reload');
   assert.equal('modelsUrl' in urls, false);
@@ -84,7 +86,7 @@ test('buildVoiceFlowFormData 组装音频文件和参数', () => {
   assert.equal(formData.get('device_name'), '');
 });
 
-test('createVoiceBackendClient 不再暴露模型接口', async () => {
+test('createVoiceBackendClient 不再暴露旧模型管理接口', async () => {
   const client = createVoiceBackendClient({
     fetchImpl: async () => {
       throw new Error('network down');
@@ -94,6 +96,35 @@ test('createVoiceBackendClient 不再暴露模型接口', async () => {
   });
 
   assert.equal('callModelBackend' in client, false);
+});
+
+test('createVoiceBackendClient 查询并触发单模型初始化接口', async () => {
+  const calls = [];
+  const client = createVoiceBackendClient({
+    fetchImpl: async (url, init) => {
+      calls.push({ url, init });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          status: init?.method === 'POST' ? 'downloading' : 'idle',
+          detail: '模型状态',
+          model_id: 'sensevoice-small',
+        }),
+      };
+    },
+    buildCurrentLlmRequestConfig: () => ({ provider_id: 'deepseek', base_url: 'https://api.deepseek.com/v1', api_key: '', model: 'deepseek-chat', auth_type: 'bearer' }),
+    normalizeLlmRequestConfig: (value) => value,
+  });
+
+  const status = await client.getVoiceModelStatus();
+  const download = await client.startVoiceModelDownload();
+
+  assert.equal(status.status, 'idle');
+  assert.equal(download.status, 'downloading');
+  assert.equal(calls[0].url, 'http://127.0.0.1:8000/model/status');
+  assert.equal(calls[1].url, 'http://127.0.0.1:8000/model/download');
+  assert.equal(calls[1].init.method, 'POST');
 });
 
 test('createVoiceBackendClient 的语音接口在后端未就绪时返回 backend_not_ready', async () => {

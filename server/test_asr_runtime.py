@@ -1,4 +1,8 @@
 import asyncio
+import os
+import sys
+import tempfile
+import types
 import unittest
 from unittest.mock import patch
 
@@ -9,33 +13,47 @@ class AsrRuntimeTest(unittest.TestCase):
     def setUp(self):
         asr._model = None
 
-    def test_preload_asr_model_uses_paraformer_loader_when_paraformer_is_active(self):
-        fake_model = object()
-        old_model = object()
-
-        with patch("model_manager.ACTIVE_ASR_MODEL_ID", asr.PARAFORMER_STREAMING_MODEL_ID), patch(
-            "asr._load_asr_model",
-            return_value=old_model,
-            create=True,
-        ), patch(
-            "asr._load_paraformer_streaming_model",
-            return_value=fake_model,
-        ) as load_paraformer:
-            first = asr.preload_asr_model()
-            second = asr.preload_asr_model()
-
-        self.assertIs(first, fake_model)
-        self.assertIs(second, fake_model)
-        load_paraformer.assert_called_once()
-
-    def test_preload_asr_model_uses_active_sensevoice_model_id_by_default(self):
+    def test_preload_asr_model_uses_sensevoice_model_id_by_default(self):
         fake_model = object()
 
         with patch("asr._load_streaming_asr_model", return_value=fake_model) as load_streaming:
             result = asr.preload_asr_model()
 
         self.assertIs(result, fake_model)
-        load_streaming.assert_called_once_with(asr.SENSEVOICE_SMALL_MODEL_ID)
+        load_streaming.assert_called_once_with()
+
+    def test_download_source_downloads_to_managed_cache_during_model_build(self):
+        observed = {}
+
+        class FakeAutoModel:
+            def __init__(self, **kwargs):
+                observed["kwargs"] = kwargs
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            snapshot_dir = os.path.join(temp_dir, "models--FunAudioLLM--SenseVoiceSmall", "snapshots", "abc")
+            source = asr.StreamingAsrModelSource(
+                kind=asr.DOWNLOAD_SOURCE,
+                model_ref="FunAudioLLM/SenseVoiceSmall",
+                download_root=temp_dir,
+            )
+            fake_funasr = types.SimpleNamespace(AutoModel=FakeAutoModel)
+            download_calls = []
+
+            def fake_snapshot_download(model, cache_dir=None):
+                download_calls.append({"model": model, "cache_dir": cache_dir})
+                return snapshot_dir
+
+            fake_huggingface_hub = types.SimpleNamespace(snapshot_download=fake_snapshot_download)
+
+            with patch.dict(sys.modules, {"funasr": fake_funasr, "huggingface_hub": fake_huggingface_hub}), patch(
+                "asr.resolve_funasr_device",
+                return_value="cpu",
+            ):
+                asr.build_streaming_asr_model(source)
+
+            self.assertEqual(download_calls, [{"model": "FunAudioLLM/SenseVoiceSmall", "cache_dir": temp_dir}])
+            self.assertEqual(observed["kwargs"]["model"], snapshot_dir)
+            self.assertEqual(observed["kwargs"]["hub"], "hf")
 
     def test_sensevoice_runtime_generates_from_accumulated_audio(self):
         calls = []
@@ -65,7 +83,7 @@ class AsrRuntimeTest(unittest.TestCase):
         self.assertEqual([len(call["input"]) for call in calls], [2, 4, 4])
 
     def test_transcribe_audio_uses_pcm16_streaming_session(self):
-        fake_runtime = asr.ParaformerStreamingRuntime(
+        fake_runtime = asr.StreamingAsrRuntime(
             model=object(),
             chunk_size=[0, 10, 5],
             encoder_chunk_look_back=4,

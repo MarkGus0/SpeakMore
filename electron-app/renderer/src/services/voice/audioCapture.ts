@@ -79,7 +79,7 @@ export function sendPcm16Chunk(socket: WebSocket, samples: Float32Array, inputSa
 }
 
 export function createPcm16AudioSender(stream: MediaStream, socket: WebSocket): AudioSender {
-  // 这个 sender 直接推 PCM16 chunk，专门服务 paraformer 流式模型。
+  // 这个 sender 直接推 PCM16 chunk，避免浏览器容器格式影响后端 ASR 输入。
   const audioContext = new AudioContext()
   const source = audioContext.createMediaStreamSource(stream)
   // ScriptProcessor 虽旧但这里足够小范围使用，用来直接拿到浏览器音频采样。

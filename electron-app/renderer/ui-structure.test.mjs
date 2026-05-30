@@ -44,6 +44,7 @@ const readMainProcessSurface = () => readProjectFiles([
   '../backend-http-utils.js',
   '../voice-backend-urls.js',
   '../voice-backend-client.js',
+  '../voice-model-ipc.js',
   '../voice-config-client.js',
   '../voice-flow-form-data.js',
   '../window-manager.js',
@@ -93,6 +94,8 @@ test('Electron 悬浮条加载本地 renderer 构建产物', async () => {
   assert.match(floatingBar, /id=["']hint-text["']/);
   assert.match(floatingBar, /class\s+ParticleSphere/);
   assert.match(floatingBar, /particleCount\s*=\s*800/);
+  assert.match(floatingBar, /LONG_PROCESSING_TEXT\s*=\s*['"]正在努力处理中\.\.\.['"]/);
+  assert.match(floatingBar, /LONG_PROCESSING_DELAY_MS\s*=\s*3000/);
   assert.match(floatingBar, /setRecording\(isRecording/);
   assert.match(floatingBar, /setProcessing\(isProcessing/);
   assert.match(floatingBar, /#particle-sphere-container\s*\{[^}]*width:\s*120px;[^}]*height:\s*120px/);
@@ -349,11 +352,12 @@ test('主进程注册真实 bundle 首屏所需的 IPC shim', async () => {
   }
 });
 
-test('模型管理能力已从主进程和 renderer 中删除', async () => {
+test('旧模型管理能力已删除，只保留单模型初始化入口', async () => {
   const main = await readMainProcessSurface();
   const navigation = await readProjectFile('src/navigation.ts');
   const sidebar = await readProjectFile('src/components/Sidebar.tsx');
   const appShell = await readProjectFile('src/components/AppShell.tsx');
+  const setupPage = await readProjectFile('src/pages/Setup.tsx');
 
   await assert.rejects(
     () => readProjectFile('src/pages/Models.tsx'),
@@ -373,13 +377,15 @@ test('模型管理能力已从主进程和 renderer 中删除', async () => {
   );
 
   assert.doesNotMatch(navigation, /'models'/);
-  assert.doesNotMatch(navigation, /模型/);
   assert.doesNotMatch(sidebar, /MemoryIcon|StorageIcon|HubIcon/);
   assert.doesNotMatch(appShell, /Models/);
   assert.doesNotMatch(main, /ipcMain\.handle\(['"]model:/);
   assert.doesNotMatch(main, /modelsUrl:/);
   assert.doesNotMatch(main, /callModelBackend/);
   assert.doesNotMatch(main, /snapshot_download/);
+  assert.match(navigation, /'setup'/);
+  assert.match(appShell, /<Setup/);
+  assert.match(setupPage, /voice-model:get-status|voice-model:start-download|getVoiceModelStatus|startVoiceModelDownload/);
 });
 
 test('项目根启动脚本指向本地 Electron 壳而不是逆向资料目录', async () => {
@@ -399,11 +405,12 @@ test('本地壳默认使用简体中文并允许英文界面语言', async () =>
   assert.doesNotMatch(main, /language\s*\|\|\s*['"]en['"]/);
 });
 
-test('主窗口四页和侧边栏通过轻量 i18n 切换中英文', async () => {
+test('主窗口页面和侧边栏通过轻量 i18n 切换中英文', async () => {
   const i18n = await readProjectFile('src/i18n.tsx');
   const appShell = await readProjectFile('src/components/AppShell.tsx');
   const sidebar = await readProjectFile('src/components/Sidebar.tsx');
   const pages = await readProjectFiles([
+    'src/pages/Setup.tsx',
     'src/pages/Dashboard.tsx',
     'src/pages/History.tsx',
     'src/pages/Dictionary.tsx',
@@ -414,6 +421,7 @@ test('主窗口四页和侧边栏通过轻量 i18n 切换中英文', async () =>
   assert.match(i18n, /en-US/);
   assert.match(i18n, /export\s+function\s+I18nProvider/);
   assert.match(i18n, /export\s+function\s+useI18n/);
+  assert.match(i18n, /Setup/);
   assert.match(i18n, /Dashboard/);
   assert.match(i18n, /History/);
   assert.match(i18n, /Dictionary/);
@@ -566,7 +574,7 @@ test('recorder 在录音期间分析真实麦克风音量并同步 inputLevel', 
   assert.match(audioLevelMonitor, /audioContext\.close/);
 });
 
-test('WebSocket 录音入口会等待主进程确认语音后端 ready', async () => {
+test('WebSocket 录音入口会等待主进程确保语音后端 ready', async () => {
   const main = await readMainProcessSurface();
   const recorder = await readProjectFile('src/services/recorder.ts');
   const recordingStartup = await readProjectFile('src/services/voice/recordingStartup.ts');
@@ -575,8 +583,9 @@ test('WebSocket 录音入口会等待主进程确认语音后端 ready', async (
   const recorderSurface = `${recorder}\n${recordingStartup}\n${voiceSocket}`;
 
   assert.match(main, /ipcMain\.handle\(['"]audio:check-voice-server-ready['"]/);
-  assert.match(main, /audio:ensure-voice-server['"][\s\S]*checkVoiceServerReady/);
-  assert.match(recordingStartup, /ipcClient\.invoke\(['"]audio:check-voice-server-ready['"]/);
+  assert.match(main, /ensureVoiceServer\s*=\s*checkVoiceServerReady/);
+  assert.match(main, /audio:ensure-voice-server['"][\s\S]*ensureVoiceServer/);
+  assert.match(recordingStartup, /ipcClient\.invoke\(['"]audio:ensure-voice-server['"]/);
   assert.match(voiceSocket, /from ['"]\.\/voiceServer['"]/);
   assert.match(voiceServer, /VOICE_SERVER_HTTP_BASE_URL/);
   assert.match(voiceServer, /VOICE_SERVER_WS_URL/);
@@ -596,16 +605,17 @@ test('renderer 不再保留旧文字请求链路', async () => {
   assert.doesNotMatch(voiceServer, /\/ai\/text_flow/);
 });
 
-test('Electron 不再负责拉起或关闭语音后端进程', async () => {
+test('Electron 只通过打包后端服务管理语音后端进程', async () => {
   const main = await readMainProcessSurface();
 
   assert.doesNotMatch(main, /voiceServerProcess/);
   assert.doesNotMatch(main, /voiceServerStartPromise/);
-  assert.doesNotMatch(main, /function ensureVoiceServer/);
   assert.doesNotMatch(main, /function stopVoiceServer/);
   assert.doesNotMatch(main, /spawn\(process\.env\.PYTHON \|\| ['"]python['"], \['main\.py'\]/);
-  assert.doesNotMatch(main, /ensureVoiceServer\(\)\.catch/);
   assert.doesNotMatch(main, /stopVoiceServer\(\)/);
+  assert.match(main, /createVoiceBackendService/);
+  assert.match(main, /backendExecutablePath:\s*\(\)\s*=>\s*appPaths\.backendExecutablePath\(\)/);
+  assert.match(main, /voiceBackendService\.stop\(\)/);
 });
 
 test('前端按键事件按真实快捷键模式启动和停止语音流', async () => {
@@ -979,11 +989,12 @@ test('P1 词典页面接入导航和主进程 IPC', async () => {
   assert.doesNotMatch(dictionaryStore, /localStorage/);
 });
 
-test('P1 模型管理能力已从主进程和 renderer 中删除', async () => {
+test('P1 旧模型管理能力已删除，只保留单模型初始化入口', async () => {
   const main = await readMainProcessSurface();
   const navigation = await readProjectFile('src/navigation.ts');
   const sidebar = await readProjectFile('src/components/Sidebar.tsx');
   const appShell = await readProjectFile('src/components/AppShell.tsx');
+  const setupPage = await readProjectFile('src/pages/Setup.tsx');
 
   await assert.rejects(() => readProjectFile('src/pages/Models.tsx'), /ENOENT/);
   await assert.rejects(() => readProjectFile('src/pages/models/useModelsPageState.ts'), /ENOENT/);
@@ -991,13 +1002,15 @@ test('P1 模型管理能力已从主进程和 renderer 中删除', async () => {
   await assert.rejects(() => readProjectFile('src/services/modelStore.ts'), /ENOENT/);
 
   assert.doesNotMatch(navigation, /'models'/);
-  assert.doesNotMatch(navigation, /模型/);
   assert.doesNotMatch(sidebar, /MemoryIcon|StorageIcon|HubIcon/);
   assert.doesNotMatch(appShell, /Models/);
   assert.doesNotMatch(main, /ipcMain\.handle\(['"]model:/);
   assert.doesNotMatch(main, /modelsUrl:/);
   assert.doesNotMatch(main, /callModelBackend/);
   assert.doesNotMatch(main, /snapshot_download/);
+  assert.match(navigation, /'setup'/);
+  assert.match(appShell, /<Setup/);
+  assert.match(setupPage, /voice-model:get-status|voice-model:start-download|getVoiceModelStatus|startVoiceModelDownload/);
 });
 
 test('P1 设置页与设置 store 统一走主进程 JSON 数据源', async () => {
@@ -1240,6 +1253,7 @@ test('首页壳层和用户可见文案符合 SpeakMore 中文化要求', async 
 test('主页面一级标题复用设置页的左上基准和字号', async () => {
   const uiTokens = await readProjectFile('src/uiTokens.ts');
   const pageFiles = [
+    'src/pages/Setup.tsx',
     'src/pages/Dashboard.tsx',
     'src/pages/History.tsx',
     'src/pages/Dictionary.tsx',
