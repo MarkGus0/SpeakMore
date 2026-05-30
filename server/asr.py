@@ -177,6 +177,15 @@ def get_auto_model_kwargs(model_id: str) -> dict[str, Any]:
     return {}
 
 
+def resolve_model_ref_for_build(source: StreamingAsrModelSource) -> str:
+    if source.kind != DOWNLOAD_SOURCE or not source.download_root:
+        return source.model_ref
+
+    from huggingface_hub import snapshot_download
+
+    return snapshot_download(source.model_ref, cache_dir=source.download_root)
+
+
 def create_streaming_runtime(model: Any, model_id: str) -> StreamingAsrRuntime:
     if model_id != SENSEVOICE_SMALL_MODEL_ID:
         raise ValueError(f"未知 streaming ASR 模型: {model_id}")
@@ -208,9 +217,10 @@ def build_streaming_asr_model(source: StreamingAsrModelSource) -> StreamingAsrRu
     from funasr import AutoModel
 
     device = resolve_funasr_device()
-    print(f"[ASR] 从 {source.kind} 加载 {source.model_id}: {source.model_ref}，设备: {device}")
+    model_ref = resolve_model_ref_for_build(source)
+    print(f"[ASR] 从 {source.kind} 加载 {source.model_id}: {model_ref}，设备: {device}")
     model = AutoModel(
-        model=source.model_ref,
+        model=model_ref,
         hub="hf",
         device=device,
         disable_update=True,
