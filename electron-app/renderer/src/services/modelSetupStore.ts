@@ -23,6 +23,9 @@ export type VoiceModelStatus = {
   cached?: boolean
   ready?: boolean
   elapsed_ms?: number
+  downloaded_bytes?: number
+  total_bytes?: number
+  progress_percent?: number | null
 }
 
 export type DirectorySelectionResult = {
@@ -36,6 +39,15 @@ const unavailableStatus: VoiceModelStatus = {
   status: 'unavailable',
   detail: '无法连接语音后端',
   ready: false,
+}
+
+function normalizeNumber(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
+function normalizePercent(value: unknown) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null
+  return Math.max(0, Math.min(100, Math.round(value)))
 }
 
 function normalizeModelStatus(value: unknown): VoiceModelStatus {
@@ -56,6 +68,9 @@ function normalizeModelStatus(value: unknown): VoiceModelStatus {
     cached: Boolean(status.cached),
     ready: Boolean(status.ready || normalizedStatus === 'ready'),
     elapsed_ms: typeof status.elapsed_ms === 'number' ? status.elapsed_ms : 0,
+    downloaded_bytes: normalizeNumber(status.downloaded_bytes),
+    total_bytes: normalizeNumber(status.total_bytes),
+    progress_percent: normalizePercent(status.progress_percent),
   }
 }
 export async function getVoiceModelStatus(cacheDir = ''): Promise<VoiceModelStatus> {
