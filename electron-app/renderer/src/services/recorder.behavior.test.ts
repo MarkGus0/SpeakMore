@@ -69,6 +69,8 @@ function createTestEnvironment(options: {
   const originalAudioContext = globalThis.AudioContext
   const originalSetInterval = globalThis.setInterval
   const originalClearInterval = globalThis.clearInterval
+  const originalSetTimeout = globalThis.setTimeout
+  const originalClearTimeout = globalThis.clearTimeout
   const originalFetch = globalThis.fetch
 
   const sentPayloads: Array<string | ArrayBufferLike | Blob | ArrayBufferView> = []
@@ -77,12 +79,15 @@ function createTestEnvironment(options: {
   const fetchCalls: Array<{ url: string; init?: RequestInit }> = []
   const sockets: FakeWebSocket[] = []
   const intervalCallbacks = new Map<number, () => void>()
+  const timeoutCallbacks = new Map<number, { callback: () => void; timeoutMs: number }>()
   const audioProcessNodes: FakeScriptProcessorNode[] = []
   const clearedIntervals: number[] = []
+  const clearedTimeouts: number[] = []
   let restoreCalls = 0
   let trackStops = 0
   let userMediaCalls = 0
   let nextIntervalId = 1
+  let nextTimeoutId = 1
   let analyserSample = 0.04
 
   const audioTrack = {
@@ -369,6 +374,27 @@ function createTestEnvironment(options: {
       intervalCallbacks.delete(id)
     },
   })
+  Object.defineProperty(globalThis, 'setTimeout', {
+    configurable: true,
+    value: (callback: () => void, timeoutMs = 0) => {
+      if (timeoutMs <= 0) return originalSetTimeout(callback, timeoutMs)
+      const id = nextTimeoutId
+      nextTimeoutId += 1
+      timeoutCallbacks.set(id, { callback, timeoutMs })
+      return id
+    },
+  })
+  Object.defineProperty(globalThis, 'clearTimeout', {
+    configurable: true,
+    value: (id: number | ReturnType<typeof setTimeout>) => {
+      if (typeof id !== 'number') {
+        originalClearTimeout(id)
+        return
+      }
+      clearedTimeouts.push(id)
+      timeoutCallbacks.delete(id)
+    },
+  })
   Object.defineProperty(globalThis, 'fetch', {
     configurable: true,
     value: async (url: string, init?: RequestInit) => {
@@ -391,6 +417,7 @@ function createTestEnvironment(options: {
     getTrackStops: () => trackStops,
     getUserMediaCalls: () => userMediaCalls,
     getClearedIntervals: () => clearedIntervals,
+    getClearedTimeouts: () => clearedTimeouts,
     emitAudioProcess(samples: Float32Array) {
       const node = audioProcessNodes[audioProcessNodes.length - 1]
       assert.ok(node, '没有创建 PCM 采样节点')
@@ -400,6 +427,14 @@ function createTestEnvironment(options: {
       for (let index = 0; index < count; index += 1) {
         Array.from(intervalCallbacks.values()).forEach((callback) => callback())
       }
+    },
+    runTimeoutByDelay(timeoutMs: number) {
+      const matchedTimers = Array.from(timeoutCallbacks.entries())
+        .filter(([, timer]) => timer.timeoutMs === timeoutMs)
+      matchedTimers.forEach(([id, timer]) => {
+        timeoutCallbacks.delete(id)
+        timer.callback()
+      })
     },
     setAnalyserSample: (value: number) => { analyserSample = value },
     restore() {
@@ -434,6 +469,14 @@ function createTestEnvironment(options: {
       Object.defineProperty(globalThis, 'clearInterval', {
         configurable: true,
         value: originalClearInterval,
+      })
+      Object.defineProperty(globalThis, 'setTimeout', {
+        configurable: true,
+        value: originalSetTimeout,
+      })
+      Object.defineProperty(globalThis, 'clearTimeout', {
+        configurable: true,
+        value: originalClearTimeout,
       })
       Object.defineProperty(globalThis, 'fetch', {
         configurable: true,
@@ -626,6 +669,58 @@ test('SenseVoiceSmall 模型启动时通过 WebSocket 发送 PCM16 音频块', a
     assert.ok(pcmPayload)
     assert.deepEqual(Array.from(new Int16Array(pcmPayload)), [0, 16384, -16384, 32767, -32768])
     assert.equal(env.sentPayloads.some((payload) => payload instanceof Blob), false)
+  } finally {
+    recorder?.disposeRecorder()
+    env.restore()
+  }
+})
+
+test('录音达到 50 秒时通过 voice-state 提示即将自动结束', async () => {
+  const env = createTestEnvironment()
+  let recorder: Awaited<ReturnType<typeof loadRecorderModule>> | null = null
+
+  try {
+    recorder = await loadRecorderModule('recording-limit-warning')
+    await recorder.startRecording('Dictate')
+
+    env.runTimeoutByDelay(50000)
+
+    const voiceStates = env.sendCalls
+      .filter((call) => call.channel === 'voice-state')
+    const latestVoiceState = voiceStates[voiceStates.length - 1]
+
+    assert.equal(recorder.getVoiceSession().status, 'recording')
+    assert.deepEqual(latestVoiceState?.payload, {
+      visible: true,
+      status: 'recording',
+      mode: 'Dictate',
+      inputLevel: 0,
+      displayText: '录音将在 10 秒后自动结束',
+      errorMessage: undefined,
+    })
+  } finally {
+    recorder?.disposeRecorder()
+    env.restore()
+  }
+})
+
+test('录音达到 60 秒时自动停止并发送 end_audio 进入转写', async () => {
+  const env = createTestEnvironment()
+  let recorder: Awaited<ReturnType<typeof loadRecorderModule>> | null = null
+
+  try {
+    recorder = await loadRecorderModule('recording-limit-stop')
+    await recorder.startRecording('Dictate')
+
+    env.runTimeoutByDelay(60000)
+
+    const messages = env.sentPayloads
+      .filter((payload): payload is string => typeof payload === 'string')
+      .map((payload) => JSON.parse(payload))
+
+    assert.equal(messages.some((message) => message.type === 'end_audio' && message.audio_id === 'audio-1'), true)
+    assert.equal(recorder.getVoiceSession().status, 'transcribing')
+    assert.equal(env.getTrackStops() > 0, true)
   } finally {
     recorder?.disposeRecorder()
     env.restore()

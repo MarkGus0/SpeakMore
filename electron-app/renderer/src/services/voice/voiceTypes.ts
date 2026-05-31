@@ -53,6 +53,7 @@ export type VoiceSession = {
   textLength: number
   error: VoiceError | null
   inputLevel: number
+  noticeText?: string
 }
 
 export type FloatingBarState = {
@@ -74,6 +75,7 @@ export const initialVoiceSession: VoiceSession = {
   textLength: 0,
   error: null,
   inputLevel: 0,
+  noticeText: '',
 }
 
 export function toVoiceFlowMode(mode: VoiceMode): VoiceFlowMode {
@@ -128,7 +130,8 @@ export function toFloatingBarState(session: VoiceSession): FloatingBarState {
     status: session.status,
     mode: session.mode,
     inputLevel: session.inputLevel,
-    ...(session.status === 'recording' && session.mode === 'Ask' ? { displayText: '请随意提出问题' } : {}),
+    ...(session.noticeText ? { displayText: session.noticeText } : {}),
+    ...(!session.noticeText && session.status === 'recording' && session.mode === 'Ask' ? { displayText: '请随意提出问题' } : {}),
     ...(session.status === 'cancelled' ? { displayText: '当前转录已取消' } : {}),
     errorMessage: session.error?.message,
   }

@@ -12,6 +12,10 @@ type VoiceSessionLifecycleOptions = {
   setTimer: (callback: () => void, timeoutMs: number) => TimerId
   clearTimer: (timerId: TimerId) => void
   onTimeout: () => void
+  recordingLimitWarningMs?: number
+  recordingLimitMs?: number
+  onRecordingLimitWarning?: () => void
+  onRecordingLimitReached?: () => void
 }
 
 export function createVoiceSessionLifecycle({
@@ -19,10 +23,16 @@ export function createVoiceSessionLifecycle({
   setTimer,
   clearTimer,
   onTimeout,
+  recordingLimitWarningMs = 0,
+  recordingLimitMs = 0,
+  onRecordingLimitWarning = () => undefined,
+  onRecordingLimitReached = () => undefined,
 }: VoiceSessionLifecycleOptions) {
   let activeSessionId: string | null = null
   let recordingStartedAt = 0
   let transcribeTimer: TimerId | null = null
+  let recordingLimitWarningTimer: TimerId | null = null
+  let recordingLimitTimer: TimerId | null = null
   const ignoredAudioIds = new Set<string>()
 
   const clearTranscribeTimeout = () => {
@@ -31,10 +41,18 @@ export function createVoiceSessionLifecycle({
     transcribeTimer = null
   }
 
+  const clearRecordingLimitTimers = () => {
+    if (recordingLimitWarningTimer !== null) clearTimer(recordingLimitWarningTimer)
+    if (recordingLimitTimer !== null) clearTimer(recordingLimitTimer)
+    recordingLimitWarningTimer = null
+    recordingLimitTimer = null
+  }
+
   return {
     startSession: (audioId: string) => {
       activeSessionId = audioId
       recordingStartedAt = 0
+      clearRecordingLimitTimers()
     },
     markRecordingStarted: () => {
       recordingStartedAt = Date.now()
@@ -52,7 +70,18 @@ export function createVoiceSessionLifecycle({
     isIgnoredAudioId: (audioId: string) => ignoredAudioIds.has(audioId),
     clearActive: () => {
       activeSessionId = null
+      clearRecordingLimitTimers()
     },
+    startRecordingLimitTimers: () => {
+      clearRecordingLimitTimers()
+      if (recordingLimitWarningMs > 0) {
+        recordingLimitWarningTimer = setTimer(onRecordingLimitWarning, recordingLimitWarningMs)
+      }
+      if (recordingLimitMs > 0) {
+        recordingLimitTimer = setTimer(onRecordingLimitReached, recordingLimitMs)
+      }
+    },
+    clearRecordingLimitTimers,
     startTranscribeTimeout: () => {
       // end_audio 后必须有最终消息或错误消息，否则按 WebSocket 超时处理。
       clearTranscribeTimeout()
@@ -63,6 +92,7 @@ export function createVoiceSessionLifecycle({
       activeSessionId = null
       recordingStartedAt = 0
       ignoredAudioIds.clear()
+      clearRecordingLimitTimers()
       clearTranscribeTimeout()
     },
   }

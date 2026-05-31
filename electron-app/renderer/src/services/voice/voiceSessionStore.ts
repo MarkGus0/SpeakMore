@@ -26,7 +26,7 @@ export function createVoiceSessionStore({ sendVoiceState }: {
 
   const setSessionStatus = (status: VoiceStatus) => {
     // 进入新状态时清掉旧错误，避免 UI 在恢复流程里展示过期错误。
-    setSession({ ...session, status, error: null })
+    setSession({ ...session, status, error: null, noticeText: status === 'recording' ? session.noticeText : '' })
   }
 
   const updateInputLevel = (inputLevel: number) => {
