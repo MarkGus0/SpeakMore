@@ -9,7 +9,7 @@ const {
   buildTrayMenuTemplate,
 } = require('./window-manager-options');
 
-const FLOATING_BAR_SIZE = { width: 400, height: 360 };
+const FLOATING_BAR_SIZE = { width: 220, height: 224 };
 const FLOATING_PANEL_SIZE = { width: 440, height: 220 };
 const FLOATING_WINDOW_BOTTOM_GAP = 32;
 

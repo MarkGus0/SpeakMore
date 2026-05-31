@@ -82,7 +82,7 @@ test('Electron 悬浮条加载本地 renderer 构建产物', async () => {
 
   assert.match(main, /renderer[\s\S]*dist[\s\S]*floating-bar\.html/);
   assert.doesNotMatch(main, /loadExtractedPage\(floatingBar,\s*['"]floating-bar\.html['"]\)/);
-  assert.match(main, /const\s+FLOATING_BAR_SIZE\s*=\s*\{\s*width:\s*400,\s*height:\s*360\s*\}/);
+  assert.match(main, /const\s+FLOATING_BAR_SIZE\s*=\s*\{\s*width:\s*220,\s*height:\s*224\s*\}/);
   assert.match(main, /const\s+FLOATING_WINDOW_BOTTOM_GAP\s*=\s*32/);
   assert.match(main, /resolveFloatingBarBounds/);
   assert.doesNotMatch(main, /defaultFloatingBarX\s*=\s*660/);
