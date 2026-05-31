@@ -1013,6 +1013,15 @@ test('P1 旧模型管理能力已删除，只保留单模型初始化入口', as
   assert.match(setupPage, /voice-model:get-status|voice-model:start-download|getVoiceModelStatus|startVoiceModelDownload/);
 });
 
+test('初始化页只在模型未下载且空闲时允许选择模型保存路径', async () => {
+  const setupPage = await readProjectFile('src/pages/Setup.tsx');
+
+  assert.match(setupPage, /const\s+isDownloaded\s*=\s*Boolean\(modelStatus\?\.cached\)/);
+  assert.match(setupPage, /const\s+isReady\s*=\s*Boolean\(modelStatus\?\.ready\s*\|\|\s*modelStatus\?\.status\s*===\s*['"]ready['"]\)/);
+  assert.match(setupPage, /const\s+canChooseCacheDir\s*=\s*!isDownloaded\s*&&\s*!isReady\s*&&\s*!busy/);
+  assert.match(setupPage, /\{canChooseCacheDir\s*\?\s*\(\s*<Button[\s\S]*setup\.chooseCacheDir[\s\S]*<\/Button>\s*\)\s*:\s*null\}/);
+});
+
 test('P1 设置页与设置 store 统一走主进程 JSON 数据源', async () => {
   const settingsStore = await readProjectFile('src/services/settingsStore.ts');
   const settingsPage = await readProjectFile('src/pages/Settings.tsx');

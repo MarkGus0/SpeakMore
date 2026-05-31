@@ -110,6 +110,9 @@ export default function Setup({ onOpenSettings }: SetupProps) {
   }
 
   const busy = isModelBusy(modelStatus) || isStartingDownload
+  const isDownloaded = Boolean(modelStatus?.cached)
+  const isReady = Boolean(modelStatus?.ready || modelStatus?.status === 'ready')
+  const canChooseCacheDir = !isDownloaded && !isReady && !busy
   const statusText = t(getStatusKey(modelStatus))
 
   return (
@@ -149,14 +152,15 @@ export default function Setup({ onOpenSettings }: SetupProps) {
         {busy ? <LinearProgress sx={{ mt: 2 }} /> : null}
 
         <Box sx={{ display: 'flex', gap: 1, mt: 2 }}>
-          <Button
-            variant="outlined"
-            startIcon={<FolderOpenIcon />}
-            onClick={() => void handleChooseModelCacheDir()}
-            disabled={busy}
-          >
-            {t('setup.chooseCacheDir')}
-          </Button>
+          {canChooseCacheDir ? (
+            <Button
+              variant="outlined"
+              startIcon={<FolderOpenIcon />}
+              onClick={() => void handleChooseModelCacheDir()}
+            >
+              {t('setup.chooseCacheDir')}
+            </Button>
+          ) : null}
           <Button
             variant="contained"
             startIcon={<CloudDownloadIcon />}
