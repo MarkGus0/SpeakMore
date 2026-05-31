@@ -150,7 +150,7 @@ test('createWindowManager 构造阶段不读取 Electron screen 方法', () => {
     nativeImage: { createFromPath: (filePath) => ({ filePath, resize: () => ({ filePath }) }) },
     session: { fromPartition: (partition) => ({ partition }) },
     screen,
-    resolveBottomCenterBounds: () => ({ x: 0, y: 0, width: 400, height: 360 }),
+    resolveBottomCenterBounds: () => ({ x: 0, y: 0, width: 220, height: 224 }),
   }));
 });
 
@@ -176,7 +176,7 @@ test('createWindowManager 创建主窗口并在关闭时隐藏', () => {
     preloadPath: () => 'C:\\repo\\SpeakMore\\electron-app\\preload.js',
     iconPath: () => 'C:\\repo\\SpeakMore\\release-artifacts\\assets\\tray-placeholder.png',
     trayIconPath: () => 'C:\\repo\\SpeakMore\\release-artifacts\\assets\\tray-placeholder.png',
-    resolveBottomCenterBounds: () => ({ x: 100, y: 200, width: 400, height: 360 }),
+    resolveBottomCenterBounds: () => ({ x: 100, y: 200, width: 220, height: 224 }),
     isActiveVoiceState,
     isErrorVoiceState,
     isTerminalVoiceState,
@@ -249,8 +249,8 @@ test('createWindowManager 创建悬浮条、悬浮面板和托盘', () => {
   assert.equal(floatingPanel.loadFilePath, path.join('C:\\repo\\SpeakMore\\electron-app', 'renderer', 'dist', 'floating-panel.html'));
   assert.equal(floatingBar.options.x, 11);
   assert.equal(floatingBar.options.y, 22);
-  assert.equal(floatingBar.options.width, 400);
-  assert.equal(floatingBar.options.height, 360);
+  assert.equal(floatingBar.options.width, 220);
+  assert.equal(floatingBar.options.height, 224);
   assert.equal(floatingPanel.options.x, 11);
   assert.equal(floatingPanel.options.y, 22);
   assert.equal(floatingPanel.options.width, 440);
