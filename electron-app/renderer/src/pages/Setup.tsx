@@ -34,11 +34,6 @@ function isModelBusy(status: VoiceModelStatus | null) {
   return status?.status === 'downloading' || status?.status === 'loading'
 }
 
-function formatElapsed(elapsedMs = 0) {
-  if (elapsedMs <= 0) return '0s'
-  return `${Math.floor(elapsedMs / 1000)}s`
-}
-
 function formatBytes(bytes = 0) {
   if (bytes <= 0) return '0 B'
   const units = ['B', 'KB', 'MB', 'GB']
@@ -151,10 +146,6 @@ export default function Setup({ onOpenSettings }: SetupProps) {
         <Box sx={rowSx}>
           <Typography sx={{ color: 'text.secondary' }}>{t('setup.cacheDir')}</Typography>
           <Typography sx={{ textAlign: 'right', wordBreak: 'break-all' }}>{effectiveModelCacheDir || '-'}</Typography>
-        </Box>
-        <Box sx={rowSx}>
-          <Typography sx={{ color: 'text.secondary' }}>{t('setup.elapsed')}</Typography>
-          <Typography>{formatElapsed(modelStatus?.elapsed_ms)}</Typography>
         </Box>
         {modelStatus?.detail ? (
           <Typography sx={{ fontSize: 13, color: modelStatus.status === 'failed' ? 'error.main' : 'text.secondary', mt: 1 }}>
