@@ -3,6 +3,8 @@ import { Box, IconButton, Typography } from '@mui/material'
 import { useEffect, useState } from 'react'
 import { subscribeVoiceSession } from '../services/recorder'
 import { ipcClient } from '../services/ipc'
+import { listDictionaryEntries, subscribeDictionaryChanges } from '../services/dictionaryStore'
+import { calculateDashboardPersonalization } from '../services/dashboardPersonalization'
 import {
   emptyVoiceStats,
   formatAverageSpeed,
@@ -21,10 +23,18 @@ import {
 import { useI18n } from '../i18n'
 import { cardSx, pageSx, pageTitleSx, subtlePanelSx } from '../uiTokens'
 
+const PERSONALIZATION_BLUE = '#2563eb'
+
 export default function Dashboard() {
   const { t } = useI18n()
   const [recentResults, setRecentResults] = useState<RecentDashboardResult[]>([])
   const [stats, setStats] = useState<VoiceStats>(emptyVoiceStats)
+  const [activeDictionaryCount, setActiveDictionaryCount] = useState(0)
+  const personalization = calculateDashboardPersonalization({
+    totalDurationMs: stats.totalDurationMs,
+    totalTextLength: stats.totalTextLength,
+    activeDictionaryCount,
+  })
 
   const handleCopyRecentResult = (text: string) => {
     if (!text) return
@@ -66,6 +76,19 @@ export default function Dashboard() {
     return () => window.removeEventListener(VOICE_HISTORY_UPDATED_EVENT, refreshStats)
   }, [])
 
+  useEffect(() => {
+    const refreshDictionaryPersonalization = () => {
+      listDictionaryEntries()
+        .then((entries) => setActiveDictionaryCount(entries.filter((entry) => entry.status === 'active').length))
+        .catch(() => setActiveDictionaryCount(0))
+    }
+
+    refreshDictionaryPersonalization()
+    return subscribeDictionaryChanges(() => {
+      refreshDictionaryPersonalization()
+    })
+  }, [])
+
   return (
     <Box sx={{ ...pageSx, maxWidth: 980, display: 'flex', flexDirection: 'column', gap: 3 }}>
       <Box>
@@ -89,12 +112,25 @@ export default function Dashboard() {
 
       <Box sx={{ ...subtlePanelSx, p: 2, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
         <Box sx={{ ...cardSx, p: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Box>
-            <Typography sx={{ fontSize: 24, fontWeight: 600 }}>{t('dashboard.personalization.value')}</Typography>
+          <Box sx={{ minWidth: 0, flex: 1, pr: 2 }}>
             <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>{t('dashboard.personalization.label')}</Typography>
+            <Box sx={{ mt: 1.5, height: 8, borderRadius: 999, bgcolor: 'rgba(119,119,119,0.12)', overflow: 'hidden' }}>
+              <Box sx={{ height: '100%', width: `${personalization}%`, borderRadius: 999, bgcolor: PERSONALIZATION_BLUE }} />
+            </Box>
           </Box>
-          <Box sx={{ width: 56, height: 56, borderRadius: '50%', background: 'conic-gradient(#d0d0d0 0% 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Box sx={{ width: 40, height: 40, borderRadius: '50%', bgcolor: '#fff' }} />
+          <Box sx={{
+            width: 64,
+            height: 64,
+            borderRadius: '50%',
+            background: `conic-gradient(${PERSONALIZATION_BLUE} 0% ${personalization}%, rgba(119,119,119,0.14) ${personalization}% 100%)`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+          }}>
+            <Box sx={{ width: 48, height: 48, borderRadius: '50%', bgcolor: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Typography sx={{ fontSize: 14, fontWeight: 600 }}>{personalization}%</Typography>
+            </Box>
           </Box>
         </Box>
         <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
