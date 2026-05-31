@@ -8,8 +8,9 @@ import sys
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
+from download_progress import DownloadProgress, create_hf_tqdm_class
 from model_manager import (
     SENSEVOICE_SMALL_MODEL_ID,
     find_cached_model_snapshot,
@@ -177,13 +178,20 @@ def get_auto_model_kwargs(model_id: str) -> dict[str, Any]:
     return {}
 
 
-def resolve_model_ref_for_build(source: StreamingAsrModelSource) -> str:
+def resolve_model_ref_for_build(
+    source: StreamingAsrModelSource,
+    download_progress_callback: Callable[[DownloadProgress], None] | None = None,
+) -> str:
     if source.kind != DOWNLOAD_SOURCE or not source.download_root:
         return source.model_ref
 
     from huggingface_hub import snapshot_download
 
-    return snapshot_download(source.model_ref, cache_dir=source.download_root)
+    if not download_progress_callback:
+        return snapshot_download(source.model_ref, cache_dir=source.download_root)
+
+    tqdm_class = create_hf_tqdm_class(download_progress_callback)
+    return snapshot_download(source.model_ref, cache_dir=source.download_root, tqdm_class=tqdm_class)
 
 
 def create_streaming_runtime(model: Any, model_id: str) -> StreamingAsrRuntime:
@@ -207,7 +215,10 @@ def create_streaming_runtime(model: Any, model_id: str) -> StreamingAsrRuntime:
     )
 
 
-def build_streaming_asr_model(source: StreamingAsrModelSource) -> StreamingAsrRuntime:
+def build_streaming_asr_model(
+    source: StreamingAsrModelSource,
+    download_progress_callback: Callable[[DownloadProgress], None] | None = None,
+) -> StreamingAsrRuntime:
     os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
     if source.kind != DOWNLOAD_SOURCE:
         os.environ.setdefault("HF_HUB_OFFLINE", "1")
@@ -217,7 +228,7 @@ def build_streaming_asr_model(source: StreamingAsrModelSource) -> StreamingAsrRu
     from funasr import AutoModel
 
     device = resolve_funasr_device()
-    model_ref = resolve_model_ref_for_build(source)
+    model_ref = resolve_model_ref_for_build(source, download_progress_callback)
     print(f"[ASR] 从 {source.kind} 加载 {source.model_id}: {model_ref}，设备: {device}")
     model = AutoModel(
         model=model_ref,
@@ -229,12 +240,12 @@ def build_streaming_asr_model(source: StreamingAsrModelSource) -> StreamingAsrRu
     return create_streaming_runtime(model, source.model_id)
 
 
-def _load_streaming_asr_model():
+def _load_streaming_asr_model(download_progress_callback: Callable[[DownloadProgress], None] | None = None):
     selected_model_id = get_active_asr_model_id()
     errors: list[str] = []
     for source in get_candidate_streaming_model_sources(selected_model_id):
         try:
-            model = build_streaming_asr_model(source)
+            model = build_streaming_asr_model(source, download_progress_callback)
             print(f"[ASR] {selected_model_id} 模型加载完成，来源: {source.kind}")
             return model
         except Exception as error:
@@ -248,7 +259,7 @@ def _load_streaming_asr_model():
     raise RuntimeError(f"{selected_model_id} 模型加载失败: " + " | ".join(errors))
 
 
-def preload_asr_model():
+def preload_asr_model(download_progress_callback: Callable[[DownloadProgress], None] | None = None):
     global _model
     if _model is not None:
         return _model
@@ -257,7 +268,10 @@ def preload_asr_model():
         if _model is not None:
             return _model
 
-        _model = _load_streaming_asr_model()
+        if download_progress_callback:
+            _model = _load_streaming_asr_model(download_progress_callback)
+        else:
+            _model = _load_streaming_asr_model()
         return _model
 
 

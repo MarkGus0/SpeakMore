@@ -39,6 +39,14 @@ function formatElapsed(elapsedMs = 0) {
   return `${Math.floor(elapsedMs / 1000)}s`
 }
 
+function formatBytes(bytes = 0) {
+  if (bytes <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
+  const value = bytes / 1024 ** exponent
+  return `${value >= 10 || exponent === 0 ? Math.round(value) : value.toFixed(1)} ${units[exponent]}`
+}
+
 function getStatusKey(status: VoiceModelStatus | null): TranslationKey {
   if (status?.status === 'downloading') return 'setup.modelStatus.downloading'
   if (status?.status === 'loading') return 'setup.modelStatus.loading'
@@ -110,6 +118,13 @@ export default function Setup({ onOpenSettings }: SetupProps) {
   }
 
   const busy = isModelBusy(modelStatus) || isStartingDownload
+  const isDownloaded = Boolean(modelStatus?.cached)
+  const isReady = Boolean(modelStatus?.ready || modelStatus?.status === 'ready')
+  const canChooseCacheDir = !isDownloaded && !isReady && !busy
+  const downloadProgressPercent = modelStatus?.progress_percent ?? null
+  const hasDownloadProgress = modelStatus?.status === 'downloading'
+    && typeof downloadProgressPercent === 'number'
+    && (modelStatus?.total_bytes ?? 0) > 0
   const statusText = t(getStatusKey(modelStatus))
 
   return (
@@ -146,17 +161,30 @@ export default function Setup({ onOpenSettings }: SetupProps) {
             {modelStatus.detail}
           </Typography>
         ) : null}
-        {busy ? <LinearProgress sx={{ mt: 2 }} /> : null}
+        {busy ? (
+          <Box sx={{ mt: 2 }}>
+            <LinearProgress
+              variant={hasDownloadProgress ? 'determinate' : 'indeterminate'}
+              value={hasDownloadProgress ? downloadProgressPercent : undefined}
+            />
+            {hasDownloadProgress ? (
+              <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.75 }}>
+                {`${downloadProgressPercent}% · ${formatBytes(modelStatus?.downloaded_bytes)} / ${formatBytes(modelStatus?.total_bytes)}`}
+              </Typography>
+            ) : null}
+          </Box>
+        ) : null}
 
         <Box sx={{ display: 'flex', gap: 1, mt: 2 }}>
-          <Button
-            variant="outlined"
-            startIcon={<FolderOpenIcon />}
-            onClick={() => void handleChooseModelCacheDir()}
-            disabled={busy}
-          >
-            {t('setup.chooseCacheDir')}
-          </Button>
+          {canChooseCacheDir ? (
+            <Button
+              variant="outlined"
+              startIcon={<FolderOpenIcon />}
+              onClick={() => void handleChooseModelCacheDir()}
+            >
+              {t('setup.chooseCacheDir')}
+            </Button>
+          ) : null}
           <Button
             variant="contained"
             startIcon={<CloudDownloadIcon />}

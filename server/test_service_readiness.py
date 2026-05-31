@@ -109,6 +109,27 @@ class ServiceReadinessTest(unittest.TestCase):
         self.assertEqual(started.status_code, 200)
         self.assertEqual(started.json()["cache_dir"], "E:\\Models\\FunASR")
 
+    def test_model_status_includes_download_progress(self):
+        app = main.create_app(preload_model=lambda: None, exit_scheduler=lambda _code: None)
+        with TestClient(app) as client:
+            app.state.voice_service_status = main.create_voice_service_state(
+                "downloading",
+                "正在下载 SenseVoiceSmall 模型",
+                started_at=time.time(),
+                download_progress={
+                    "downloaded_bytes": 25,
+                    "total_bytes": 100,
+                    "progress_percent": 25,
+                },
+            )
+            response = client.get("/model/status")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["downloaded_bytes"], 25)
+        self.assertEqual(payload["total_bytes"], 100)
+        self.assertEqual(payload["progress_percent"], 25)
+
 
 if __name__ == "__main__":
     unittest.main()

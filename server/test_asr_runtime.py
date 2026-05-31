@@ -55,6 +55,32 @@ class AsrRuntimeTest(unittest.TestCase):
             self.assertEqual(observed["kwargs"]["model"], snapshot_dir)
             self.assertEqual(observed["kwargs"]["hub"], "hf")
 
+    def test_download_source_passes_progress_tqdm_to_snapshot_download(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            snapshot_dir = os.path.join(temp_dir, "models--FunAudioLLM--SenseVoiceSmall", "snapshots", "abc")
+            source = asr.StreamingAsrModelSource(
+                kind=asr.DOWNLOAD_SOURCE,
+                model_ref="FunAudioLLM/SenseVoiceSmall",
+                download_root=temp_dir,
+            )
+            observed = {}
+
+            def fake_snapshot_download(model, cache_dir=None, tqdm_class=None):
+                observed["model"] = model
+                observed["cache_dir"] = cache_dir
+                observed["tqdm_class"] = tqdm_class
+                return snapshot_dir
+
+            fake_huggingface_hub = types.SimpleNamespace(snapshot_download=fake_snapshot_download)
+
+            with patch.dict(sys.modules, {"huggingface_hub": fake_huggingface_hub}):
+                result = asr.resolve_model_ref_for_build(source, download_progress_callback=lambda progress: None)
+
+            self.assertEqual(result, snapshot_dir)
+            self.assertEqual(observed["model"], "FunAudioLLM/SenseVoiceSmall")
+            self.assertEqual(observed["cache_dir"], temp_dir)
+            self.assertTrue(callable(observed["tqdm_class"]))
+
     def test_sensevoice_runtime_generates_from_accumulated_audio(self):
         calls = []
 

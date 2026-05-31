@@ -1,6 +1,7 @@
 """Typeless 本地后端服务 - 复现 /ai/voice_flow 和 WebSocket 接口"""
 
 import asyncio
+import inspect
 import json
 import os
 import tempfile
@@ -219,7 +220,28 @@ def is_sensevoice_cached() -> bool:
     return find_cached_model_snapshot(SENSEVOICE_SMALL_MODEL_ID) is not None
 
 
-def create_voice_service_state(status: str, detail: str = "", started_at: float | None = None) -> dict[str, str | int | bool | None]:
+def normalize_download_progress(progress: dict | None = None) -> dict[str, int | None]:
+    downloaded = progress.get("downloaded_bytes") if isinstance(progress, dict) else None
+    total = progress.get("total_bytes") if isinstance(progress, dict) else None
+    percent = progress.get("progress_percent") if isinstance(progress, dict) else None
+    downloaded_bytes = max(0, int(downloaded)) if isinstance(downloaded, (int, float)) else 0
+    total_bytes = max(0, int(total)) if isinstance(total, (int, float)) else 0
+    progress_percent = int(percent) if isinstance(percent, (int, float)) else None
+    if progress_percent is not None:
+        progress_percent = max(0, min(100, progress_percent))
+    return {
+        "downloaded_bytes": downloaded_bytes,
+        "total_bytes": total_bytes,
+        "progress_percent": progress_percent,
+    }
+
+
+def create_voice_service_state(
+    status: str,
+    detail: str = "",
+    started_at: float | None = None,
+    download_progress: dict | None = None,
+) -> dict[str, str | int | bool | None]:
     now = time.time()
     return {
         "status": status,
@@ -232,6 +254,7 @@ def create_voice_service_state(status: str, detail: str = "", started_at: float 
         "started_at": started_at,
         "updated_at": now,
         "elapsed_ms": int((now - started_at) * 1000) if started_at else 0,
+        **normalize_download_progress(download_progress),
     }
 
 
@@ -241,6 +264,40 @@ def set_voice_service_state(app: FastAPI, status: str, detail: str = "", started
         current_started_at = current.get("started_at")
         started_at = current_started_at if isinstance(current_started_at, float) else time.time()
     app.state.voice_service_status = create_voice_service_state(status, detail, started_at)
+
+
+def update_voice_service_download_progress(app: FastAPI, progress: dict) -> None:
+    current = getattr(app.state, "voice_service_status", None)
+    if not isinstance(current, dict):
+        return
+    app.state.voice_service_status = {
+        **current,
+        **normalize_download_progress(progress),
+        "updated_at": time.time(),
+    }
+
+
+def preload_model_accepts_progress_callback(preload_model) -> bool:
+    try:
+        signature = inspect.signature(preload_model)
+    except (TypeError, ValueError):
+        return True
+    return any(
+        parameter.kind in {
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.VAR_POSITIONAL,
+            inspect.Parameter.KEYWORD_ONLY,
+            inspect.Parameter.VAR_KEYWORD,
+        }
+        for parameter in signature.parameters.values()
+    )
+
+
+def call_preload_model(preload_model, progress_callback):
+    if preload_model_accepts_progress_callback(preload_model):
+        return preload_model(progress_callback)
+    return preload_model()
 
 
 def get_voice_service_state(app: FastAPI) -> dict:
@@ -295,7 +352,11 @@ async def preload_voice_service(
         else:
             set_voice_service_state(app, "loading", "正在加载 SenseVoiceSmall 模型", started_at)
 
-        await asyncio.to_thread(preload_model)
+        await asyncio.to_thread(
+            call_preload_model,
+            preload_model,
+            lambda progress: update_voice_service_download_progress(app, progress),
+        )
         set_voice_service_state(app, "ready", "ASR 模型已完成预热")
     except Exception as error:
         set_voice_service_state(app, "failed", str(error))

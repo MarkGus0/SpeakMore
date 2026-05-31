@@ -26,6 +26,9 @@ import {
 } from './voice/voiceTypes'
 
 const TRANSCRIBE_TIMEOUT_MS = 60000
+const RECORDING_LIMIT_WARNING_MS = 50000
+const RECORDING_LIMIT_MS = 60000
+const RECORDING_LIMIT_WARNING_TEXT = '录音将在 10 秒后自动结束'
 // 只有这些状态代表本轮语音还没有产出最终结果，Escape 才允许取消。
 const CANCELABLE_STATUSES = new Set<VoiceStatus>(['connecting', 'recording', 'stopping', 'transcribing'])
 
@@ -44,6 +47,10 @@ const lifecycle = createVoiceSessionLifecycle({
   setTimer: (callback, timeoutMs) => window.setTimeout(callback, timeoutMs),
   clearTimer: (timerId) => window.clearTimeout(timerId),
   onTimeout: () => failSession(createVoiceError('websocket_timeout')),
+  recordingLimitWarningMs: RECORDING_LIMIT_WARNING_MS,
+  recordingLimitMs: RECORDING_LIMIT_MS,
+  onRecordingLimitWarning: () => showRecordingLimitWarning(),
+  onRecordingLimitReached: () => stopRecording(),
 })
 const voiceSocket = createVoiceSocketManager({
   getCurrentAudioId: () => getVoiceSession().audioId || '',
@@ -167,6 +174,7 @@ async function startRecordingFromIntent(intent: ShortcutIntent) {
 
     transportRuntime.start()
     lifecycle.markRecordingStarted()
+    lifecycle.startRecordingLimitTimers()
     setSessionStatus('recording')
     void muteBackgroundAudio()
   } catch (error) {
@@ -183,6 +191,7 @@ export function stopRecording() {
 
   try {
     // 正常停止需要发送 end_audio，让后端 flush 音频并进入转写/润色阶段。
+    lifecycle.clearRecordingLimitTimers()
     setSessionStatus('stopping')
     cleanupRecording()
 
@@ -226,6 +235,7 @@ export function cancelRecording() {
     durationMs,
     error: null,
     inputLevel: 0,
+    noticeText: '',
   })
 }
 
@@ -259,7 +269,7 @@ function failSession(error: VoiceError) {
   const durationMs = lifecycle.getDurationMs()
   cleanupRecording()
   void restoreBackgroundAudio()
-  setSession({ ...getVoiceSession(), status: 'error', durationMs, error })
+  setSession({ ...getVoiceSession(), status: 'error', durationMs, error, noticeText: '' })
   lifecycle.resetRecordingStarted()
 }
 
@@ -278,6 +288,7 @@ async function completeSession(refinedText: string) {
     durationMs,
     textLength,
     error: null,
+    noticeText: '',
   }
 
   setSession(completedSession)
@@ -293,6 +304,12 @@ async function completeSession(refinedText: string) {
 function handleRawText(text: string) {
   // 流式转写会多次更新 rawText，最终结果仍以后端完成消息为准。
   setSession({ ...getVoiceSession(), rawText: text, textLength: countTextLength(text) })
+}
+
+function showRecordingLimitWarning() {
+  const session = getVoiceSession()
+  if (session.status !== 'recording') return
+  setSession({ ...session, noticeText: RECORDING_LIMIT_WARNING_TEXT })
 }
 
 function isSessionActive(audioId: string) {
