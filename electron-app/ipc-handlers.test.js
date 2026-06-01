@@ -323,19 +323,17 @@ test('registerFileIpcHandlers 注册文件通道', async () => {
 
 test('registerPermissionIpcHandlers 注册权限和更新兼容通道', async () => {
   const ipcMain = createFakeIpcMain();
-  const loginSettings = [];
-
   registerPermissionIpcHandlers({
     ipcMain,
-    app: {
-      setLoginItemSettings: (settings) => loginSettings.push(settings),
-    },
-    processExecPath: 'D:\\SpeakMore.exe',
+    app: {},
   });
 
   assert.equal(await ipcMain.invoke('permission:request'), true);
-  assert.equal(await ipcMain.invoke('permission:update-auto-launch', { enable: true }), true);
-  assert.deepEqual(loginSettings, [{ openAtLogin: true, path: 'D:\\SpeakMore.exe' }]);
+  assert.deepEqual(await ipcMain.invoke('permission:update-auto-launch', { enable: true }), {
+    success: false,
+    skipped: true,
+    code: 'auto_launch_disabled',
+  });
   assert.equal(await ipcMain.invoke('updater:check-for-update'), null);
 });
 

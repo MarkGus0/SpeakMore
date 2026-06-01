@@ -1,9 +1,9 @@
 /**
  * 音频设置区块
  *
- * 需要选择麦克风和开机启动时看这里。
+ * 需要选择麦克风时看这里。
  */
-import { Box, MenuItem, Select, Switch, Typography } from '@mui/material'
+import { Box, MenuItem, Select, Typography } from '@mui/material'
 import { type LocalSettings } from '../../services/settingsStore'
 import { useI18n } from '../../i18n'
 
@@ -47,16 +47,7 @@ export default function AudioSettingsSection({ settings, devices, updateSettings
         </Select>
       </Box>
 
-      <Typography sx={sectionTitle}>{t('settings.other')}</Typography>
-      <Box sx={rowSx}>
-        <Typography>{t('settings.autoLaunch')}</Typography>
-        <Switch
-          checked={settings.launchAtSystemStartup}
-          onChange={(_event, checked) => {
-            void updateSettings({ ...settings, launchAtSystemStartup: checked })
-          }}
-        />
-      </Box>
+      {/* 自动启动设置暂时停用，恢复前需要先补系统真实状态读取和失败回滚。 */}
     </>
   )
 }
