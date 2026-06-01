@@ -3,6 +3,8 @@ const os = require('os');
 const path = require('path');
 const { createRightAltRelay } = require('./right-alt-relay');
 
+const RELAY_KEYS = new Set(['RightAlt', 'RightShift', 'Space']);
+
 function createRightAltListenerService({
   emitKeyboardState,
   handleEscapeKeydown = () => undefined,
@@ -47,6 +49,7 @@ function createRightAltListenerService({
         }
         return;
       }
+      if (!RELAY_KEYS.has(payload.key)) return;
       getRightAltRelay().handlePayload(payload);
     } catch (error) {
       console.error('Right Alt 监听器输出解析失败:', error);

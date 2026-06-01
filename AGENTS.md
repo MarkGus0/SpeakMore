@@ -32,7 +32,7 @@
 - Windows 托盘图标由 `electron-app/assets/tray-placeholder.png` 提供，并通过 `electron-app/app-paths.js` 暴露给主进程。
 - 结构测试不能假设所有主进程逻辑都内联在 `main.js`，应检查 `main.js` 与拆分后的生产模块共同组成的主进程实现面。
 - Windows 文本观察 helper 位于 `electron-app/windows-text-observer/`，只服务本轮粘贴后的短时自动学习，不参与基础录音链路。
-- macOS 开发态 Option 监听 helper 位于 `electron-app/macos-option-listener.c`，当前只服务开发态 MVP；主进程启动时用 `clang` 编译到本机临时目录，再把 macOS `Option` 组合映射成既有 `global-keyboard` 事件，不改变 renderer 录音状态机协议。
+- macOS 开发态 Option 监听 helper 位于 `electron-app/macos-option-listener.c`，当前只服务开发态 MVP；主进程启动时用 `clang` 编译到本机临时目录，再把 macOS 右侧 `Option` 组合映射成既有 `global-keyboard` 事件，不改变 renderer 录音状态机协议；左侧 `Option` 不应触发提示、录音或模式切换。
 - macOS 平台能力 helper 位于 `electron-app/macos-platform-helper.m`，由 `electron-app/macos-platform-capabilities.js` 按需编译和调用；当前用于 Accessibility 权限状态、前台应用、可输入目标、AX selected text、AX focused text 观察、剪贴板恢复和受控 `Cmd+V`。
 - `electron-app/renderer/src/components/AppShell.tsx` 只承担全局壳层和持久化订阅，页面状态拆到 `useGlobalShortcutBridge`、`useVoiceHistoryPersistence` 和 `useSettingsPageState` 之类的专用 hook。
 - 前端修改后必须在 `electron-app/renderer/` 下运行 `npm run build`，再重启 Electron 验证。
@@ -50,9 +50,10 @@
   - `Right Alt + Right Shift`：翻译。
   - `Escape`：取消当前未完成语音会话，或关闭当前悬浮面板。
 - macOS 开发态 MVP 固定快捷键：
-  - `Option`：听写。
-  - `Option + Space`：自由提问。
-  - `Option + Shift`：翻译。
+  - 右侧 `Option`：听写。
+  - 右侧 `Option + Space`：自由提问。
+  - 右侧 `Option + Shift`：翻译。
+  - 左侧 `Option`：无触发条件，不显示提示，不启动录音。
   - `Escape`：取消当前未完成语音会话，或关闭当前悬浮面板。
 - `Escape` 取消语音会话时不能发送 `end_audio`，不能自动粘贴，必须忽略迟到结果。
 - 录音状态源由 `recorder.ts` 管理；悬浮胶囊只消费 `voice-state`，不要在悬浮胶囊里重新实现录音状态机。
@@ -64,7 +65,7 @@
 - `Right Alt` 始终是普通听写并优先自动粘贴；是否有 UIA 选区都不能改变为翻译或自由提问。
 - `Right Alt + Space` 永远是自由提问；有 UIA confirmed 选区时优先把选区作为 `selected_text` 上下文，UIA 无 confirmed 选区但剪贴板 fallback 成功时可作为低可信 `selected_text` 上下文，结果永远展示在悬浮卡片，不自动替换。
 - `Right Alt + Right Shift` 是显式语音翻译；不因有选区而直接翻译选区，必须录音，完成后走普通粘贴链路把翻译结果贴到当前光标位置。
-- macOS 阶段四支持普通听写和语音翻译在可信输入目标中自动粘贴，失败时展示悬浮面板；`Option + Space` 自由提问会读取 AX confirmed 选区并作为 `selected_text` 上下文，结果仍固定展示悬浮面板；自动学习只在 macOS 自动粘贴成功后围绕本轮 focused text target 短时观察。
+- macOS 阶段四支持普通听写和语音翻译在可信输入目标中自动粘贴，失败时展示悬浮面板；右侧 `Option + Space` 自由提问会读取 AX confirmed 选区并作为 `selected_text` 上下文，结果仍固定展示悬浮面板；自动学习只在 macOS 自动粘贴成功后围绕本轮 focused text target 短时观察。
 - 三种模式只要粘贴或替换失败，都必须把最终结果展示到悬浮卡片，不能让用户丢失结果。
 - 自动粘贴前必须先确认当前存在可信文本输入目标；找不到光标或输入目标时，不得静默写剪贴板和发送 `Ctrl+V`，必须直接展示悬浮卡片。
 - 自动粘贴前的输入目标判定按四层收敛：`UIA confirmed` -> `Win32 caret confirmed` -> `app_compat` 弱可信应用族兜底 -> 悬浮卡片；不要把“前台窗口存在”当成可粘贴条件，第三层只在 allowlist 应用族且弱信号充分时放行。当前 allowlist 只做显式应用族匹配，包含微信、QQ、Discord、Codex、Claude Code、ChatGPT、VS Code、Cursor、Slack、Notion、Spotify，不把所有 Electron / Chromium 一刀切放开。
