@@ -12,6 +12,7 @@ type ElectronIpcRenderer = {
   on: (channel: string, listener: IpcListener) => void
   off?: (channel: string, listener: IpcListener) => void
   removeListener?: (channel: string, listener: IpcListener) => void
+  platform?: string
 }
 
 // renderer 只能通过 preload 暴露的 window.ipcRenderer 访问主进程，直接引用 Electron API 会破坏隔离边界。
@@ -52,5 +53,9 @@ export const ipcClient = {
       if (ipc.off) ipc.off(channel, listener)
       else ipc.removeListener?.(channel, listener)
     }
+  },
+
+  platform() {
+    return getIpcRenderer()?.platform || 'browser'
   },
 }

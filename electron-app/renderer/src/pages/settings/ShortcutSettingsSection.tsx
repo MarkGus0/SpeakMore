@@ -5,6 +5,7 @@
  */
 import { Box, Typography } from '@mui/material'
 import { useI18n } from '../../i18n'
+import { getShortcutLabelSet } from '../../services/shortcutLabels'
 
 const keybindChip = {
   borderRadius: '6px',
@@ -36,21 +37,22 @@ function KeyChips({ keys }: { keys: string[] }) {
 
 export default function ShortcutSettingsSection() {
   const { t } = useI18n()
+  const shortcuts = getShortcutLabelSet()
 
   return (
     <>
       <Typography sx={sectionTitle}>{t('settings.shortcuts')}</Typography>
       <Box sx={rowSx}>
         <Typography>{t('settings.shortcut.dictation')}</Typography>
-        <KeyChips keys={['Right Alt']} />
+        <KeyChips keys={shortcuts.dictation} />
       </Box>
       <Box sx={rowSx}>
         <Typography>{t('settings.shortcut.ask')}</Typography>
-        <KeyChips keys={['Right Alt', 'Space']} />
+        <KeyChips keys={shortcuts.ask} />
       </Box>
       <Box sx={rowSx}>
         <Typography>{t('settings.shortcut.translate')}</Typography>
-        <KeyChips keys={['Right Alt', 'Right Shift']} />
+        <KeyChips keys={shortcuts.translate} />
       </Box>
     </>
   )

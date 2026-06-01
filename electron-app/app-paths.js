@@ -5,31 +5,38 @@ function createAppPaths({
   resourcesPath = path.join(baseDir, '..'),
   isPackaged = false,
   getUserDataPath = () => '',
+  processPlatform = process.platform,
 } = {}) {
+  const pathApi = processPlatform === 'win32' ? path.win32 : path;
+
   function localDataDir() {
-    return path.join(getUserDataPath(), 'local-data');
+    return pathApi.join(getUserDataPath(), 'local-data');
   }
 
   function localDataPath(fileName) {
-    return path.join(localDataDir(), fileName);
+    return pathApi.join(localDataDir(), fileName);
   }
 
   function resourcePath(...segments) {
-    if (isPackaged) return path.join(resourcesPath, ...segments);
-    return path.join(baseDir, ...segments);
+    if (isPackaged) return pathApi.join(resourcesPath, ...segments);
+    return pathApi.join(baseDir, ...segments);
   }
 
   function packagedResourcePath(...segments) {
     return isPackaged
-      ? path.join(resourcesPath, ...segments)
-      : path.join(baseDir, '..', 'release-artifacts', ...segments);
+      ? pathApi.join(resourcesPath, ...segments)
+      : pathApi.join(baseDir, '..', 'release-artifacts', ...segments);
   }
 
   function unpackedAppPath(...segments) {
     const unpackedBaseDir = isPackaged
-      ? baseDir.replace(`${path.sep}app.asar${path.sep}`, `${path.sep}app.asar.unpacked${path.sep}`)
+      ? baseDir.replace(`${pathApi.sep}app.asar${pathApi.sep}`, `${pathApi.sep}app.asar.unpacked${pathApi.sep}`)
       : baseDir;
-    return path.join(unpackedBaseDir, ...segments);
+    return pathApi.join(unpackedBaseDir, ...segments);
+  }
+
+  function executableName(baseName) {
+    return processPlatform === 'win32' ? `${baseName}.exe` : baseName;
   }
 
   return {
@@ -37,14 +44,15 @@ function createAppPaths({
     localDataPath,
     logFilePath: () => localDataPath('recording.log'),
     recordingsDir: () => localDataPath('recordings'),
-    preloadPath: () => path.join(baseDir, 'preload.js'),
+    preloadPath: () => pathApi.join(baseDir, 'preload.js'),
     iconPath: () => packagedResourcePath('assets', 'tray-placeholder.png'),
     trayIconPath: () => packagedResourcePath('assets', 'tray-placeholder.png'),
     rightAltListenerPath: () => unpackedAppPath('right-alt-listener.ps1'),
+    macosOptionListenerPath: () => unpackedAppPath('macos-option-listener.c'),
     audioSessionControlPath: () => unpackedAppPath('audio-session-control.ps1'),
-    backendExecutablePath: () => packagedResourcePath('backend', 'speakmore-backend.exe'),
-    ffmpegExecutablePath: () => packagedResourcePath('ffmpeg', 'bin', 'ffmpeg.exe'),
-    textObserverExecutablePath: () => packagedResourcePath('helper', 'WindowsTextObserver.exe'),
+    backendExecutablePath: () => packagedResourcePath('backend', executableName('speakmore-backend')),
+    ffmpegExecutablePath: () => packagedResourcePath('ffmpeg', 'bin', executableName('ffmpeg')),
+    textObserverExecutablePath: () => packagedResourcePath('helper', executableName('WindowsTextObserver')),
     dotnetRootPath: () => packagedResourcePath('dotnet'),
     resourcePath,
     packagedResourcePath,

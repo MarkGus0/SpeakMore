@@ -67,6 +67,20 @@ class AsrConfigTest(unittest.TestCase):
 
         self.assertEqual(result, local_app_data / "Typeless" / "models" / "funasr")
 
+    def test_model_manager_uses_macos_application_support_default(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch.dict(
+                os.environ,
+                {
+                    "TYPELESS_MODEL_CACHE_DIR": "",
+                    "LOCALAPPDATA": "",
+                },
+                clear=False,
+            ), patch("sys.platform", "darwin"), patch("pathlib.Path.home", return_value=Path(temp_dir)):
+                result = model_manager.get_managed_model_cache_root(SENSEVOICE_SMALL_MODEL_ID)
+
+        self.assertEqual(result, Path(temp_dir) / "Library" / "Application Support" / "SpeakMore" / "models" / "funasr")
+
     def test_resolve_streaming_model_source_uses_hf_cache_by_default(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             local_app_data = Path(temp_dir) / "LocalAppData"

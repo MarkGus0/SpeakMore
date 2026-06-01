@@ -1,4 +1,6 @@
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
+const os = require('os');
+const path = require('path');
 const { createRightAltRelay } = require('./right-alt-relay');
 
 function createRightAltListenerService({
@@ -6,9 +8,13 @@ function createRightAltListenerService({
   handleEscapeKeydown = () => undefined,
   createRelay = createRightAltRelay,
   rightAltListenerPath = () => '',
+  macosOptionListenerPath = () => '',
+  macosOptionListenerExecutablePath = () => '',
+  clangExecutablePath = () => '/usr/bin/clang',
   processPlatform = process.platform,
   processEnv = process.env,
   spawnProcess = spawn,
+  spawnSyncProcess = spawnSync,
   debugLog = () => undefined,
 } = {}) {
   let rightAltRelay = null;
@@ -47,11 +53,29 @@ function createRightAltListenerService({
     }
   }
 
-  function start() {
-    if (processPlatform !== 'win32') return false;
+  function attachListenerProcess(child, errorLabel) {
+    rightAltListener = child;
+    rightAltListener.stdout.on('data', (chunk) => {
+      rightAltListenerStdout += chunk.toString('utf8');
+      const lines = rightAltListenerStdout.split(/\r?\n/);
+      rightAltListenerStdout = lines.pop() || '';
+      lines.forEach(handleListenerLine);
+    });
+
+    rightAltListener.stderr.on('data', (chunk) => {
+      console.error(`${errorLabel}: ${chunk.toString('utf8').trim()}`);
+    });
+
+    rightAltListener.on('exit', () => {
+      rightAltListener = null;
+      rightAltListenerStdout = '';
+    });
+  }
+
+  function startWindowsListener() {
     if (rightAltListener && !rightAltListener.killed) return true;
 
-    rightAltListener = spawnProcess('powershell.exe', [
+    const child = spawnProcess('powershell.exe', [
       '-NoProfile',
       '-ExecutionPolicy',
       'Bypass',
@@ -72,23 +96,59 @@ function createRightAltListenerService({
       },
     });
 
-    rightAltListener.stdout.on('data', (chunk) => {
-      rightAltListenerStdout += chunk.toString('utf8');
-      const lines = rightAltListenerStdout.split(/\r?\n/);
-      rightAltListenerStdout = lines.pop() || '';
-      lines.forEach(handleListenerLine);
-    });
-
-    rightAltListener.stderr.on('data', (chunk) => {
-      console.error(`Right Alt 监听器错误: ${chunk.toString('utf8').trim()}`);
-    });
-
-    rightAltListener.on('exit', () => {
-      rightAltListener = null;
-      rightAltListenerStdout = '';
-    });
-
+    attachListenerProcess(child, 'Right Alt 监听器错误');
     return true;
+  }
+
+  function macosListenerBinaryPath() {
+    const configuredPath = macosOptionListenerExecutablePath();
+    if (configuredPath) return configuredPath;
+    return path.join(processEnv.TMPDIR || os.tmpdir(), 'speakmore-macos-option-listener');
+  }
+
+  function compileMacosListener() {
+    const outputPath = macosListenerBinaryPath();
+    const result = spawnSyncProcess(clangExecutablePath(), [
+      '-framework',
+      'ApplicationServices',
+      macosOptionListenerPath(),
+      '-o',
+      outputPath,
+    ], {
+      encoding: 'utf8',
+      env: { ...processEnv },
+    });
+
+    if (result.error) {
+      console.error('Option 监听器编译失败:', result.error);
+      return '';
+    }
+    if (result.status !== 0) {
+      console.error('Option 监听器编译失败:', (result.stderr || '').trim());
+      return '';
+    }
+    return outputPath;
+  }
+
+  function startMacosListener() {
+    if (rightAltListener && !rightAltListener.killed) return true;
+
+    const binaryPath = compileMacosListener();
+    if (!binaryPath) return false;
+
+    const child = spawnProcess(binaryPath, [], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...processEnv },
+    });
+
+    attachListenerProcess(child, 'Option 监听器错误');
+    return true;
+  }
+
+  function start() {
+    if (processPlatform === 'win32') return startWindowsListener();
+    if (processPlatform === 'darwin') return startMacosListener();
+    return false;
   }
 
   function stop() {

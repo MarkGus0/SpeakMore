@@ -5,6 +5,7 @@ import { subscribeVoiceSession } from '../services/recorder'
 import { ipcClient } from '../services/ipc'
 import { listDictionaryEntries, subscribeDictionaryChanges } from '../services/dictionaryStore'
 import { calculateDashboardPersonalization } from '../services/dashboardPersonalization'
+import { formatShortcut, getShortcutLabelSet } from '../services/shortcutLabels'
 import {
   emptyVoiceStats,
   formatAverageSpeed,
@@ -30,6 +31,7 @@ export default function Dashboard() {
   const [recentResults, setRecentResults] = useState<RecentDashboardResult[]>([])
   const [stats, setStats] = useState<VoiceStats>(emptyVoiceStats)
   const [activeDictionaryCount, setActiveDictionaryCount] = useState(0)
+  const shortcuts = getShortcutLabelSet()
   const personalization = calculateDashboardPersonalization({
     totalDurationMs: stats.totalDurationMs,
     totalTextLength: stats.totalTextLength,
@@ -96,15 +98,15 @@ export default function Dashboard() {
         <Typography sx={{ fontSize: 14, color: '#5d5d5d', mt: 0.5 }}>
           {t('dashboard.shortcut.prefix')}{' '}
           <Box component="kbd" sx={{ bgcolor: 'rgba(119,119,119,0.08)', borderRadius: '5px', px: '5px', py: '2px', fontWeight: 500 }}>
-            Right Alt
+            {formatShortcut(shortcuts.dictation)}
           </Box>{' '}
           {t('dashboard.shortcut.orPress')}{' '}
           <Box component="kbd" sx={{ bgcolor: 'rgba(119,119,119,0.08)', borderRadius: '5px', px: '5px', py: '2px', fontWeight: 500 }}>
-            Right Alt + Right Shift
+            {formatShortcut(shortcuts.translate)}
           </Box>{' '}
           {t('dashboard.shortcut.orPress')}{' '}
           <Box component="kbd" sx={{ bgcolor: 'rgba(119,119,119,0.08)', borderRadius: '5px', px: '5px', py: '2px', fontWeight: 500 }}>
-            Right Alt + Space
+            {formatShortcut(shortcuts.ask)}
           </Box>{' '}
           {t('dashboard.shortcut.suffix')}
         </Typography>

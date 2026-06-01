@@ -3,7 +3,7 @@
 ## 协作原则
 
 - 本文件只记录长期有效的项目约束、当前真实架构和已知限制；历史迭代、临时计划和排查记录写入 `docs/ai/context/`。
-- 默认使用中文沟通、写文档和写注释；用户可见文案默认中文，仅品牌名和原始按键名可保留英文，例如 `SpeakMore`、`Right Alt`、`Right Shift`、`Space`。
+- 默认使用中文沟通、写文档和写注释；用户可见文案默认中文，仅品牌名和原始按键名可保留英文，例如 `SpeakMore`、`Right Alt`、`Right Shift`、`Option`、`Space`。
 - 修改前先明确 design / plan，并新增 `docs/ai/context/YYYYMMDD-HHMMSS-文件名.md` 记录背景、取舍和验证方式。
 - 优先复用现有 `server/`、`electron-app/` 和 `electron-app/renderer/`，不要把逆向资料当作主要开发入口。
 - 代码和测试是最终事实来源；如果本文件、README、上下文文档和代码冲突，先读代码与测试，再更新文档。
@@ -11,7 +11,7 @@
 ## 目录职责
 
 - `server/`：本地 FastAPI 后端，负责音频上传、WebSocket 语音流、音频转码、ASR 转写和大模型文本处理。
-- `electron-app/`：Electron 主进程、preload、本地兼容层、托盘、窗口、快捷键、自动粘贴、本地数据和 Windows 音频会话控制。
+- `electron-app/`：Electron 主进程、preload、本地兼容层、托盘、窗口、快捷键、结果交付、本地数据、Windows 音频会话控制和 macOS 开发态适配。
 - `electron-app/renderer/`：Vite + React + MUI + TypeScript 前端，包含首页、历史记录、词典、设置、录音状态机、悬浮胶囊和悬浮面板静态页面。
 - `docs/ai/context/`：AI 上下文、设计、计划、验证和决策记录。新增内容只创建新文件，不覆盖、重命名或删除历史文件。
 - `experiments/`：如果存在，只放独立实验代码，不参与主应用运行链路。
@@ -24,7 +24,7 @@
 - 旧模型管理能力已删除，Electron 不再注册 `model:*` IPC，也不提供模型切换、删除或选择入口；当前只允许单模型初始化页触发 SenseVoiceSmall 下载/加载。
 - 当前正式 ASR 模型只支持 `FunAudioLLM/SenseVoiceSmall`，用户可见层只有“初始化”页的单模型下载/加载入口。
 - `sensevoice-small` 通过 FunASR `SenseVoiceSmall` 接入，不描述为原生在线 streaming；后端通过累计音频伪流式输出维持现有 WebSocket 协议。
-- ASR 运行时优先使用 CUDA，PyTorch 不可用 CUDA 时降级到 CPU；模型扫描顺序固定为 `SENSEVOICE_SMALL_MODEL_DIR` → 用户设置的 `modelCacheDir` / 后端 `TYPELESS_MODEL_CACHE_DIR` → `%LOCALAPPDATA%\Typeless\models\funasr` → `%USERPROFILE%\.cache\huggingface\hub` → 初始化页点击下载到用户设置的 `modelCacheDir`，未设置时下载到 `%LOCALAPPDATA%\Typeless\models\funasr`。
+- ASR 运行时优先使用 CUDA，PyTorch 不可用 CUDA 时降级到 CPU；macOS MVP 先按 CPU 跑通，MPS 只作为后续优化；模型扫描顺序固定为 `SENSEVOICE_SMALL_MODEL_DIR` → 用户设置的 `modelCacheDir` / 后端 `TYPELESS_MODEL_CACHE_DIR` → 平台默认模型目录（Windows `%LOCALAPPDATA%\Typeless\models\funasr`，macOS `~/Library/Application Support/SpeakMore/models/funasr`）→ `%USERPROFILE%\.cache\huggingface\hub` 或当前用户 Hugging Face cache → 初始化页点击下载到用户设置的 `modelCacheDir`，未设置时下载到平台默认模型目录。
 - `electron-app/main.js` 加载 `electron-app/renderer/dist/index.html`、`floating-bar.html` 和 `floating-panel.html`。
 - `electron-app/main.js` 是 Electron 主进程组合根，主要负责创建服务、依赖接线和生命周期注册；窗口、悬浮状态、IPC、本地数据、后端客户端、音频会话、文本观察和 Right Alt 监听逻辑应放在对应独立模块。
 - `electron-app/main-ipc-registry.js` 负责按上下文注册 IPC，主进程只注入依赖，不在 `main.js` 里直接拼装各通道业务逻辑。
@@ -32,6 +32,7 @@
 - Windows 托盘图标由 `electron-app/assets/tray-placeholder.png` 提供，并通过 `electron-app/app-paths.js` 暴露给主进程。
 - 结构测试不能假设所有主进程逻辑都内联在 `main.js`，应检查 `main.js` 与拆分后的生产模块共同组成的主进程实现面。
 - Windows 文本观察 helper 位于 `electron-app/windows-text-observer/`，只服务本轮粘贴后的短时自动学习，不参与基础录音链路。
+- macOS 开发态 Option 监听 helper 位于 `electron-app/macos-option-listener.c`，当前只服务开发态 MVP；主进程启动时用 `clang` 编译到本机临时目录，再把 macOS `Option` 组合映射成既有 `global-keyboard` 事件，不改变 renderer 录音状态机协议。
 - `electron-app/renderer/src/components/AppShell.tsx` 只承担全局壳层和持久化订阅，页面状态拆到 `useGlobalShortcutBridge`、`useVoiceHistoryPersistence` 和 `useSettingsPageState` 之类的专用 hook。
 - 前端修改后必须在 `electron-app/renderer/` 下运行 `npm run build`，再重启 Electron 验证。
 - 主窗口关闭按钮只隐藏窗口到后台，托盘“退出”或真实应用退出才结束 Electron。
@@ -41,11 +42,16 @@
 
 ## 语音链路约束
 
-- 快捷键由 Windows 低级键盘监听器和 `shortcutGuard.ts` 处理，录音启动/停止基于释放边沿触发，不要对每次 `global-keyboard` 键态更新直接调用 `toggleRecording`。
-- 当前固定快捷键：
+- 快捷键由平台监听器和 `shortcutGuard.ts` 处理，录音启动/停止基于释放边沿触发，不要对每次 `global-keyboard` 键态更新直接调用 `toggleRecording`。
+- Windows 当前固定快捷键：
   - `Right Alt`：听写。
   - `Right Alt + Space`：自由提问。
   - `Right Alt + Right Shift`：翻译。
+  - `Escape`：取消当前未完成语音会话，或关闭当前悬浮面板。
+- macOS 开发态 MVP 固定快捷键：
+  - `Option`：听写。
+  - `Option + Space`：自由提问。
+  - `Option + Shift`：翻译。
   - `Escape`：取消当前未完成语音会话，或关闭当前悬浮面板。
 - `Escape` 取消语音会话时不能发送 `end_audio`，不能自动粘贴，必须忽略迟到结果。
 - 录音状态源由 `recorder.ts` 管理；悬浮胶囊只消费 `voice-state`，不要在悬浮胶囊里重新实现录音状态机。
@@ -57,6 +63,7 @@
 - `Right Alt` 始终是普通听写并优先自动粘贴；是否有 UIA 选区都不能改变为翻译或自由提问。
 - `Right Alt + Space` 永远是自由提问；有 UIA confirmed 选区时优先把选区作为 `selected_text` 上下文，UIA 无 confirmed 选区但剪贴板 fallback 成功时可作为低可信 `selected_text` 上下文，结果永远展示在悬浮卡片，不自动替换。
 - `Right Alt + Right Shift` 是显式语音翻译；不因有选区而直接翻译选区，必须录音，完成后走普通粘贴链路把翻译结果贴到当前光标位置。
+- macOS MVP 暂不做自动粘贴、选区上下文和自动学习；听写、自由提问和翻译结果都先展示到悬浮面板，后续再按 `docs/ai/context/` 里的 macOS 分阶段计划补齐。
 - 三种模式只要粘贴或替换失败，都必须把最终结果展示到悬浮卡片，不能让用户丢失结果。
 - 自动粘贴前必须先确认当前存在可信文本输入目标；找不到光标或输入目标时，不得静默写剪贴板和发送 `Ctrl+V`，必须直接展示悬浮卡片。
 - 自动粘贴前的输入目标判定按四层收敛：`UIA confirmed` -> `Win32 caret confirmed` -> `app_compat` 弱可信应用族兜底 -> 悬浮卡片；不要把“前台窗口存在”当成可粘贴条件，第三层只在 allowlist 应用族且弱信号充分时放行。当前 allowlist 只做显式应用族匹配，包含微信、QQ、Discord、Codex、Claude Code、ChatGPT、VS Code、Cursor、Slack、Notion、Spotify，不把所有 Electron / Chromium 一刀切放开。
@@ -115,7 +122,7 @@
 ## 已知限制
 
 - 大模型 provider 默认模型只是首次配置建议，可能随服务商策略变化；如果调用失败，优先让用户在设置页修改模型名或 API Key，不要写死单一模型假设。
-- 当前可信选区读取依赖 Windows UI Automation；目标应用不支持 UIA 选区时会按无选区处理。剪贴板读取不参与模式判断。
+- 当前 Windows 可信选区读取依赖 Windows UI Automation；目标应用不支持 UIA 选区时会按无选区处理。macOS MVP 暂不读取选区，后续需要用 Accessibility API 单独实现。
 - 当前 `ask_anything` 只调用 DeepSeek 文本模型，没有联网搜索、天气查询或工具调用链路；实时信息问题必须明确能力边界。
 - 当前没有单独的选区文本翻译快捷键；`Right Alt` 固定为听写，`Right Alt + Right Shift` 固定为语音翻译粘贴。翻译目标语言当前支持 `en` 和 `ja`。
 - 首页“最近结果”的真实 UI 以 `electron-app/renderer/src/pages/Dashboard.tsx` 为准，修改前先读当前实现和测试，不要只依赖历史上下文。
