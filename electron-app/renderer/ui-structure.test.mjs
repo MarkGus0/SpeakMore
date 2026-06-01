@@ -321,7 +321,6 @@ test('主进程注册真实 bundle 首屏所需的 IPC shim', async () => {
     'db:history-list',
     'i18n:reset-to-system-language',
     'permission:request',
-    'permission:update-auto-launch',
     'updater:check-for-update',
     'page:open-url',
     'page:floating-bar-update-positions',
@@ -1088,10 +1087,13 @@ test('P1 设置页与设置 store 统一走主进程 JSON 数据源', async () =
   assert.match(settingsPage, /AudioSettingsSection/);
   assert.match(settingsPage, /LanguageSettingsSection/);
   assert.match(settingsPage, /LlmSettingsSection/);
-  assert.match(settingsState, /permission:update-auto-launch/);
+  assert.doesNotMatch(settingsState, /permission:update-auto-launch/);
   assert.match(settingsState, /navigator\.mediaDevices\.enumerateDevices/);
   assert.match(settingsState, /reloadLlmBackendConfig/);
   assert.match(audioSection, /selectedAudioDeviceId/);
+  assert.doesNotMatch(audioSection, /settings\.other/);
+  assert.doesNotMatch(audioSection, /settings\.autoLaunch/);
+  assert.doesNotMatch(audioSection, /launchAtSystemStartup/);
   assert.match(languageSection, /preferredLanguage/);
   assert.match(languageSection, /translationTargetLanguage/);
   assert.match(languageSection, /MenuItem value="zh-CN"/);

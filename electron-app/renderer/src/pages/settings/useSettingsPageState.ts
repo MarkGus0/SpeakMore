@@ -4,7 +4,6 @@
  * 需要加载本地设置、枚举麦克风或保存大模型配置时看这里。
  */
 import { useCallback, useMemo, useRef, useState, useEffect } from 'react'
-import { ipcClient } from '../../services/ipc'
 import {
   defaultSettings,
   loadSettings,
@@ -60,16 +59,12 @@ export function useSettingsPageState() {
   }, [])
 
   const updateSettings = useCallback(async (next: LocalSettings) => {
-    const previousSettings = settingsRef.current
     const seq = settingsUpdateSeq.current + 1
     settingsUpdateSeq.current = seq
     settingsRef.current = next
     setSettings(next)
 
-    if (previousSettings.launchAtSystemStartup !== next.launchAtSystemStartup) {
-      void ipcClient.invoke('permission:update-auto-launch', { enable: next.launchAtSystemStartup })
-        .catch(() => undefined)
-    }
+    // 自动启动链路暂时停用，避免设置页写入系统开机项。
 
     const saved = await saveSettings(next)
     if (settingsUpdateSeq.current === seq) {
