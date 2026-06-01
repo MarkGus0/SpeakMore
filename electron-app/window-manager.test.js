@@ -27,8 +27,11 @@ function createFakeBrowserWindowClass() {
       this.bounds = null;
       this.ignoreMouseEvents = null;
       this.alwaysOnTopArgs = null;
+      this.alwaysOnTopCalls = [];
       this.visibleOnAllWorkspacesArgs = null;
+      this.visibleOnAllWorkspacesCalls = [];
       this.fullScreenable = null;
+      this.moveTopCallCount = 0;
       this.webContents = {
         sent: [],
         devToolsOpened: false,
@@ -99,14 +102,20 @@ function createFakeBrowserWindowClass() {
 
     setAlwaysOnTop(...args) {
       this.alwaysOnTopArgs = args;
+      this.alwaysOnTopCalls.push(args);
     }
 
     setVisibleOnAllWorkspaces(...args) {
       this.visibleOnAllWorkspacesArgs = args;
+      this.visibleOnAllWorkspacesCalls.push(args);
     }
 
     setFullScreenable(value) {
       this.fullScreenable = value;
+    }
+
+    moveTop() {
+      this.moveTopCallCount += 1;
     }
   }
 
@@ -310,6 +319,61 @@ test('显示悬浮窗口时使用非激活显示，避免抢占外部输入焦�
   assert.equal(floatingPanel.showInactiveCallCount, 1);
   assert.equal(floatingPanel.showCallCount, 0);
   assert.equal(floatingPanel.shown, true);
+});
+
+test('显示悬浮窗口时会重新提升置顶层级但不抢焦点', () => {
+  const BrowserWindow = createFakeBrowserWindowClass();
+  const manager = createWindowManager({
+    app: { quit: () => undefined },
+    BrowserWindow,
+    Tray: createFakeTrayClass(),
+    Menu: { buildFromTemplate: (template) => template },
+    nativeImage: { createFromPath: (filePath) => ({ filePath, resize: () => ({ filePath }) }) },
+    session: { fromPartition: (partition) => ({ partition }) },
+    screen: {
+      getCursorScreenPoint: () => ({ x: 0, y: 0 }),
+      getDisplayNearestPoint: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }),
+      getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }),
+    },
+    path,
+    baseDir: 'C:\\repo\\SpeakMore\\electron-app',
+    preloadPath: () => 'C:\\repo\\SpeakMore\\electron-app\\preload.js',
+    iconPath: () => 'C:\\repo\\SpeakMore\\release-artifacts\\assets\\tray-placeholder.png',
+    trayIconPath: () => 'C:\\repo\\SpeakMore\\release-artifacts\\assets\\tray-placeholder.png',
+    resolveBottomCenterBounds: (_, windowSize) => ({ x: 11, y: 22, width: windowSize.width, height: windowSize.height }),
+    isActiveVoiceState,
+    isErrorVoiceState,
+    isTerminalVoiceState,
+    shouldShowShortcutHint,
+    sendToMain: () => undefined,
+    sendToFloatingBar: () => undefined,
+    sendToFloatingPanel: () => undefined,
+    getAppIsQuitting: () => false,
+  });
+
+  const floatingBar = manager.createFloatingBar();
+  const floatingPanel = manager.createFloatingPanelWindow();
+
+  assert.equal(floatingBar.alwaysOnTopCalls.length, 1);
+  assert.equal(floatingPanel.alwaysOnTopCalls.length, 1);
+  assert.equal(floatingBar.moveTopCallCount, 0);
+  assert.equal(floatingPanel.moveTopCallCount, 0);
+
+  manager.showFloatingBar();
+  manager.showFloatingPanel();
+
+  assert.equal(floatingBar.alwaysOnTopCalls.length, 2);
+  assert.equal(floatingPanel.alwaysOnTopCalls.length, 2);
+  assert.equal(floatingBar.visibleOnAllWorkspacesCalls.length, 2);
+  assert.equal(floatingPanel.visibleOnAllWorkspacesCalls.length, 2);
+  assert.deepEqual(floatingBar.alwaysOnTopArgs, [true, 'screen-saver', 1]);
+  assert.deepEqual(floatingPanel.alwaysOnTopArgs, [true, 'screen-saver', 1]);
+  assert.deepEqual(floatingBar.visibleOnAllWorkspacesArgs[1], { visibleOnFullScreen: true, skipTransformProcessType: true });
+  assert.deepEqual(floatingPanel.visibleOnAllWorkspacesArgs[1], { visibleOnFullScreen: true, skipTransformProcessType: true });
+  assert.equal(floatingBar.moveTopCallCount, 1);
+  assert.equal(floatingPanel.moveTopCallCount, 1);
+  assert.equal(floatingBar.focused, false);
+  assert.equal(floatingPanel.focused, false);
 });
 
 test('handleVoiceState 对终态会显示悬浮条并安排自动隐藏', () => {
