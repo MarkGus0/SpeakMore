@@ -49,6 +49,7 @@ function createAppPaths({
     trayIconPath: () => packagedResourcePath('assets', 'tray-placeholder.png'),
     rightAltListenerPath: () => unpackedAppPath('right-alt-listener.ps1'),
     macosOptionListenerPath: () => unpackedAppPath('macos-option-listener.c'),
+    macosPlatformHelperPath: () => unpackedAppPath('macos-platform-helper.m'),
     audioSessionControlPath: () => unpackedAppPath('audio-session-control.ps1'),
     backendExecutablePath: () => packagedResourcePath('backend', executableName('speakmore-backend')),
     ffmpegExecutablePath: () => packagedResourcePath('ffmpeg', 'bin', executableName('ffmpeg')),

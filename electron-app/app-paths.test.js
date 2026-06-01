@@ -20,6 +20,7 @@ test('createAppPaths 生成本地数据和辅助路径', () => {
   assert.equal(appPaths.trayIconPath(), winPath.join('C:\\repo\\SpeakMore\\release-artifacts', 'assets', 'tray-placeholder.png'));
   assert.equal(appPaths.rightAltListenerPath(), winPath.join('C:\\repo\\SpeakMore\\electron-app', 'right-alt-listener.ps1'));
   assert.equal(appPaths.macosOptionListenerPath(), winPath.join('C:\\repo\\SpeakMore\\electron-app', 'macos-option-listener.c'));
+  assert.equal(appPaths.macosPlatformHelperPath(), winPath.join('C:\\repo\\SpeakMore\\electron-app', 'macos-platform-helper.m'));
   assert.equal(appPaths.audioSessionControlPath(), winPath.join('C:\\repo\\SpeakMore\\electron-app', 'audio-session-control.ps1'));
   assert.equal(appPaths.textObserverExecutablePath(), winPath.join('C:\\repo\\SpeakMore\\release-artifacts', 'helper', 'WindowsTextObserver.exe'));
   assert.equal(appPaths.dotnetRootPath(), winPath.join('C:\\repo\\SpeakMore\\release-artifacts', 'dotnet'));
@@ -57,4 +58,5 @@ test('createAppPaths 在 macOS 使用无 exe 后缀的本地可执行资源', ()
   assert.equal(appPaths.ffmpegExecutablePath(), path.join('/Applications/SpeakMore.app/Contents/Resources', 'ffmpeg', 'bin', 'ffmpeg'));
   assert.equal(appPaths.textObserverExecutablePath(), path.join('/Applications/SpeakMore.app/Contents/Resources', 'helper', 'WindowsTextObserver'));
   assert.equal(appPaths.macosOptionListenerPath(), path.join('/Applications/SpeakMore.app/Contents/Resources/app.asar.unpacked/electron-app', 'macos-option-listener.c'));
+  assert.equal(appPaths.macosPlatformHelperPath(), path.join('/Applications/SpeakMore.app/Contents/Resources/app.asar.unpacked/electron-app', 'macos-platform-helper.m'));
 });

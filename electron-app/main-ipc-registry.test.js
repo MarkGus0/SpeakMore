@@ -27,6 +27,7 @@ test('createMainIpcRegistry 只注册一次并按固定顺序分发依赖', () =
   const dialog = { name: 'dialog' };
   const localUser = { name: 'SpeakMore' };
   const emitDictionaryChanged = () => undefined;
+  const macosPlatformCapabilities = { name: 'macosPlatformCapabilities' };
   const localCompatState = {
     localStores: { 'app-settings': { enabledMuteBackgroundAudio: true } },
     getLocalUser: () => localUser,
@@ -105,6 +106,8 @@ test('createMainIpcRegistry 只注册一次并按固定顺序分发依赖', () =
     setInteractiveCardPayload: () => undefined,
     processExecPath: 'D:\\SpeakMore.exe',
     processEnv: { TYPELESS: '1' },
+    processPlatform: 'win32',
+    macosPlatformCapabilities,
   });
 
   registry.registerIpcHandlers();
@@ -135,6 +138,8 @@ test('createMainIpcRegistry 只注册一次并按固定顺序分发依赖', () =
   assert.equal(calls[7][1].dialog, dialog);
   assert.equal(calls[8][1].randomUUID(), 'uuid-1');
   assert.equal(calls[9][1].createMainWindow(), 'main-window');
+  assert.equal(calls[10][1].macosPlatformCapabilities, macosPlatformCapabilities);
+  assert.equal(calls[10][1].processPlatform, 'win32');
   assert.equal(calls[11][1].localStores, localCompatState.localStores);
   assert.equal('getSystemInfo' in calls[11][1], false);
 });
