@@ -73,13 +73,25 @@ class ServiceReadinessTest(unittest.TestCase):
     def test_model_status_is_idle_until_user_starts_download(self):
         app = main.create_app(preload_model=lambda: None, exit_scheduler=lambda _code: None)
 
-        with TestClient(app) as client:
+        with patch(
+            "main.get_asr_runtime_device_status",
+            return_value={
+                "device": "mps",
+                "requested_device": "auto",
+                "device_source": "auto",
+                "fallback_reason": None,
+            },
+        ), TestClient(app) as client:
             status = client.get("/model/status")
             ready = client.get("/ready")
 
         self.assertEqual(status.status_code, 200)
         self.assertEqual(status.json()["status"], "idle")
         self.assertEqual(status.json()["model_id"], "sensevoice-small")
+        self.assertEqual(status.json()["device"], "mps")
+        self.assertEqual(status.json()["requested_device"], "auto")
+        self.assertEqual(status.json()["device_source"], "auto")
+        self.assertIsNone(status.json()["fallback_reason"])
         self.assertEqual(ready.status_code, 503)
 
     def test_model_download_endpoint_starts_preload_task(self):

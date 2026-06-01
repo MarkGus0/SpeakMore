@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from asr import (
     DOWNLOAD_SOURCE,
     create_streaming_asr_session,
+    get_asr_runtime_device_status,
     preload_asr_model,
     resolve_streaming_model_source,
     transcribe_audio,
@@ -243,11 +244,16 @@ def create_voice_service_state(
     download_progress: dict | None = None,
 ) -> dict[str, str | int | bool | None]:
     now = time.time()
+    device_status = get_asr_runtime_device_status()
     return {
         "status": status,
         "detail": detail,
         "model_id": SENSEVOICE_SMALL_MODEL_ID,
         "repo_id": SENSEVOICE_SMALL_REPO_ID,
+        "device": device_status.get("device"),
+        "requested_device": device_status.get("requested_device"),
+        "device_source": device_status.get("device_source"),
+        "fallback_reason": device_status.get("fallback_reason"),
         "cache_dir": get_model_cache_dir(),
         "cached": is_sensevoice_cached(),
         "ready": status == "ready",
@@ -307,6 +313,7 @@ def get_voice_service_state(app: FastAPI) -> dict:
 
     current = {
         **current,
+        **get_asr_runtime_device_status(),
         "cache_dir": get_model_cache_dir(),
         "cached": is_sensevoice_cached(),
         "ready": current.get("status") == "ready",
