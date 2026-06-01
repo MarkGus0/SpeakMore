@@ -512,7 +512,9 @@ test('语音输入 IPC 会调用本地后端并把结果粘贴到焦点应用', 
   assert.match(main, /FormData/);
   assert.match(main, /fetchImpl\(/);
   assert.doesNotMatch(main, /audio:ai-voice-flow['"],\s*\(\)\s*=>\s*\(\{\s*success:\s*false[\s\S]*not_implemented/);
-  assert.match(main, /keyboard:type-transcript['"][\s\S]*clipboard\.writeText/);
+  assert.match(main, /keyboard:type-transcript/);
+  assert.match(main, /clipboard\.writeText\(pastedText\)/);
+  assert.match(main, /macosPlatformCapabilities\.pasteText/);
   assert.match(main, /System\.Windows\.Forms\.SendKeys/);
 });
 

@@ -14,6 +14,8 @@ function registerKeyboardIpcHandlers({
   restoreClipboardSnapshot,
   readFocusedInfo,
   textObservationManager,
+  macosPlatformCapabilities = null,
+  platform = process.platform,
   randomUUID = () => require('crypto').randomUUID(),
   processEnv = process.env,
   logger = console,
@@ -36,20 +38,32 @@ function registerKeyboardIpcHandlers({
     throw new Error('textObservationManager.start is required');
   }
 
-  // 自动粘贴的唯一主进程入口。renderer 只提交最终文本，是否真的能粘贴由主进程基于当前焦点环境判断。
-  ipcMain.handle('keyboard:type-transcript', async (_, text, pasteContext = {}) => {
-    const pastedText = String(text || '');
-    log('info', '收到转写结果', {
+  async function startWindowsTextObservation(pastedText) {
+    const focusInfo = await readFocusedInfo();
+    log('info', '读取当前焦点信息完成', {
       pastedText,
-      length: pastedText.length,
-      pasteContext,
+      focusInfo,
     });
-    if (!pastedText) return false;
+    try {
+      const observationResult = await textObservationManager.start({
+        audioId: randomUUID(),
+        pastedText,
+        focusInfo,
+      });
+      log('info', '观察会话启动结果', {
+        pastedText,
+        observationResult,
+      });
+    } catch (error) {
+      // 自动学习是粘贴后的后台能力；失败不能影响用户已经拿到的文本结果。
+      log('info', '观察会话启动异常，已静默结束', {
+        pastedText,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 
-    // 录音开始前记录的焦点信息用于防止焦点漂移；如果当前目标已经不是可信输入框，就不能误发 Ctrl+V。
-    const startFocusInfo = pasteContext && typeof pasteContext === 'object'
-      ? pasteContext.startFocusInfo || null
-      : null;
+  async function pasteWithWindowsSendKeys(pastedText, startFocusInfo) {
     log('info', '开始检查焦点目标', { startFocusInfo });
     const textTarget = await readFocusedTextTarget({ startFocusInfo });
     log('info', '焦点目标检查结果', { textTarget });
@@ -106,29 +120,8 @@ function registerKeyboardIpcHandlers({
       });
       log('info', 'SendKeys 执行结果', { pasteSucceeded, pastedText });
       if (pasteSucceeded && pastedText.trim()) {
-        // 自动学习只能围绕 SpeakMore 本轮粘贴结果短时观察；没有成功粘贴时启动观察会把用户手动输入误判为修正。
-        const focusInfo = await readFocusedInfo();
-        log('info', '读取当前焦点信息完成', {
-          pastedText,
-          focusInfo,
-        });
-        try {
-          const observationResult = await textObservationManager.start({
-            audioId: randomUUID(),
-            pastedText,
-            focusInfo,
-          });
-          log('info', '观察会话启动结果', {
-            pastedText,
-            observationResult,
-          });
-        } catch (error) {
-          // 自动学习是粘贴后的后台能力；失败不能影响用户已经拿到的文本结果。
-          log('info', '观察会话启动异常，已静默结束', {
-            pastedText,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
+        // 自动学习当前只接 Windows UIA 文本观察，macOS 后续阶段单独实现。
+        await startWindowsTextObservation(pastedText);
       }
       return { success: pasteSucceeded };
     } finally {
@@ -145,6 +138,45 @@ function registerKeyboardIpcHandlers({
         logger.warn?.('自动粘贴后恢复剪贴板失败');
       }
     }
+  }
+
+  async function pasteWithMacos(pastedText, startFocusInfo) {
+    if (!macosPlatformCapabilities || typeof macosPlatformCapabilities.pasteText !== 'function') {
+      return { success: false, reason: 'macos_auto_paste_unavailable' };
+    }
+
+    const result = await macosPlatformCapabilities.pasteText(pastedText, { startFocusInfo });
+    log(result?.success ? 'info' : 'warn', 'macOS 自动粘贴结果', {
+      pastedText,
+      result,
+    });
+    return result;
+  }
+
+  // 自动粘贴的唯一主进程入口。renderer 只提交最终文本，是否真的能粘贴由主进程基于当前焦点环境判断。
+  ipcMain.handle('keyboard:type-transcript', async (_, text, pasteContext = {}) => {
+    const pastedText = String(text || '');
+    log('info', '收到转写结果', {
+      pastedText,
+      length: pastedText.length,
+      pasteContext,
+    });
+    if (!pastedText) return false;
+
+    // 录音开始前记录的焦点信息用于防止焦点漂移；如果当前目标已经不是可信输入框，就不能误发粘贴快捷键。
+    const startFocusInfo = pasteContext && typeof pasteContext === 'object'
+      ? pasteContext.startFocusInfo || null
+      : null;
+
+    if (platform === 'darwin') {
+      return pasteWithMacos(pastedText, startFocusInfo);
+    }
+
+    if (platform !== 'win32') {
+      return { success: false, reason: 'auto_paste_unsupported_platform' };
+    }
+
+    return pasteWithWindowsSendKeys(pastedText, startFocusInfo);
   });
 }
 

@@ -253,29 +253,17 @@ function audioSessionControlPath() { return appPaths.audioSessionControlPath(); 
 function macosOptionListenerPath() { return appPaths.macosOptionListenerPath(); }
 function macosPlatformHelperPath() { return appPaths.macosPlatformHelperPath(); }
 
-function readFocusedInfoForPlatform(options = {}) {
-  if (IS_MACOS) return Promise.resolve(createEmptyFocusedInfo());
+async function readFocusedInfoForPlatform(options = {}) {
+  if (IS_MACOS) {
+    const focusedInfo = await macosPlatformCapabilities.getFocusedInfo(options);
+    if (focusedInfo?.appInfo && focusedInfo?.elementInfo) return focusedInfo;
+    return createEmptyFocusedInfo();
+  }
   return readFocusedInfo(options);
 }
 
 function readFocusedTextTargetForPlatform() {
-  if (IS_MACOS) {
-    return Promise.resolve({
-      success: false,
-      source: 'none',
-      confidence: 'none',
-      reason: 'macos_auto_paste_not_supported',
-      valuePattern: false,
-      textPattern: false,
-      isReadOnly: false,
-      controlType: '',
-      appFamily: '',
-      foregroundHwnd: '',
-      focusHwnd: '',
-      caretHwnd: '',
-      matchedSignals: [],
-    });
-  }
+  if (IS_MACOS) return macosPlatformCapabilities.getFocusedTextTargetForPaste(...arguments);
   return readFocusedTextTarget(...arguments);
 }
 

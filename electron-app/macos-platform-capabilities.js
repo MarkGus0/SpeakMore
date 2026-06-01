@@ -5,9 +5,11 @@ const {
   createClipboardSnapshot: defaultCreateClipboardSnapshot,
   restoreClipboardSnapshot: defaultRestoreClipboardSnapshot,
 } = require('./focused-context/clipboard');
+const { normalizeFocusedTextTargetResult } = require('./focused-context/normalizers');
 
 const ACCESSIBILITY_SETTINGS_URL = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility';
 const DEFAULT_HELPER_TIMEOUT_MS = 3000;
+const DEFAULT_PASTE_SETTLE_MS = 180;
 
 function unavailable(reason = 'macos_capability_unavailable', detail = '') {
   return {
@@ -34,6 +36,7 @@ function createMacosPlatformCapabilities({
   setTimer = setTimeout,
   clearTimer = clearTimeout,
   helperTimeoutMs = DEFAULT_HELPER_TIMEOUT_MS,
+  pasteSettleMs = DEFAULT_PASTE_SETTLE_MS,
   logger = console,
 } = {}) {
   let compiledHelperPath = '';
@@ -98,6 +101,26 @@ function createMacosPlatformCapabilities({
     } catch (error) {
       return unavailable('macos_helper_invalid_json', `${command}: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  function wait(ms) {
+    return new Promise((resolve) => {
+      setTimer(resolve, Math.max(0, Number(ms) || 0));
+    });
+  }
+
+  function hasFocusedTargetChanged(startFocusInfo, textTarget) {
+    if (!startFocusInfo || typeof startFocusInfo !== 'object') return false;
+
+    const metadata = startFocusInfo.appInfo?.app_metadata || {};
+    const startBundleId = String(startFocusInfo.appInfo?.app_identifier || metadata.bundle_id || '');
+    const currentBundleId = String(textTarget.foregroundHwnd || textTarget.appFamily || '');
+    const startProcessId = String(metadata.process_id || '');
+    const currentProcessId = String(textTarget.focusHwnd || '');
+
+    if (startBundleId && currentBundleId && startBundleId !== currentBundleId) return true;
+    if (startProcessId && currentProcessId && startProcessId !== currentProcessId) return true;
+    return false;
   }
 
   async function runHelperCommand(command) {
@@ -166,7 +189,25 @@ function createMacosPlatformCapabilities({
   }
 
   async function getFocusedTextTarget() {
-    return runHelperCommand('focused-text-target');
+    const result = await runHelperCommand('focused-text-target');
+    return normalizeFocusedTextTargetResult(result);
+  }
+
+  async function getFocusedTextTargetForPaste({ startFocusInfo = null } = {}) {
+    const textTarget = await getFocusedTextTarget();
+    if (!textTarget.success) return textTarget;
+
+    if (hasFocusedTargetChanged(startFocusInfo, textTarget)) {
+      return {
+        ...textTarget,
+        success: false,
+        source: 'none',
+        confidence: 'none',
+        reason: 'macos_focused_target_changed',
+      };
+    }
+
+    return textTarget;
   }
 
   async function sendPasteShortcutForDiagnostics() {
@@ -219,6 +260,73 @@ function createMacosPlatformCapabilities({
     }
   }
 
+  async function pasteText(text, { startFocusInfo = null } = {}) {
+    if (!isMacOS()) return unavailable('macos_auto_paste_unavailable');
+
+    const pastedText = String(text || '');
+    if (!pastedText) return { success: false, reason: 'empty_text' };
+    if (!clipboard || typeof clipboard.writeText !== 'function' || typeof clipboard.readText !== 'function') {
+      return unavailable('clipboard_unavailable');
+    }
+
+    const textTarget = await getFocusedTextTargetForPaste({ startFocusInfo });
+    if (!textTarget.success) {
+      return {
+        success: false,
+        reason: textTarget.reason || 'macos_focused_target_unavailable',
+        textTarget,
+      };
+    }
+
+    const previousClipboard = createClipboardSnapshot(clipboard);
+    let result = null;
+    let restoreResult = { success: true };
+
+    try {
+      clipboard.writeText(pastedText);
+      const pasteShortcut = await sendPasteShortcutForDiagnostics();
+      if (!pasteShortcut.success) {
+        result = {
+          success: false,
+          reason: pasteShortcut.reason || 'macos_event_injection_failed',
+          textTarget,
+          pasteShortcut,
+        };
+      } else {
+        await wait(pasteSettleMs);
+        result = {
+          success: true,
+          platform: 'darwin',
+          textTarget,
+          pasteShortcut,
+        };
+      }
+    } catch (error) {
+      result = unavailable('macos_auto_paste_failed', error instanceof Error ? error.message : String(error));
+    }
+
+    try {
+      restoreClipboardSnapshot(clipboard, previousClipboard);
+    } catch (error) {
+      restoreResult = {
+        success: false,
+        reason: 'macos_clipboard_restore_failed',
+        detail: error instanceof Error ? error.message : String(error),
+      };
+    }
+
+    if (!restoreResult.success) {
+      return {
+        success: false,
+        reason: 'macos_clipboard_restore_failed',
+        restoreResult,
+        pasteResult: result,
+      };
+    }
+
+    return result;
+  }
+
   async function getDiagnostics({ includeClipboard = false, includeEventInjection = false } = {}) {
     if (!isMacOS()) return unavailable();
 
@@ -249,9 +357,11 @@ function createMacosPlatformCapabilities({
     getDiagnostics,
     getFocusedInfo,
     getFocusedTextTarget,
+    getFocusedTextTargetForPaste,
     getFrontmostApp,
     helperBinaryPath,
     openAccessibilitySettings,
+    pasteText,
     runHelperCommand,
     sendPasteShortcutForDiagnostics,
   };

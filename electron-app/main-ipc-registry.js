@@ -170,6 +170,8 @@ function createMainIpcRegistry({
       restoreClipboardSnapshot,
       readFocusedInfo,
       textObservationManager,
+      macosPlatformCapabilities,
+      platform: processPlatform,
       randomUUID: () => crypto.randomUUID(),
       processEnv,
       logger,

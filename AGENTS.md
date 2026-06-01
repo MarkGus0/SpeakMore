@@ -64,7 +64,7 @@
 - `Right Alt` 始终是普通听写并优先自动粘贴；是否有 UIA 选区都不能改变为翻译或自由提问。
 - `Right Alt + Space` 永远是自由提问；有 UIA confirmed 选区时优先把选区作为 `selected_text` 上下文，UIA 无 confirmed 选区但剪贴板 fallback 成功时可作为低可信 `selected_text` 上下文，结果永远展示在悬浮卡片，不自动替换。
 - `Right Alt + Right Shift` 是显式语音翻译；不因有选区而直接翻译选区，必须录音，完成后走普通粘贴链路把翻译结果贴到当前光标位置。
-- macOS 阶段一暂不做真实自动粘贴、选区上下文和自动学习；听写、自由提问和翻译结果都先展示到悬浮面板，权限和 `Cmd+V` 只允许通过诊断 IPC 使用，后续再按 `docs/ai/context/` 里的 macOS 分阶段计划补齐。
+- macOS 阶段二支持普通听写和语音翻译在可信输入目标中自动粘贴，失败时展示悬浮面板；自由提问仍固定展示悬浮面板。macOS 仍暂不做选区上下文和自动学习，后续再按 `docs/ai/context/` 里的 macOS 分阶段计划补齐。
 - 三种模式只要粘贴或替换失败，都必须把最终结果展示到悬浮卡片，不能让用户丢失结果。
 - 自动粘贴前必须先确认当前存在可信文本输入目标；找不到光标或输入目标时，不得静默写剪贴板和发送 `Ctrl+V`，必须直接展示悬浮卡片。
 - 自动粘贴前的输入目标判定按四层收敛：`UIA confirmed` -> `Win32 caret confirmed` -> `app_compat` 弱可信应用族兜底 -> 悬浮卡片；不要把“前台窗口存在”当成可粘贴条件，第三层只在 allowlist 应用族且弱信号充分时放行。当前 allowlist 只做显式应用族匹配，包含微信、QQ、Discord、Codex、Claude Code、ChatGPT、VS Code、Cursor、Slack、Notion、Spotify，不把所有 Electron / Chromium 一刀切放开。

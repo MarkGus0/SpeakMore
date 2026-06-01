@@ -137,3 +137,144 @@ test('createMacosPlatformCapabilities 剪贴板诊断会恢复原始内容', () 
   assert.equal(clipboard.current().html, '<b>旧文本</b>');
   assert.equal(clipboard.current().image.id, 'image-1');
 });
+
+test('createMacosPlatformCapabilities 在可信目标中执行 macOS 自动粘贴并恢复剪贴板', async () => {
+  const clipboard = createRichClipboard();
+  const helperCommands = [];
+  const service = createMacosPlatformCapabilities({
+    processPlatform: 'darwin',
+    clipboard,
+    pasteSettleMs: 0,
+    helperSourcePath: () => '/repo/electron-app/macos-platform-helper.m',
+    helperExecutablePath: () => '/tmp/speakmore-macos-platform-helper',
+    spawnSyncProcess: () => ({ status: 0, stdout: '', stderr: '' }),
+    spawnProcess: (_command, args) => {
+      helperCommands.push(args[0]);
+      if (args[0] === 'focused-text-target') {
+        return createFakeChild({
+          stdout: JSON.stringify({
+            success: true,
+            source: 'macos_ax',
+            confidence: 'confirmed',
+            reason: 'macos_focused_target_confirmed',
+            text_pattern: true,
+            control_type: 'AXTextField',
+            app_family: 'com.apple.TextEdit',
+            foreground_hwnd: 'com.apple.TextEdit',
+            focus_hwnd: '42',
+            matched_signals: ['frontmost_app', 'role:AXTextField'],
+          }),
+        });
+      }
+      return createFakeChild({
+        stdout: JSON.stringify({
+          success: true,
+          source: 'macos_cgevent',
+          confidence: 'sent',
+          reason: 'macos_event_injection_sent',
+        }),
+      });
+    },
+  });
+
+  const result = await service.pasteText('hello', {
+    startFocusInfo: {
+      appInfo: {
+        app_identifier: 'com.apple.TextEdit',
+        app_metadata: { process_id: 42 },
+      },
+    },
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.platform, 'darwin');
+  assert.deepEqual(helperCommands, ['focused-text-target', 'send-paste-shortcut']);
+  assert.equal(clipboard.current().text, '旧文本');
+  assert.equal(clipboard.current().html, '<b>旧文本</b>');
+});
+
+test('createMacosPlatformCapabilities 在焦点漂移时拒绝自动粘贴', async () => {
+  const clipboard = createRichClipboard();
+  const helperCommands = [];
+  const service = createMacosPlatformCapabilities({
+    processPlatform: 'darwin',
+    clipboard,
+    helperSourcePath: () => '/repo/electron-app/macos-platform-helper.m',
+    spawnSyncProcess: () => ({ status: 0, stdout: '', stderr: '' }),
+    spawnProcess: (_command, args) => {
+      helperCommands.push(args[0]);
+      return createFakeChild({
+        stdout: JSON.stringify({
+          success: true,
+          source: 'macos_ax',
+          confidence: 'confirmed',
+          reason: 'macos_focused_target_confirmed',
+          text_pattern: true,
+          control_type: 'AXTextField',
+          app_family: 'com.apple.TextEdit',
+          foreground_hwnd: 'com.apple.TextEdit',
+          focus_hwnd: '42',
+          matched_signals: ['frontmost_app', 'role:AXTextField'],
+        }),
+      });
+    },
+  });
+
+  const result = await service.pasteText('hello', {
+    startFocusInfo: {
+      appInfo: {
+        app_identifier: 'com.microsoft.VSCode',
+        app_metadata: { process_id: 42 },
+      },
+    },
+  });
+
+  assert.equal(result.success, false);
+  assert.equal(result.reason, 'macos_focused_target_changed');
+  assert.deepEqual(helperCommands, ['focused-text-target']);
+  assert.equal(clipboard.current().text, '旧文本');
+});
+
+test('createMacosPlatformCapabilities 自动粘贴会报告剪贴板恢复失败', async () => {
+  const clipboard = createRichClipboard();
+  const service = createMacosPlatformCapabilities({
+    processPlatform: 'darwin',
+    clipboard,
+    pasteSettleMs: 0,
+    restoreClipboardSnapshot: () => {
+      throw new Error('restore failed');
+    },
+    helperSourcePath: () => '/repo/electron-app/macos-platform-helper.m',
+    spawnSyncProcess: () => ({ status: 0, stdout: '', stderr: '' }),
+    spawnProcess: (_command, args) => {
+      if (args[0] === 'focused-text-target') {
+        return createFakeChild({
+          stdout: JSON.stringify({
+            success: true,
+            source: 'macos_ax',
+            confidence: 'confirmed',
+            text_pattern: true,
+            control_type: 'AXTextField',
+            foreground_hwnd: 'com.apple.TextEdit',
+            focus_hwnd: '42',
+            matched_signals: ['frontmost_app', 'role:AXTextField'],
+          }),
+        });
+      }
+      return createFakeChild({
+        stdout: JSON.stringify({
+          success: true,
+          source: 'macos_cgevent',
+          confidence: 'sent',
+          reason: 'macos_event_injection_sent',
+        }),
+      });
+    },
+  });
+
+  const result = await service.pasteText('hello');
+
+  assert.equal(result.success, false);
+  assert.equal(result.reason, 'macos_clipboard_restore_failed');
+  assert.equal(result.restoreResult.detail, 'restore failed');
+});
