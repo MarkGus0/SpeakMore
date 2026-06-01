@@ -28,6 +28,46 @@ static NSString *AXStringAttribute(AXUIElementRef element, CFStringRef attribute
   return result ?: @"";
 }
 
+static NSDictionary *AXStringAttributeResult(AXUIElementRef element, CFStringRef attribute) {
+  if (element == NULL) {
+    return @{
+      @"success": @NO,
+      @"text": @"",
+      @"reason": @"macos_focused_element_unavailable",
+    };
+  }
+
+  CFTypeRef value = NULL;
+  AXError error = AXUIElementCopyAttributeValue(element, attribute, &value);
+  if (error != kAXErrorSuccess || value == NULL) {
+    return @{
+      @"success": @NO,
+      @"text": @"",
+      @"reason": @"macos_observed_text_unavailable",
+    };
+  }
+
+  NSString *text = @"";
+  BOOL success = NO;
+  if (CFGetTypeID(value) == CFStringGetTypeID()) {
+    text = [(__bridge NSString *)value copy] ?: @"";
+    success = YES;
+  }
+  CFRelease(value);
+
+  return @{
+    @"success": @(success),
+    @"text": text ?: @"",
+    @"reason": success ? @"macos_observed_text_read" : @"macos_observed_text_unavailable",
+  };
+}
+
+static NSString *LimitText(NSString *value) {
+  NSString *text = value ?: @"";
+  if ([text length] <= 4000) return text;
+  return [text substringToIndex:4000];
+}
+
 static BOOL AXBoolAttribute(AXUIElementRef element, CFStringRef attribute, BOOL fallback) {
   if (element == NULL) return fallback;
 
@@ -359,6 +399,69 @@ static NSDictionary *FocusedTextTarget(void) {
   return result;
 }
 
+static NSDictionary *FocusedTextForObservation(void) {
+  BOOL trusted = AXIsProcessTrusted();
+  NSDictionary *appInfo = FrontmostAppInfo();
+  NSString *appFamily = appInfo[@"bundle_id"] ?: appInfo[@"process_name"] ?: @"";
+  NSNumber *processId = appInfo[@"process_id"] ?: @0;
+
+  if (!trusted) {
+    return @{
+      @"success": @NO,
+      @"text": @"",
+      @"source": @"macos_ax",
+      @"confidence": @"none",
+      @"reason": @"macos_accessibility_permission_missing",
+      @"app_identifier": StringOrEmpty(appInfo[@"bundle_id"]),
+      @"app_family": appFamily,
+      @"process_id": processId,
+      @"role": @"",
+      @"subrole": @"",
+      @"bounds": @{ @"x": @0, @"y": @0, @"width": @0, @"height": @0 },
+    };
+  }
+
+  AXUIElementRef focused = CopyFocusedElement();
+  if (focused == NULL) {
+    return @{
+      @"success": @NO,
+      @"text": @"",
+      @"source": @"macos_ax",
+      @"confidence": @"none",
+      @"reason": @"macos_focused_element_unavailable",
+      @"app_identifier": StringOrEmpty(appInfo[@"bundle_id"]),
+      @"app_family": appFamily,
+      @"process_id": processId,
+      @"role": @"",
+      @"subrole": @"",
+      @"bounds": @{ @"x": @0, @"y": @0, @"width": @0, @"height": @0 },
+    };
+  }
+
+  NSString *role = AXStringAttribute(focused, kAXRoleAttribute);
+  NSString *subrole = AXStringAttribute(focused, kAXSubroleAttribute);
+  NSDictionary *textResult = AXStringAttributeResult(focused, kAXValueAttribute);
+  BOOL readable = [textResult[@"success"] boolValue];
+  NSString *text = LimitText(textResult[@"text"] ?: @"");
+
+  NSDictionary *result = @{
+    @"success": @(readable),
+    @"text": readable ? text : @"",
+    @"source": @"macos_ax",
+    @"confidence": readable ? @"confirmed" : @"none",
+    @"reason": readable ? @"macos_observed_text_read" : (textResult[@"reason"] ?: @"macos_observed_text_unavailable"),
+    @"app_identifier": StringOrEmpty(appInfo[@"bundle_id"]),
+    @"app_family": appFamily,
+    @"process_id": processId,
+    @"role": role ?: @"",
+    @"subrole": subrole ?: @"",
+    @"bounds": BoundsForElement(focused),
+  };
+
+  CFRelease(focused);
+  return result;
+}
+
 static NSDictionary *SendPasteShortcut(void) {
   if (!AXIsProcessTrusted()) {
     return @{
@@ -444,6 +547,10 @@ int main(int argc, const char *argv[]) {
     }
     if ([command isEqualToString:@"focused-text-target"]) {
       PrintJSON(FocusedTextTarget());
+      return 0;
+    }
+    if ([command isEqualToString:@"focused-text-observation"]) {
+      PrintJSON(FocusedTextForObservation());
       return 0;
     }
     if ([command isEqualToString:@"send-paste-shortcut"]) {

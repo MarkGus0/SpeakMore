@@ -15,6 +15,7 @@ const {
 const ACCESSIBILITY_SETTINGS_URL = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility';
 const DEFAULT_HELPER_TIMEOUT_MS = 3000;
 const DEFAULT_PASTE_SETTLE_MS = 180;
+const OBSERVATION_BOUNDS_TOLERANCE = 4;
 
 function unavailable(reason = 'macos_capability_unavailable', detail = '') {
   return {
@@ -128,6 +129,57 @@ function createMacosPlatformCapabilities({
     return false;
   }
 
+  function toFiniteNumber(value, fallback = 0) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+  }
+
+  function readElementBounds(value = {}) {
+    const bounds = value && typeof value === 'object' ? value : {};
+    return {
+      x: toFiniteNumber(bounds.x),
+      y: toFiniteNumber(bounds.y),
+      width: toFiniteNumber(bounds.width),
+      height: toFiniteNumber(bounds.height),
+    };
+  }
+
+  function hasMeaningfulBounds(bounds) {
+    return toFiniteNumber(bounds?.width) > 0 || toFiniteNumber(bounds?.height) > 0;
+  }
+
+  function isSameBounds(left, right) {
+    const normalizedLeft = readElementBounds(left);
+    const normalizedRight = readElementBounds(right);
+    if (!hasMeaningfulBounds(normalizedLeft) || !hasMeaningfulBounds(normalizedRight)) return true;
+
+    return Math.abs(normalizedLeft.x - normalizedRight.x) <= OBSERVATION_BOUNDS_TOLERANCE
+      && Math.abs(normalizedLeft.y - normalizedRight.y) <= OBSERVATION_BOUNDS_TOLERANCE
+      && Math.abs(normalizedLeft.width - normalizedRight.width) <= OBSERVATION_BOUNDS_TOLERANCE
+      && Math.abs(normalizedLeft.height - normalizedRight.height) <= OBSERVATION_BOUNDS_TOLERANCE;
+  }
+
+  function hasObservationTargetChanged(startFocusInfo, observedTarget) {
+    if (!startFocusInfo || typeof startFocusInfo !== 'object') return false;
+
+    const metadata = startFocusInfo.appInfo?.app_metadata || {};
+    const startBundleId = String(startFocusInfo.appInfo?.app_identifier || metadata.bundle_id || '');
+    const currentBundleId = String(observedTarget.appIdentifier || observedTarget.appFamily || '');
+    const startProcessId = String(metadata.process_id || '');
+    const currentProcessId = String(observedTarget.processId || '');
+    const startRole = String(startFocusInfo.elementInfo?.role || '');
+    const currentRole = String(observedTarget.role || '');
+    const startSubrole = String(startFocusInfo.elementInfo?.subrole || '');
+    const currentSubrole = String(observedTarget.subrole || '');
+
+    if (startBundleId && currentBundleId && startBundleId !== currentBundleId) return true;
+    if (startProcessId && currentProcessId && startProcessId !== currentProcessId) return true;
+    if (startRole && currentRole && startRole !== currentRole) return true;
+    if (startSubrole && currentSubrole && startSubrole !== currentSubrole) return true;
+    if (!isSameBounds(startFocusInfo.elementInfo?.bounds, observedTarget.bounds)) return true;
+    return false;
+  }
+
   function normalizeMacosSelectedTextResult(value) {
     if (!value || typeof value !== 'object') {
       return { success: false, text: '', source: 'none', confidence: 'none', reason: 'invalid_result' };
@@ -145,6 +197,42 @@ function createMacosPlatformCapabilities({
       ...(typeof value.subrole === 'string' && value.subrole ? { subrole: value.subrole } : {}),
       ...(typeof value.app_identifier === 'string' && value.app_identifier ? { appIdentifier: value.app_identifier } : {}),
       ...(value.process_id !== undefined ? { processId: Number(value.process_id) || 0 } : {}),
+    };
+  }
+
+  function normalizeMacosObservedTextResult(value) {
+    if (!value || typeof value !== 'object') {
+      return {
+        success: false,
+        text: '',
+        source: 'macos_ax',
+        confidence: 'none',
+        reason: 'invalid_result',
+        appIdentifier: '',
+        appFamily: '',
+        processId: 0,
+        role: '',
+        subrole: '',
+        bounds: readElementBounds(),
+      };
+    }
+
+    const success = value.success === true
+      && value.source === 'macos_ax'
+      && value.confidence === 'confirmed';
+
+    return {
+      success,
+      text: success && typeof value.text === 'string' ? value.text.trim() : '',
+      source: typeof value.source === 'string' ? value.source : 'macos_ax',
+      confidence: success ? 'confirmed' : 'none',
+      reason: typeof value.reason === 'string' ? value.reason : (success ? 'macos_observed_text_read' : 'macos_observed_text_unavailable'),
+      appIdentifier: typeof value.app_identifier === 'string' ? value.app_identifier : '',
+      appFamily: typeof value.app_family === 'string' ? value.app_family : '',
+      processId: toFiniteNumber(value.process_id),
+      role: typeof value.role === 'string' ? value.role : '',
+      subrole: typeof value.subrole === 'string' ? value.subrole : '',
+      bounds: readElementBounds(value.bounds),
     };
   }
 
@@ -260,6 +348,26 @@ function createMacosPlatformCapabilities({
     }
 
     return textTarget;
+  }
+
+  async function getFocusedTextForObservation({ startFocusInfo = null } = {}) {
+    if (!isMacOS()) return unavailable('macos_text_observation_unavailable');
+
+    const observedTarget = normalizeMacosObservedTextResult(await runHelperCommand('focused-text-observation'));
+    if (!observedTarget.success) return observedTarget;
+
+    if (hasObservationTargetChanged(startFocusInfo, observedTarget)) {
+      return {
+        ...observedTarget,
+        success: false,
+        text: '',
+        source: 'none',
+        confidence: 'none',
+        reason: 'macos_observation_target_changed',
+      };
+    }
+
+    return observedTarget;
   }
 
   async function sendPasteShortcutForDiagnostics() {
@@ -408,6 +516,7 @@ function createMacosPlatformCapabilities({
     getAccessibilityStatus,
     getDiagnostics,
     getFocusedInfo,
+    getFocusedTextForObservation,
     getFocusedTextTarget,
     getFocusedTextTargetForPaste,
     getFrontmostApp,

@@ -33,7 +33,7 @@
 - 结构测试不能假设所有主进程逻辑都内联在 `main.js`，应检查 `main.js` 与拆分后的生产模块共同组成的主进程实现面。
 - Windows 文本观察 helper 位于 `electron-app/windows-text-observer/`，只服务本轮粘贴后的短时自动学习，不参与基础录音链路。
 - macOS 开发态 Option 监听 helper 位于 `electron-app/macos-option-listener.c`，当前只服务开发态 MVP；主进程启动时用 `clang` 编译到本机临时目录，再把 macOS `Option` 组合映射成既有 `global-keyboard` 事件，不改变 renderer 录音状态机协议。
-- macOS 平台能力 helper 位于 `electron-app/macos-platform-helper.m`，由 `electron-app/macos-platform-capabilities.js` 按需编译和调用；当前用于 Accessibility 权限状态、前台应用、可输入目标、AX selected text、剪贴板恢复和受控 `Cmd+V`。
+- macOS 平台能力 helper 位于 `electron-app/macos-platform-helper.m`，由 `electron-app/macos-platform-capabilities.js` 按需编译和调用；当前用于 Accessibility 权限状态、前台应用、可输入目标、AX selected text、AX focused text 观察、剪贴板恢复和受控 `Cmd+V`。
 - `electron-app/renderer/src/components/AppShell.tsx` 只承担全局壳层和持久化订阅，页面状态拆到 `useGlobalShortcutBridge`、`useVoiceHistoryPersistence` 和 `useSettingsPageState` 之类的专用 hook。
 - 前端修改后必须在 `electron-app/renderer/` 下运行 `npm run build`，再重启 Electron 验证。
 - 主窗口关闭按钮只隐藏窗口到后台，托盘“退出”或真实应用退出才结束 Electron。
@@ -64,7 +64,7 @@
 - `Right Alt` 始终是普通听写并优先自动粘贴；是否有 UIA 选区都不能改变为翻译或自由提问。
 - `Right Alt + Space` 永远是自由提问；有 UIA confirmed 选区时优先把选区作为 `selected_text` 上下文，UIA 无 confirmed 选区但剪贴板 fallback 成功时可作为低可信 `selected_text` 上下文，结果永远展示在悬浮卡片，不自动替换。
 - `Right Alt + Right Shift` 是显式语音翻译；不因有选区而直接翻译选区，必须录音，完成后走普通粘贴链路把翻译结果贴到当前光标位置。
-- macOS 阶段三支持普通听写和语音翻译在可信输入目标中自动粘贴，失败时展示悬浮面板；`Option + Space` 自由提问会读取 AX confirmed 选区并作为 `selected_text` 上下文，结果仍固定展示悬浮面板。macOS 仍暂不做自动学习，后续再按 `docs/ai/context/` 里的 macOS 分阶段计划补齐。
+- macOS 阶段四支持普通听写和语音翻译在可信输入目标中自动粘贴，失败时展示悬浮面板；`Option + Space` 自由提问会读取 AX confirmed 选区并作为 `selected_text` 上下文，结果仍固定展示悬浮面板；自动学习只在 macOS 自动粘贴成功后围绕本轮 focused text target 短时观察。
 - 三种模式只要粘贴或替换失败，都必须把最终结果展示到悬浮卡片，不能让用户丢失结果。
 - 自动粘贴前必须先确认当前存在可信文本输入目标；找不到光标或输入目标时，不得静默写剪贴板和发送 `Ctrl+V`，必须直接展示悬浮卡片。
 - 自动粘贴前的输入目标判定按四层收敛：`UIA confirmed` -> `Win32 caret confirmed` -> `app_compat` 弱可信应用族兜底 -> 悬浮卡片；不要把“前台窗口存在”当成可粘贴条件，第三层只在 allowlist 应用族且弱信号充分时放行。当前 allowlist 只做显式应用族匹配，包含微信、QQ、Discord、Codex、Claude Code、ChatGPT、VS Code、Cursor、Slack、Notion、Spotify，不把所有 Electron / Chromium 一刀切放开。
@@ -84,7 +84,7 @@
 - ASR 后端只支持 `sensevoice-small`，不要恢复旧模型兼容逻辑。
 - 开发态 `uvicorn reload` 必须显式由环境变量 `UVICORN_RELOAD` 开启，不要在代码里默认写死 `reload=True`。
 - 录音期间静音后台声音时，保持“短按开始、再次短按结束”的交互；Windows 上按音频会话静音，结束后只恢复本轮被 SpeakMore 主动静音的会话。
-- 自动学习只能围绕 SpeakMore 本轮粘贴结果短时观察当前焦点控件，不允许做无差别全局文本采集；目标应用不支持 UIA 文本读取时，本轮学习应降级为不可用。
+- 自动学习只能围绕 SpeakMore 本轮粘贴结果短时观察当前焦点控件，不允许做无差别全局文本采集；目标应用不支持 Windows UIA 或 macOS AX focused text 读取时，本轮学习应降级为不可用。
 - 自动学习候选只允许短词或短语级纠错；整句改写、问答命令、摘要结果或无上下文的大段替换不能写入候选词典。
 
 ## 前端与用户体验约束

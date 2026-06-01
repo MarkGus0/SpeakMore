@@ -216,6 +216,15 @@ function learnDictionaryCorrection(candidate) {
   return dictionaryRepository.learnDictionaryCorrection(candidate);
 }
 
+const macosPlatformCapabilities = createMacosPlatformCapabilities({
+  clipboard,
+  helperSourcePath: () => macosPlatformHelperPath(),
+  processPlatform: process.platform,
+  processEnv: process.env,
+  shell,
+  spawnProcess: spawn,
+});
+
 const textObserverService = createTextObserverService({
   exePath: appPaths.textObserverExecutablePath(),
   processPlatform: process.platform,
@@ -225,19 +234,11 @@ const textObserverService = createTextObserverService({
   dotnetRoot: appPaths.dotnetRootPath(),
   learnCorrection: async (candidate) => learnDictionaryCorrection(candidate),
   emitDictionaryChanged,
+  macosPlatformCapabilities,
   logger: autoLearningLogger,
 });
 
 const textObservationManager = textObserverService.textObservationManager;
-
-const macosPlatformCapabilities = createMacosPlatformCapabilities({
-  clipboard,
-  helperSourcePath: () => macosPlatformHelperPath(),
-  processPlatform: process.platform,
-  processEnv: process.env,
-  shell,
-  spawnProcess: spawn,
-});
 
 function debugShortcut(event, payload = {}) {
   if (!SHORTCUT_DEBUG_ENABLED) return;

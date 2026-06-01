@@ -38,7 +38,7 @@ function registerKeyboardIpcHandlers({
     throw new Error('textObservationManager.start is required');
   }
 
-  async function startWindowsTextObservation(pastedText) {
+  async function startTextObservation(pastedText) {
     const focusInfo = await readFocusedInfo();
     log('info', '读取当前焦点信息完成', {
       pastedText,
@@ -120,8 +120,7 @@ function registerKeyboardIpcHandlers({
       });
       log('info', 'SendKeys 执行结果', { pasteSucceeded, pastedText });
       if (pasteSucceeded && pastedText.trim()) {
-        // 自动学习当前只接 Windows UIA 文本观察，macOS 后续阶段单独实现。
-        await startWindowsTextObservation(pastedText);
+        await startTextObservation(pastedText);
       }
       return { success: pasteSucceeded };
     } finally {
@@ -150,6 +149,9 @@ function registerKeyboardIpcHandlers({
       pastedText,
       result,
     });
+    if (result?.success && pastedText.trim()) {
+      await startTextObservation(pastedText);
+    }
     return result;
   }
 

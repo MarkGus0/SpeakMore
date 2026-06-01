@@ -358,6 +358,94 @@ test('createMacosPlatformCapabilities 在焦点漂移时拒绝自动粘贴', asy
   assert.equal(clipboard.current().text, '旧文本');
 });
 
+test('createMacosPlatformCapabilities 读取 macOS 自动学习观察文本', async () => {
+  const helperCommands = [];
+  const service = createMacosPlatformCapabilities({
+    processPlatform: 'darwin',
+    helperSourcePath: () => '/repo/electron-app/macos-platform-helper.m',
+    helperExecutablePath: () => '/tmp/speakmore-macos-platform-helper',
+    spawnSyncProcess: () => ({ status: 0, stdout: '', stderr: '' }),
+    spawnProcess: (_command, args) => {
+      helperCommands.push(args[0]);
+      return createFakeChild({
+        stdout: JSON.stringify({
+          success: true,
+          text: ' Client2API ',
+          source: 'macos_ax',
+          confidence: 'confirmed',
+          reason: 'macos_observed_text_read',
+          app_identifier: 'com.apple.TextEdit',
+          app_family: 'com.apple.TextEdit',
+          process_id: 42,
+          role: 'AXTextArea',
+          subrole: '',
+          bounds: { x: 1, y: 2, width: 300, height: 40 },
+        }),
+      });
+    },
+  });
+
+  const result = await service.getFocusedTextForObservation({
+    startFocusInfo: {
+      appInfo: {
+        app_identifier: 'com.apple.TextEdit',
+        app_metadata: { process_id: 42 },
+      },
+      elementInfo: {
+        role: 'AXTextArea',
+        bounds: { x: 1, y: 2, width: 300, height: 40 },
+      },
+    },
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.text, 'Client2API');
+  assert.equal(result.appIdentifier, 'com.apple.TextEdit');
+  assert.equal(result.processId, 42);
+  assert.deepEqual(helperCommands, ['focused-text-observation']);
+});
+
+test('createMacosPlatformCapabilities 在 macOS 观察目标漂移时拒绝读取文本', async () => {
+  const service = createMacosPlatformCapabilities({
+    processPlatform: 'darwin',
+    helperSourcePath: () => '/repo/electron-app/macos-platform-helper.m',
+    helperExecutablePath: () => '/tmp/speakmore-macos-platform-helper',
+    spawnSyncProcess: () => ({ status: 0, stdout: '', stderr: '' }),
+    spawnProcess: () => createFakeChild({
+      stdout: JSON.stringify({
+        success: true,
+        text: 'new target text',
+        source: 'macos_ax',
+        confidence: 'confirmed',
+        reason: 'macos_observed_text_read',
+        app_identifier: 'com.apple.TextEdit',
+        app_family: 'com.apple.TextEdit',
+        process_id: 42,
+        role: 'AXTextArea',
+        subrole: '',
+        bounds: { x: 1, y: 2, width: 300, height: 40 },
+      }),
+    }),
+  });
+
+  const result = await service.getFocusedTextForObservation({
+    startFocusInfo: {
+      appInfo: {
+        app_identifier: 'com.microsoft.VSCode',
+        app_metadata: { process_id: 42 },
+      },
+      elementInfo: {
+        role: 'AXTextArea',
+        bounds: { x: 1, y: 2, width: 300, height: 40 },
+      },
+    },
+  });
+
+  assert.equal(result.success, false);
+  assert.equal(result.text, '');
+  assert.equal(result.reason, 'macos_observation_target_changed');
+});
+
 test('createMacosPlatformCapabilities 自动粘贴会报告剪贴板恢复失败', async () => {
   const clipboard = createRichClipboard();
   const service = createMacosPlatformCapabilities({

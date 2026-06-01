@@ -17,13 +17,18 @@ function createTextObserverService({
   createSessionManager = createTextObservationSessionManager,
   learnCorrection = async () => undefined,
   emitDictionaryChanged = () => undefined,
+  macosPlatformCapabilities = null,
   logger = console,
   timeoutMs = 120000,
   startResponseTimeoutMs = 3000,
+  macosPollIntervalMs = 800,
+  setTimer = setTimeout,
+  clearTimer = clearTimeout,
   now = () => new Date().toISOString(),
 } = {}) {
   let textObserverProcess = null;
   let textObserverStdoutBuffer = '';
+  let macosObservation = null;
   const pendingStartResponses = new Map();
 
   function log(level, message, details = {}) {
@@ -206,8 +211,111 @@ function createTextObserverService({
     return true;
   }
 
+  function clearMacosObservation(reason = 'stopped') {
+    const observation = macosObservation;
+    macosObservation = null;
+    if (observation?.timer) clearTimer(observation.timer);
+    if (observation) {
+      log('info', '清理 macOS 文本观察', {
+        audioId: observation.audioId,
+        reason,
+      });
+    }
+  }
+
+  function scheduleMacosPoll(observation) {
+    observation.timer = setTimer(() => {
+      void pollMacosObservedText(observation);
+    }, Math.max(50, Number(macosPollIntervalMs) || 800));
+  }
+
+  async function pollMacosObservedText(observation) {
+    if (macosObservation !== observation) return;
+    if (observation.reading) {
+      scheduleMacosPoll(observation);
+      return;
+    }
+
+    observation.reading = true;
+    try {
+      const result = await macosPlatformCapabilities.getFocusedTextForObservation({
+        startFocusInfo: observation.focusInfo,
+      });
+
+      if (!result?.success) {
+        log('info', 'macOS 观察目标不可用，停止本轮观察', {
+          audioId: observation.audioId,
+          result,
+        });
+        await textObservationManager.stop(result?.reason || 'macos_observation_unavailable');
+        return;
+      }
+
+      const text = String(result.text || '').trim();
+      if (text && text !== observation.lastText) {
+        observation.lastText = text;
+        await textObservationManager.handleObservedText({
+          type: 'observed-text',
+          audioId: observation.audioId,
+          text,
+        });
+      }
+    } catch (error) {
+      log('info', 'macOS 文本观察读取异常，停止本轮观察', {
+        audioId: observation.audioId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await textObservationManager.stop('macos_observation_read_failed');
+      return;
+    } finally {
+      observation.reading = false;
+    }
+
+    if (macosObservation === observation) scheduleMacosPoll(observation);
+  }
+
+  async function startMacosTextObservation(session) {
+    clearMacosObservation('replaced');
+    if (!macosPlatformCapabilities || typeof macosPlatformCapabilities.getFocusedTextForObservation !== 'function') {
+      log('info', 'macOS 文本观察能力不可用', {
+        audioId: session.audioId,
+      });
+      return { success: false, code: 'native_observer_unavailable' };
+    }
+
+    const initial = await macosPlatformCapabilities.getFocusedTextForObservation({
+      startFocusInfo: session.focusInfo,
+    });
+    if (!initial?.success) {
+      log('info', 'macOS 文本观察启动失败', {
+        audioId: session.audioId,
+        result: initial,
+      });
+      return { success: false, code: initial?.reason || 'native_observer_unavailable' };
+    }
+
+    macosObservation = {
+      audioId: session.audioId,
+      pastedText: session.pastedText,
+      focusInfo: session.focusInfo || null,
+      lastText: String(initial.text || '').trim(),
+      reading: false,
+      timer: null,
+    };
+    log('info', 'macOS 文本观察启动成功', {
+      audioId: session.audioId,
+      textLength: macosObservation.lastText.length,
+    });
+    scheduleMacosPoll(macosObservation);
+    return { success: true };
+  }
+
   const textObservationManager = createSessionManager({
     startNativeObservation: async (session) => {
+      if (processPlatform === 'darwin') {
+        return startMacosTextObservation(session);
+      }
+
       // pastedText 是本轮 SpeakMore 自动粘贴的结果，后续只允许围绕这段文本识别用户修正。
       log('info', '启动原生观察', {
         audioId: session.audioId,
@@ -235,6 +343,11 @@ function createTextObserverService({
       return result;
     },
     stopNativeObservation: async (session) => {
+      if (processPlatform === 'darwin') {
+        clearMacosObservation(session.reason);
+        return;
+      }
+
       // 停止失败不需要向上抛；观察窗口结束后 helper 失效只会影响自动学习，不影响用户已得到的文本结果。
       log('info', '停止原生观察', {
         audioId: session.audioId,
@@ -265,6 +378,7 @@ function createTextObserverService({
     ensureTextObserverProcess,
     sendTextObserverMessage,
     getProcess: () => textObserverProcess,
+    getMacosObservation: () => macosObservation,
   };
 }
 
