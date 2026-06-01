@@ -3,6 +3,8 @@
 #import <Foundation/Foundation.h>
 #include <unistd.h>
 
+static const NSUInteger SpeakMoreMaxAXDescendantScanNodes = 1500;
+
 static CFStringRef SpeakMoreAXEditableAttribute(void) {
   return CFSTR("AXEditable");
 }
@@ -143,15 +145,188 @@ static NSDictionary *FrontmostAppInfo(void) {
 }
 
 static AXUIElementRef CopyFocusedElement(void) {
+  NSRunningApplication *frontmostApp = FrontmostApplication();
+  pid_t processId = frontmostApp != nil ? [frontmostApp processIdentifier] : 0;
+
   AXUIElementRef systemWide = AXUIElementCreateSystemWide();
-  if (systemWide == NULL) return NULL;
+  if (systemWide != NULL) {
+    CFTypeRef focused = NULL;
+    AXError error = AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute, &focused);
+    CFRelease(systemWide);
+    if (error == kAXErrorSuccess && focused != NULL) return (AXUIElementRef)focused;
+  }
 
-  CFTypeRef focused = NULL;
-  AXError error = AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute, &focused);
-  CFRelease(systemWide);
-  if (error != kAXErrorSuccess || focused == NULL) return NULL;
+  if (processId > 0) {
+    AXUIElementRef appElement = AXUIElementCreateApplication(processId);
+    if (appElement != NULL) {
+      CFTypeRef focused = NULL;
+      AXError error = AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute, &focused);
+      CFRelease(appElement);
+      if (error == kAXErrorSuccess && focused != NULL) return (AXUIElementRef)focused;
+    }
+  }
 
-  return (AXUIElementRef)focused;
+  return NULL;
+}
+
+static NSArray *AXArrayAttribute(AXUIElementRef element, CFStringRef attribute) {
+  if (element == NULL) return @[];
+
+  CFTypeRef value = NULL;
+  AXError error = AXUIElementCopyAttributeValue(element, attribute, &value);
+  if (error != kAXErrorSuccess || value == NULL) return @[];
+
+  if (CFGetTypeID(value) != CFArrayGetTypeID()) {
+    CFRelease(value);
+    return @[];
+  }
+
+  return CFBridgingRelease(value);
+}
+
+static BOOL AXHasSelectedTextRange(AXUIElementRef element) {
+  if (element == NULL) return NO;
+
+  CFTypeRef value = NULL;
+  AXError error = AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute, &value);
+  if (error != kAXErrorSuccess || value == NULL) return NO;
+
+  CFRelease(value);
+  return YES;
+}
+
+static BOOL IsTextInputRole(NSString *role, NSString *subrole) {
+  NSArray *roles = @[
+    @"AXTextArea",
+    @"AXTextField",
+    @"AXComboBox",
+    @"AXSearchField",
+  ];
+  if ([roles containsObject:role]) return YES;
+  return [subrole isEqualToString:@"AXTextField"] || [subrole isEqualToString:@"AXSearchField"];
+}
+
+static BOOL IsTextInputContainerRole(NSString *role, NSString *subrole) {
+  NSArray *roles = @[
+    @"AXWebArea",
+    @"AXGroup",
+    @"AXScrollArea",
+    @"AXWindow",
+  ];
+  if ([roles containsObject:role]) return YES;
+  return [subrole isEqualToString:@"AXStandardWindow"];
+}
+
+static BOOL IsWritableTextInputElement(AXUIElementRef element) {
+  if (element == NULL) return NO;
+
+  NSString *role = AXStringAttribute(element, kAXRoleAttribute);
+  NSString *subrole = AXStringAttribute(element, kAXSubroleAttribute);
+  BOOL enabled = AXBoolAttribute(element, kAXEnabledAttribute, YES);
+  BOOL editable = AXBoolAttribute(element, SpeakMoreAXEditableAttribute(), NO);
+  Boolean valueSettable = false;
+  AXUIElementIsAttributeSettable(element, kAXValueAttribute, &valueSettable);
+
+  return enabled && IsTextInputRole(role, subrole) && (editable || valueSettable);
+}
+
+static BOOL IsActiveTextInputElement(AXUIElementRef element) {
+  if (!IsWritableTextInputElement(element)) return NO;
+  return AXBoolAttribute(element, kAXFocusedAttribute, NO) || AXHasSelectedTextRange(element);
+}
+
+static AXUIElementRef CopyFirstTextInputDescendant(AXUIElementRef root, BOOL allowInactiveFallback) {
+  if (root == NULL) return NULL;
+
+  NSMutableArray *queue = [NSMutableArray arrayWithObject:(__bridge id)root];
+  AXUIElementRef fallback = NULL;
+  NSUInteger scanned = 0;
+
+  while ([queue count] > 0 && scanned < SpeakMoreMaxAXDescendantScanNodes) {
+    id item = [queue objectAtIndex:0];
+    [queue removeObjectAtIndex:0];
+    scanned += 1;
+
+    AXUIElementRef element = (__bridge AXUIElementRef)item;
+    if (IsActiveTextInputElement(element)) {
+      CFRetain(element);
+      if (fallback != NULL) CFRelease(fallback);
+      return element;
+    }
+
+    if (allowInactiveFallback && fallback == NULL && IsWritableTextInputElement(element)) {
+      CFRetain(element);
+      fallback = element;
+    }
+
+    NSArray *children = AXArrayAttribute(element, kAXChildrenAttribute);
+    for (id child in children) {
+      if (CFGetTypeID((__bridge CFTypeRef)child) == AXUIElementGetTypeID()) {
+        [queue addObject:child];
+      }
+    }
+  }
+
+  return fallback;
+}
+
+static AXUIElementRef CopyTextInputDescendantFromFrontmostApp(void) {
+  NSRunningApplication *frontmostApp = FrontmostApplication();
+  if (frontmostApp == nil) return NULL;
+
+  AXUIElementRef appElement = AXUIElementCreateApplication([frontmostApp processIdentifier]);
+  if (appElement == NULL) return NULL;
+
+  CFTypeRef focusedWindow = NULL;
+  AXError windowError = AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute, &focusedWindow);
+  if (windowError == kAXErrorSuccess && focusedWindow != NULL) {
+    AXUIElementRef windowTarget = CopyFirstTextInputDescendant((AXUIElementRef)focusedWindow, YES);
+    CFRelease(focusedWindow);
+    if (windowTarget != NULL) {
+      CFRelease(appElement);
+      return windowTarget;
+    }
+  }
+
+  AXUIElementRef appTarget = CopyFirstTextInputDescendant(appElement, YES);
+  CFRelease(appElement);
+  return appTarget;
+}
+
+static AXUIElementRef CopyFocusedElementWithDescendantFallback(BOOL *usedDescendantScan) {
+  if (usedDescendantScan != NULL) *usedDescendantScan = NO;
+
+  AXUIElementRef focused = CopyFocusedElement();
+  if (focused != NULL) {
+    if (IsWritableTextInputElement(focused)) return focused;
+
+    NSString *role = AXStringAttribute(focused, kAXRoleAttribute);
+    NSString *subrole = AXStringAttribute(focused, kAXSubroleAttribute);
+    if (IsTextInputContainerRole(role, subrole)) {
+      AXUIElementRef descendant = CopyFirstTextInputDescendant(focused, NO);
+      if (descendant != NULL) {
+        if (usedDescendantScan != NULL) *usedDescendantScan = YES;
+        CFRelease(focused);
+        return descendant;
+      }
+    }
+
+    return focused;
+  }
+
+  AXUIElementRef scanned = CopyTextInputDescendantFromFrontmostApp();
+  if (scanned != NULL && usedDescendantScan != NULL) *usedDescendantScan = YES;
+  return scanned;
+}
+
+static AXUIElementRef CopyFocusedElementWithMissingFallback(void) {
+  AXUIElementRef focused = CopyFocusedElement();
+  if (focused != NULL) return focused;
+  return CopyTextInputDescendantFromFrontmostApp();
+}
+
+static AXUIElementRef CopyFocusedElementForTextOperations(void) {
+  return CopyFocusedElementWithDescendantFallback(NULL);
 }
 
 static NSString *FocusedWindowTitle(pid_t processId) {
@@ -166,17 +341,6 @@ static NSString *FocusedWindowTitle(pid_t processId) {
   NSString *title = AXStringAttribute((AXUIElementRef)focusedWindow, kAXTitleAttribute);
   CFRelease(focusedWindow);
   return title ?: @"";
-}
-
-static BOOL IsTextInputRole(NSString *role, NSString *subrole) {
-  NSArray *roles = @[
-    @"AXTextArea",
-    @"AXTextField",
-    @"AXComboBox",
-    @"AXSearchField",
-  ];
-  if ([roles containsObject:role]) return YES;
-  return [subrole isEqualToString:@"AXTextField"] || [subrole isEqualToString:@"AXSearchField"];
 }
 
 static NSDictionary *AccessibilityStatus(void) {
@@ -220,7 +384,7 @@ static NSDictionary *FocusedInfo(void) {
     };
   }
 
-  AXUIElementRef focused = CopyFocusedElement();
+  AXUIElementRef focused = CopyFocusedElementForTextOperations();
   NSString *role = AXStringAttribute(focused, kAXRoleAttribute);
   NSString *subrole = AXStringAttribute(focused, kAXSubroleAttribute);
   BOOL focusedState = AXBoolAttribute(focused, kAXFocusedAttribute, focused != NULL);
@@ -284,7 +448,7 @@ static NSDictionary *SelectedText(void) {
     };
   }
 
-  AXUIElementRef focused = CopyFocusedElement();
+  AXUIElementRef focused = CopyFocusedElementWithMissingFallback();
   if (focused == NULL) {
     return @{
       @"success": @NO,
@@ -344,7 +508,8 @@ static NSDictionary *FocusedTextTarget(void) {
     };
   }
 
-  AXUIElementRef focused = CopyFocusedElement();
+  BOOL usedDescendantScan = NO;
+  AXUIElementRef focused = CopyFocusedElementWithDescendantFallback(&usedDescendantScan);
   if (focused == NULL) {
     return @{
       @"success": @NO,
@@ -374,6 +539,7 @@ static NSDictionary *FocusedTextTarget(void) {
   BOOL success = enabled && !readOnly && textRole;
 
   NSMutableArray *signals = [NSMutableArray arrayWithObject:@"frontmost_app"];
+  if (usedDescendantScan) [signals addObject:@"ax_descendant_scan"];
   if (role.length > 0) [signals addObject:[NSString stringWithFormat:@"role:%@", role]];
   if (subrole.length > 0) [signals addObject:[NSString stringWithFormat:@"subrole:%@", subrole]];
   if (editable) [signals addObject:@"ax_editable"];
@@ -421,7 +587,7 @@ static NSDictionary *FocusedTextForObservation(void) {
     };
   }
 
-  AXUIElementRef focused = CopyFocusedElement();
+  AXUIElementRef focused = CopyFocusedElementForTextOperations();
   if (focused == NULL) {
     return @{
       @"success": @NO,
