@@ -1,3 +1,5 @@
+const path = require('path');
+
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -22,6 +24,7 @@ function createVoiceBackendService({
   spawnProcess,
   probeReady,
   processEnv = process.env,
+  pathDelimiter = path.delimiter,
   wait = delay,
   logger = console,
 } = {}) {
@@ -32,7 +35,7 @@ function createVoiceBackendService({
     const ffmpegDir = ffmpegBinDir();
     const env = {
       ...processEnv,
-      PATH: [ffmpegDir, processEnv.PATH].filter(Boolean).join(';'),
+      PATH: [ffmpegDir, processEnv.PATH].filter(Boolean).join(pathDelimiter),
       HOST: processEnv.HOST || '127.0.0.1',
       PORT: processEnv.PORT || '8000',
     };

@@ -149,11 +149,11 @@ html, body {
   <div id="shortcut-view" class="panel-row">
     <div>
       <div class="hint-title">检测到长按快捷键</div>
-      <div class="hint-text">长按 Right Alt 不会开始语音输入。请短按 Right Alt，或使用 Right Alt + Space / Right Alt + Right Shift。</div>
+      <div id="shortcut-hint-text" class="hint-text">长按 Right Alt 不会开始语音输入。请短按 Right Alt，或使用 Right Alt + Space / Right Alt + Right Shift。</div>
       <div class="chips">
-        <span class="chip">Right Alt</span>
-        <span class="chip">Right Alt + Space</span>
-        <span class="chip">Right Alt + Right Shift</span>
+        <span id="shortcut-dictation-chip" class="chip">Right Alt</span>
+        <span id="shortcut-ask-chip" class="chip">Right Alt + Space</span>
+        <span id="shortcut-translate-chip" class="chip">Right Alt + Right Shift</span>
       </div>
     </div>
     <button class="dismiss" type="button" aria-label="关闭提示">×</button>
@@ -175,6 +175,16 @@ const resultView = document.getElementById('result-view');
 const resultText = document.getElementById('result-text');
 const copyResultButton = document.getElementById('copy-result');
 let currentResultText = '';
+
+function applyShortcutLabels() {
+  const isMacOS = window.ipcRenderer && window.ipcRenderer.platform === 'darwin';
+  if (!isMacOS) return;
+
+  document.getElementById('shortcut-hint-text').textContent = '长按 Option 不会开始语音输入。请短按 Option，或使用 Option + Space / Option + Shift。';
+  document.getElementById('shortcut-dictation-chip').textContent = 'Option';
+  document.getElementById('shortcut-ask-chip').textContent = 'Option + Space';
+  document.getElementById('shortcut-translate-chip').textContent = 'Option + Shift';
+}
 
 function closeFloatingPanel() {
   if (window.ipcRenderer) {
@@ -235,6 +245,7 @@ if (window.ipcRenderer) {
   window.ipcRenderer.on('floating-panel', (_event, payload) => renderFloatingPanel(payload));
 }
 
+applyShortcutLabels();
 renderFloatingPanel({ visible: true, type: 'shortcut-hint' });
 </script>
 </body>

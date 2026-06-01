@@ -22,6 +22,7 @@ test('createAudioSessionService 在禁用时不调用系统静音命令', async 
 test('createAudioSessionService 静音后只恢复本轮记录的会话', async () => {
   const calls = [];
   const service = createAudioSessionService({
+    platform: 'win32',
     isEnabled: () => true,
     getTypelessProcessIds: () => [100, 200],
     runAudioSessionControl: async (action, payload) => {
@@ -48,6 +49,7 @@ test('createAudioSessionService 静音后只恢复本轮记录的会话', async 
 test('createAudioSessionService 重复静音前会先恢复旧会话', async () => {
   const actions = [];
   const service = createAudioSessionService({
+    platform: 'win32',
     isEnabled: () => true,
     getTypelessProcessIds: () => [100],
     runAudioSessionControl: async (action, payload) => {

@@ -28,6 +28,7 @@ const { createVoiceBackendClient } = require('./voice-backend-client');
 const { createAudioSessionService } = require('./audio-session-service');
 const {
   createClipboardSnapshot,
+  createEmptyFocusedInfo,
   isSameFocusedContext,
   readFocusedInfo,
   readFocusedTextTarget,
@@ -70,6 +71,7 @@ const DICTIONARY_CANDIDATES_FILE_NAME = 'dictionary-candidates.json';
 const SHORTCUT_DEBUG_ENABLED = ['1', 'true', 'yes', 'on'].includes(
   String(process.env.TYPELESS_SHORTCUT_DEBUG || '').toLowerCase(),
 );
+const IS_MACOS = process.platform === 'darwin';
 
 const appPaths = createAppPaths({
   baseDir: __dirname,
@@ -238,6 +240,60 @@ function iconPath() { return appPaths.iconPath(); }
 function trayIconPath() { return appPaths.trayIconPath(); }
 function rightAltListenerPath() { return appPaths.rightAltListenerPath(); }
 function audioSessionControlPath() { return appPaths.audioSessionControlPath(); }
+function macosOptionListenerPath() { return appPaths.macosOptionListenerPath(); }
+
+function readFocusedInfoForPlatform(options = {}) {
+  if (IS_MACOS) return Promise.resolve(createEmptyFocusedInfo());
+  return readFocusedInfo(options);
+}
+
+function readFocusedTextTargetForPlatform() {
+  if (IS_MACOS) {
+    return Promise.resolve({
+      success: false,
+      source: 'none',
+      confidence: 'none',
+      reason: 'macos_auto_paste_not_supported',
+      valuePattern: false,
+      textPattern: false,
+      isReadOnly: false,
+      controlType: '',
+      appFamily: '',
+      foregroundHwnd: '',
+      focusHwnd: '',
+      caretHwnd: '',
+      matchedSignals: [],
+    });
+  }
+  return readFocusedTextTarget(...arguments);
+}
+
+function readSelectedTextByClipboardForPlatform() {
+  if (IS_MACOS) {
+    return Promise.resolve({
+      success: false,
+      text: '',
+      source: 'clipboard',
+      confidence: 'none',
+      reason: 'macos_selection_not_supported',
+    });
+  }
+  return readSelectedTextByClipboard(...arguments);
+}
+
+function readSelectionSnapshotForPlatform() {
+  if (IS_MACOS) {
+    return Promise.resolve({
+      success: false,
+      text: '',
+      source: 'none',
+      confidence: 'none',
+      reason: 'macos_selection_not_supported',
+      focusInfo: createEmptyFocusedInfo(),
+    });
+  }
+  return readSelectionSnapshot(...arguments);
+}
 
 let windowManager = null;
 
@@ -402,14 +458,14 @@ const mainIpcRegistry = createMainIpcRegistry({
   os,
   processEnv: process.env,
   processExecPath: process.execPath,
-  readFocusedInfo,
-  readFocusedTextTarget,
+  readFocusedInfo: readFocusedInfoForPlatform,
+  readFocusedTextTarget: readFocusedTextTargetForPlatform,
   readHistoryItems,
   readHistoryStats,
   readHistoryStatsForDashboard,
   readLocalSettings,
-  readSelectedTextByClipboard,
-  readSelectionSnapshot,
+  readSelectedTextByClipboard: readSelectedTextByClipboardForPlatform,
+  readSelectionSnapshot: readSelectionSnapshotForPlatform,
   recordingsDir,
   reloadVoiceServerConfig,
   restoreClipboardSnapshot,
@@ -436,6 +492,7 @@ const rightAltListenerService = createRightAltListenerService({
   emitKeyboardState,
   handleEscapeKeydown: handleRightAltEscapeKeydown,
   rightAltListenerPath: () => rightAltListenerPath(),
+  macosOptionListenerPath: () => macosOptionListenerPath(),
   processPlatform: process.platform,
   processEnv: process.env,
   spawnProcess: spawn,

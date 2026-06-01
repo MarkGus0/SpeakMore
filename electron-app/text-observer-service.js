@@ -109,9 +109,10 @@ function createTextObserverService({
   function buildTextObserverEnv() {
     const env = { ...processEnv };
     if (dotnetRoot && fileExists(dotnetRoot)) {
+      const pathDelimiter = processPlatform === 'win32' ? ';' : path.delimiter;
       env.DOTNET_ROOT = dotnetRoot;
       env['DOTNET_ROOT(x64)'] = dotnetRoot;
-      env.PATH = [dotnetRoot, env.PATH].filter(Boolean).join(path.delimiter);
+      env.PATH = [dotnetRoot, env.PATH].filter(Boolean).join(pathDelimiter);
       log('info', '已为 helper 注入本地 dotnet runtime', {
         dotnetRoot,
         hasPath: Boolean(env.PATH),

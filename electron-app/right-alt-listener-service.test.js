@@ -84,3 +84,64 @@ test('start 在 Windows 平台启动 PowerShell 并路由 stdout 行', () => {
 
   assert.deepEqual(handled, [{ key: 'RightAlt', isKeydown: true }]);
 });
+
+test('start 在 macOS 平台编译并启动 Option 监听器，随后路由 stdout 行', () => {
+  const child = createFakeProcess();
+  const handled = [];
+  const spawnCalls = [];
+  const compileCalls = [];
+  const service = createRightAltListenerService({
+    processPlatform: 'darwin',
+    macosOptionListenerPath: () => '/repo/electron-app/macos-option-listener.c',
+    macosOptionListenerExecutablePath: () => '/tmp/speakmore-macos-option-listener',
+    clangExecutablePath: () => '/usr/bin/clang',
+    spawnSyncProcess: (command, args) => {
+      compileCalls.push({ command, args });
+      return { status: 0, stderr: '' };
+    },
+    spawnProcess: (command, args) => {
+      spawnCalls.push({ command, args });
+      return child;
+    },
+    emitKeyboardState: () => undefined,
+    createRelay: () => ({
+      handlePayload: (payload) => handled.push(payload),
+      dispose: () => undefined,
+    }),
+  });
+
+  assert.equal(service.start(), true);
+  child.stdout.emit('data', '{"key":"RightAlt","isKeydown":true}\n');
+
+  assert.deepEqual(compileCalls, [{
+    command: '/usr/bin/clang',
+    args: [
+      '-framework',
+      'ApplicationServices',
+      '/repo/electron-app/macos-option-listener.c',
+      '-o',
+      '/tmp/speakmore-macos-option-listener',
+    ],
+  }]);
+  assert.deepEqual(spawnCalls, [{
+    command: '/tmp/speakmore-macos-option-listener',
+    args: [],
+  }]);
+  assert.deepEqual(handled, [{ key: 'RightAlt', isKeydown: true }]);
+});
+
+test('start 在 macOS Option 监听器编译失败时不启动子进程', () => {
+  let spawned = false;
+  const service = createRightAltListenerService({
+    processPlatform: 'darwin',
+    macosOptionListenerPath: () => '/repo/electron-app/macos-option-listener.c',
+    spawnSyncProcess: () => ({ status: 1, stderr: 'compile failed' }),
+    spawnProcess: () => {
+      spawned = true;
+      return createFakeProcess();
+    },
+  });
+
+  assert.equal(service.start(), false);
+  assert.equal(spawned, false);
+});

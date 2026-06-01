@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 
 
@@ -52,8 +53,12 @@ def get_model_explicit_dir_env(model_id: str):
 
 def get_managed_models_root():
     local_app_data = os.environ.get("LOCALAPPDATA")
-    base_dir = Path(local_app_data) if local_app_data else Path.home() / "AppData" / "Local"
-    return base_dir / "Typeless" / "models"
+    if local_app_data:
+        return Path(local_app_data) / "Typeless" / "models"
+    elif sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "SpeakMore" / "models"
+    else:
+        return Path.home() / "AppData" / "Local" / "Typeless" / "models"
 
 
 def normalize_model_cache_dir(cache_dir: str | None) -> str:
