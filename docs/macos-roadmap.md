@@ -64,8 +64,9 @@
 
 - 使用 macOS Accessibility API 读取 focused element 的 selected text。
 - `Option + Space` 自由提问优先携带可信选区上下文。
-- Accessibility 读取失败时可降级剪贴板 fallback，但不得影响模式判断。
+- Accessibility 读取失败时先按无选区处理；剪贴板 fallback 后续如启用，必须限制触发模式并恢复原剪贴板。
 - 普通听写和语音翻译启动前不读取选区。
+- 当前阶段已进入实现：`Option + Space` 可携带 AX confirmed 选区上下文，结果仍展示悬浮面板。
 
 约束：
 

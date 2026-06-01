@@ -33,7 +33,7 @@
 - 结构测试不能假设所有主进程逻辑都内联在 `main.js`，应检查 `main.js` 与拆分后的生产模块共同组成的主进程实现面。
 - Windows 文本观察 helper 位于 `electron-app/windows-text-observer/`，只服务本轮粘贴后的短时自动学习，不参与基础录音链路。
 - macOS 开发态 Option 监听 helper 位于 `electron-app/macos-option-listener.c`，当前只服务开发态 MVP；主进程启动时用 `clang` 编译到本机临时目录，再把 macOS `Option` 组合映射成既有 `global-keyboard` 事件，不改变 renderer 录音状态机协议。
-- macOS 平台能力 helper 位于 `electron-app/macos-platform-helper.m`，由 `electron-app/macos-platform-capabilities.js` 按需编译和调用；阶段一只用于 Accessibility 权限状态、前台应用、可输入目标、剪贴板和 `Cmd+V` 诊断，不接入真实语音结果粘贴。
+- macOS 平台能力 helper 位于 `electron-app/macos-platform-helper.m`，由 `electron-app/macos-platform-capabilities.js` 按需编译和调用；当前用于 Accessibility 权限状态、前台应用、可输入目标、AX selected text、剪贴板恢复和受控 `Cmd+V`。
 - `electron-app/renderer/src/components/AppShell.tsx` 只承担全局壳层和持久化订阅，页面状态拆到 `useGlobalShortcutBridge`、`useVoiceHistoryPersistence` 和 `useSettingsPageState` 之类的专用 hook。
 - 前端修改后必须在 `electron-app/renderer/` 下运行 `npm run build`，再重启 Electron 验证。
 - 主窗口关闭按钮只隐藏窗口到后台，托盘“退出”或真实应用退出才结束 Electron。
@@ -60,18 +60,18 @@
 - 自由提问录音时悬浮胶囊显示 `请随意提出问题`；最终结果不自动粘贴、不进入首页最近结果，而是通过 `floating-panel` IPC 进入独立悬浮面板展示。
 - 自由提问 `ask_anything` 当前先按“无工具安全版”设计：有 `selected_text` 时优先围绕选区执行翻译、解释、题目解答、总结、改写等任务；没有工具结果时不得编造天气、新闻、价格、政策等实时信息。
 - 快捷键层只输出意图，不直接决定最终语音任务；最终任务由快捷键意图和启动前选区快照共同解析。
-- UIA 是最高可信选区来源；剪贴板读取不能参与“是否有选区”的模式判断，只能在 `Right Alt + Space` 且 UIA 无 confirmed 选区时作为低可信 `selected_text` fallback。
+- Windows UIA 和 macOS AX confirmed 选区是最高可信选区来源；剪贴板读取不能参与“是否有选区”的模式判断，只能在自由提问且 confirmed 选区不可用时作为低可信 `selected_text` fallback。macOS 当前先不启用剪贴板选区 fallback。
 - `Right Alt` 始终是普通听写并优先自动粘贴；是否有 UIA 选区都不能改变为翻译或自由提问。
 - `Right Alt + Space` 永远是自由提问；有 UIA confirmed 选区时优先把选区作为 `selected_text` 上下文，UIA 无 confirmed 选区但剪贴板 fallback 成功时可作为低可信 `selected_text` 上下文，结果永远展示在悬浮卡片，不自动替换。
 - `Right Alt + Right Shift` 是显式语音翻译；不因有选区而直接翻译选区，必须录音，完成后走普通粘贴链路把翻译结果贴到当前光标位置。
-- macOS 阶段二支持普通听写和语音翻译在可信输入目标中自动粘贴，失败时展示悬浮面板；自由提问仍固定展示悬浮面板。macOS 仍暂不做选区上下文和自动学习，后续再按 `docs/ai/context/` 里的 macOS 分阶段计划补齐。
+- macOS 阶段三支持普通听写和语音翻译在可信输入目标中自动粘贴，失败时展示悬浮面板；`Option + Space` 自由提问会读取 AX confirmed 选区并作为 `selected_text` 上下文，结果仍固定展示悬浮面板。macOS 仍暂不做自动学习，后续再按 `docs/ai/context/` 里的 macOS 分阶段计划补齐。
 - 三种模式只要粘贴或替换失败，都必须把最终结果展示到悬浮卡片，不能让用户丢失结果。
 - 自动粘贴前必须先确认当前存在可信文本输入目标；找不到光标或输入目标时，不得静默写剪贴板和发送 `Ctrl+V`，必须直接展示悬浮卡片。
 - 自动粘贴前的输入目标判定按四层收敛：`UIA confirmed` -> `Win32 caret confirmed` -> `app_compat` 弱可信应用族兜底 -> 悬浮卡片；不要把“前台窗口存在”当成可粘贴条件，第三层只在 allowlist 应用族且弱信号充分时放行。当前 allowlist 只做显式应用族匹配，包含微信、QQ、Discord、Codex、Claude Code、ChatGPT、VS Code、Cursor、Slack、Notion、Spotify，不把所有 Electron / Chromium 一刀切放开。
 - 自动粘贴成功后必须恢复用户原剪贴板内容，不能让 SpeakMore 的结果长期占用系统剪贴板。
 - 如果同一轮键态里同时存在 `Space` 和 `RightShift`，优先按翻译意图处理，避免自由提问抢占翻译。
-- `focused-context:get-selection-snapshot` 使用 Windows UI Automation 读取 confirmed 选区；读取顺序为 `FocusedElement` 的 TextPattern、前台窗口 Document/TextPattern 子树扫描、剪贴板 fallback；`focused-context:get-selected-text` 的剪贴板读取只保留为旧兼容能力，必须尽量恢复原剪贴板。
-- 普通听写和语音翻译启动前不得读取 UIA 或剪贴板选区；只有 `Right Alt + Space` 自由提问需要按 UIA 优先、剪贴板 fallback 次之读取选区作为上下文。
+- `focused-context:get-selection-snapshot` 在 Windows 使用 UI Automation 读取 confirmed 选区，读取顺序为 `FocusedElement` 的 TextPattern、前台窗口 Document/TextPattern 子树扫描、剪贴板 fallback；在 macOS 使用 Accessibility API 读取 focused element 的 selected text，当前不启用剪贴板 fallback；`focused-context:get-selected-text` 的剪贴板读取只保留为旧兼容能力，必须尽量恢复原剪贴板。
+- 普通听写和语音翻译启动前不得读取 UIA、AX 或剪贴板选区；只有自由提问需要读取选区作为上下文。
 - 自由提问未来如需回答实时问题，必须在后端增加意图分类和工具路由；不要只靠 prompt 假装具备联网、天气或网页检索能力。
 - 翻译录音启动时，renderer 必须从本地设置读取 `translationTargetLanguage`，并通过 WebSocket `start_audio.parameters.output_language` 传给后端；当前支持 `en` 和 `ja`，语言集合以共享翻译目标语言元数据为准。
 - 录音启动必须先校验当前大模型 provider 的 API Key；未填写时直接拦截并提示，不得打开麦克风、连接 WebSocket 或等待后端 ready。API Key 已配置后，可以并行准备后端 ready、词典、WebSocket 和麦克风；模型未下载时必须返回 `voice_model_missing` 并提示先下载模型；`start_audio` 只能在 `/ready` 成功和所有启动资源准备完成后发送，ready 失败或取消时必须清理已打开的麦克风和 WebSocket。
@@ -123,7 +123,7 @@
 ## 已知限制
 
 - 大模型 provider 默认模型只是首次配置建议，可能随服务商策略变化；如果调用失败，优先让用户在设置页修改模型名或 API Key，不要写死单一模型假设。
-- 当前 Windows 可信选区读取依赖 Windows UI Automation；目标应用不支持 UIA 选区时会按无选区处理。macOS MVP 暂不读取选区，后续需要用 Accessibility API 单独实现。
+- 当前 Windows 可信选区读取依赖 Windows UI Automation；目标应用不支持 UIA 选区时会按无选区处理。当前 macOS 可信选区读取依赖 Accessibility API focused element selected text；目标应用不暴露 AX selected text 时会按无选区处理。
 - 当前 `ask_anything` 只调用 DeepSeek 文本模型，没有联网搜索、天气查询或工具调用链路；实时信息问题必须明确能力边界。
 - 当前没有单独的选区文本翻译快捷键；`Right Alt` 固定为听写，`Right Alt + Right Shift` 固定为语音翻译粘贴。翻译目标语言当前支持 `en` 和 `ja`。
 - 首页“最近结果”的真实 UI 以 `electron-app/renderer/src/pages/Dashboard.tsx` 为准，修改前先读当前实现和测试，不要只依赖历史上下文。

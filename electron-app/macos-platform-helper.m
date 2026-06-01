@@ -226,6 +226,60 @@ static NSDictionary *FocusedInfo(void) {
   return result;
 }
 
+static NSDictionary *SelectedText(void) {
+  BOOL trusted = AXIsProcessTrusted();
+  NSDictionary *appInfo = FrontmostAppInfo();
+  NSNumber *processId = appInfo[@"process_id"] ?: @0;
+
+  if (!trusted) {
+    return @{
+      @"success": @NO,
+      @"text": @"",
+      @"source": @"macos_ax",
+      @"confidence": @"none",
+      @"reason": @"macos_accessibility_permission_missing",
+      @"selection_scope": @"focused_element",
+      @"app_identifier": appInfo[@"bundle_id"] ?: @"",
+      @"process_id": processId,
+    };
+  }
+
+  AXUIElementRef focused = CopyFocusedElement();
+  if (focused == NULL) {
+    return @{
+      @"success": @NO,
+      @"text": @"",
+      @"source": @"macos_ax",
+      @"confidence": @"none",
+      @"reason": @"macos_focused_element_unavailable",
+      @"selection_scope": @"focused_element",
+      @"app_identifier": appInfo[@"bundle_id"] ?: @"",
+      @"process_id": processId,
+    };
+  }
+
+  NSString *selectedText = AXStringAttribute(focused, kAXSelectedTextAttribute);
+  NSString *role = AXStringAttribute(focused, kAXRoleAttribute);
+  NSString *subrole = AXStringAttribute(focused, kAXSubroleAttribute);
+  BOOL hasText = [selectedText stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]].length > 0;
+
+  NSDictionary *result = @{
+    @"success": @(hasText),
+    @"text": hasText ? selectedText : @"",
+    @"source": @"macos_ax",
+    @"confidence": hasText ? @"confirmed" : @"none",
+    @"reason": hasText ? @"macos_selected_text_confirmed" : @"macos_selected_text_empty",
+    @"selection_scope": @"focused_element",
+    @"role": role ?: @"",
+    @"subrole": subrole ?: @"",
+    @"app_identifier": appInfo[@"bundle_id"] ?: @"",
+    @"process_id": processId,
+  };
+
+  CFRelease(focused);
+  return result;
+}
+
 static NSDictionary *FocusedTextTarget(void) {
   BOOL trusted = AXIsProcessTrusted();
   NSDictionary *appInfo = FrontmostAppInfo();
@@ -382,6 +436,10 @@ int main(int argc, const char *argv[]) {
     }
     if ([command isEqualToString:@"focused-info"]) {
       PrintJSON(FocusedInfo());
+      return 0;
+    }
+    if ([command isEqualToString:@"selected-text"]) {
+      PrintJSON(SelectedText());
       return 0;
     }
     if ([command isEqualToString:@"focused-text-target"]) {

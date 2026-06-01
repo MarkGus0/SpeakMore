@@ -5,7 +5,12 @@ const {
   createClipboardSnapshot: defaultCreateClipboardSnapshot,
   restoreClipboardSnapshot: defaultRestoreClipboardSnapshot,
 } = require('./focused-context/clipboard');
-const { normalizeFocusedTextTargetResult } = require('./focused-context/normalizers');
+const {
+  createEmptyFocusedInfo,
+  normalizeFocusedInfo,
+  normalizeFocusedTextTargetResult,
+  normalizeUiaSelectionResult,
+} = require('./focused-context/normalizers');
 
 const ACCESSIBILITY_SETTINGS_URL = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility';
 const DEFAULT_HELPER_TIMEOUT_MS = 3000;
@@ -123,6 +128,26 @@ function createMacosPlatformCapabilities({
     return false;
   }
 
+  function normalizeMacosSelectedTextResult(value) {
+    if (!value || typeof value !== 'object') {
+      return { success: false, text: '', source: 'none', confidence: 'none', reason: 'invalid_result' };
+    }
+
+    const normalized = normalizeUiaSelectionResult({
+      ...value,
+      source: value.source === 'macos_ax' ? 'uia' : value.source,
+    });
+
+    return {
+      ...normalized,
+      platformSource: typeof value.source === 'string' ? value.source : 'unknown',
+      ...(typeof value.role === 'string' && value.role ? { role: value.role } : {}),
+      ...(typeof value.subrole === 'string' && value.subrole ? { subrole: value.subrole } : {}),
+      ...(typeof value.app_identifier === 'string' && value.app_identifier ? { appIdentifier: value.app_identifier } : {}),
+      ...(value.process_id !== undefined ? { processId: Number(value.process_id) || 0 } : {}),
+    };
+  }
+
   async function runHelperCommand(command) {
     if (!isMacOS()) return unavailable();
 
@@ -186,6 +211,33 @@ function createMacosPlatformCapabilities({
 
   async function getFocusedInfo() {
     return runHelperCommand('focused-info');
+  }
+
+  async function getSelectedText() {
+    const result = await runHelperCommand('selected-text');
+    return normalizeMacosSelectedTextResult(result);
+  }
+
+  async function getSelectionSnapshot() {
+    if (!isMacOS()) {
+      return {
+        ...unavailable('macos_selection_not_supported'),
+        text: '',
+        source: 'none',
+        focusInfo: createEmptyFocusedInfo(),
+      };
+    }
+
+    const [focusedInfoResult, selectedTextResult] = await Promise.all([
+      getFocusedInfo(),
+      getSelectedText(),
+    ]);
+    const focusInfo = normalizeFocusedInfo(focusedInfoResult);
+
+    return {
+      ...selectedTextResult,
+      focusInfo,
+    };
   }
 
   async function getFocusedTextTarget() {
@@ -359,6 +411,8 @@ function createMacosPlatformCapabilities({
     getFocusedTextTarget,
     getFocusedTextTargetForPaste,
     getFrontmostApp,
+    getSelectedText,
+    getSelectionSnapshot,
     helperBinaryPath,
     openAccessibilitySettings,
     pasteText,

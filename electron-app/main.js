@@ -282,14 +282,7 @@ function readSelectedTextByClipboardForPlatform() {
 
 function readSelectionSnapshotForPlatform() {
   if (IS_MACOS) {
-    return Promise.resolve({
-      success: false,
-      text: '',
-      source: 'none',
-      confidence: 'none',
-      reason: 'macos_selection_not_supported',
-      focusInfo: createEmptyFocusedInfo(),
-    });
+    return macosPlatformCapabilities.getSelectionSnapshot(...arguments);
   }
   return readSelectionSnapshot(...arguments);
 }

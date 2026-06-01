@@ -1,20 +1,20 @@
 # SpeakMore
 
-SpeakMore 是一个本地语音输入工具。Electron 负责桌面壳、固定快捷键、托盘、本地数据和结果交付；本地 FastAPI 后端负责音频转写和大模型文本处理。Windows 是当前最终稳定版，macOS 当前提供开发态 MVP。
+SpeakMore 是一个本地语音输入工具。Electron 负责桌面壳、固定快捷键、托盘、本地数据和结果交付；本地 FastAPI 后端负责音频转写和大模型文本处理。Windows 是当前最终稳定版，macOS 当前提供开发态版本。
 
 当前正式 ASR 模型只支持 `FunAudioLLM/SenseVoiceSmall`。Windows x64 便携包不内置模型；首次运行进入“初始化”页后，由用户点击下载并加载 SenseVoiceSmall，下载失败时会显示明确错误。
 
 ## 功能
 
-- Windows `Right Alt` / macOS `Option`：听写。Windows 自动粘贴，macOS MVP 先展示在悬浮面板。
-- Windows `Right Alt + Space` / macOS `Option + Space`：自由提问，结果显示在悬浮面板，不自动粘贴。
-- Windows `Right Alt + Right Shift` / macOS `Option + Shift`：语音翻译。Windows 粘贴到当前光标位置，macOS MVP 先展示在悬浮面板。
+- Windows `Right Alt` / macOS `Option`：听写，结果自动粘贴；无法确认可信输入目标时显示悬浮面板。
+- Windows `Right Alt + Space` / macOS `Option + Space`：自由提问，结果显示在悬浮面板，不自动粘贴；有可信选区时携带选区上下文。
+- Windows `Right Alt + Right Shift` / macOS `Option + Shift`：语音翻译，结果粘贴到当前光标位置；无法确认可信输入目标时显示悬浮面板。
 - `Escape`：取消当前未完成语音会话，或关闭当前悬浮面板。
 - 录音时显示悬浮胶囊和麦克风音量。
 - 主窗口包含初始化、首页、历史记录、词典和设置。
 - 历史、设置、词典和自动学习候选只保存在本机。
 
-自动粘贴必须先确认可信文本输入目标；不满足条件时显示悬浮卡片，不静默写剪贴板和发送粘贴快捷键。macOS MVP 暂不做自动粘贴和选区上下文。
+自动粘贴必须先确认可信文本输入目标；不满足条件时显示悬浮卡片，不静默写剪贴板和发送粘贴快捷键。macOS 当前不做自动学习，选区上下文只服务自由提问。
 
 macOS 后续版本边界见 [macOS 路线图](docs/macos-roadmap.md)。
 
@@ -135,9 +135,9 @@ LLM provider、API Key 和模型名由设置页保存到本机 Electron `userDat
 
 ## 启动
 
-macOS 开发态 MVP 需要先在系统设置里允许当前终端或 Electron 使用“辅助功能”权限，否则全局 Option 监听器无法创建事件 tap。
+macOS 开发态需要先在系统设置里允许当前终端或 Electron 使用“辅助功能”权限，否则全局 Option 监听器、自动粘贴和选区读取不可用。
 
-设置页会显示 macOS 辅助功能权限状态，并提供打开系统设置的入口。当前 macOS 阶段会在可信输入目标中自动粘贴听写和翻译结果；权限缺失、目标不可用或粘贴失败时会展示悬浮面板。自由提问仍只展示悬浮面板。
+设置页会显示 macOS 辅助功能权限状态，并提供打开系统设置的入口。当前 macOS 阶段会在可信输入目标中自动粘贴听写和翻译结果；权限缺失、目标不可用或粘贴失败时会展示悬浮面板。自由提问会读取 AX confirmed 选区作为上下文，结果仍只展示悬浮面板。
 
 构建前端：
 

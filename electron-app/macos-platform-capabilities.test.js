@@ -138,6 +138,129 @@ test('createMacosPlatformCapabilities 剪贴板诊断会恢复原始内容', () 
   assert.equal(clipboard.current().image.id, 'image-1');
 });
 
+test('createMacosPlatformCapabilities 读取 macOS 选区并归一化为自由提问上下文', async () => {
+  const helperCommands = [];
+  const service = createMacosPlatformCapabilities({
+    processPlatform: 'darwin',
+    helperSourcePath: () => '/repo/electron-app/macos-platform-helper.m',
+    helperExecutablePath: () => '/tmp/speakmore-macos-platform-helper',
+    spawnSyncProcess: () => ({ status: 0, stdout: '', stderr: '' }),
+    spawnProcess: (_command, args) => {
+      helperCommands.push(args[0]);
+      if (args[0] === 'focused-info') {
+        return createFakeChild({
+          stdout: JSON.stringify({
+            success: true,
+            source: 'macos_ax',
+            confidence: 'confirmed',
+            appInfo: {
+              app_name: 'TextEdit',
+              app_identifier: 'com.apple.TextEdit',
+              window_title: 'note.txt',
+              app_type: 'native_app',
+              app_metadata: {
+                bundle_id: 'com.apple.TextEdit',
+                process_id: 42,
+              },
+              browser_context: null,
+            },
+            elementInfo: {
+              role: 'AXTextArea',
+              focused: true,
+              editable: true,
+              selected: true,
+              bounds: { x: 1, y: 2, width: 300, height: 40 },
+            },
+          }),
+        });
+      }
+      return createFakeChild({
+        stdout: JSON.stringify({
+          success: true,
+          text: '  选中的上下文  ',
+          source: 'macos_ax',
+          confidence: 'confirmed',
+          reason: 'macos_selected_text_confirmed',
+          selection_scope: 'focused_element',
+          role: 'AXTextArea',
+          app_identifier: 'com.apple.TextEdit',
+          process_id: 42,
+        }),
+      });
+    },
+  });
+
+  const snapshot = await service.getSelectionSnapshot();
+
+  assert.equal(snapshot.success, true);
+  assert.equal(snapshot.text, '选中的上下文');
+  assert.equal(snapshot.source, 'uia');
+  assert.equal(snapshot.confidence, 'confirmed');
+  assert.equal(snapshot.platformSource, 'macos_ax');
+  assert.equal(snapshot.selectionScope, 'focused_element');
+  assert.equal(snapshot.focusInfo.appInfo.app_identifier, 'com.apple.TextEdit');
+  assert.equal(snapshot.focusInfo.elementInfo.selected, true);
+  assert.deepEqual(helperCommands, ['focused-info', 'selected-text']);
+});
+
+test('createMacosPlatformCapabilities 在 macOS 选区权限缺失时返回空选区和焦点信息', async () => {
+  const helperCommands = [];
+  const service = createMacosPlatformCapabilities({
+    processPlatform: 'darwin',
+    helperSourcePath: () => '/repo/electron-app/macos-platform-helper.m',
+    helperExecutablePath: () => '/tmp/speakmore-macos-platform-helper',
+    spawnSyncProcess: () => ({ status: 0, stdout: '', stderr: '' }),
+    spawnProcess: (_command, args) => {
+      helperCommands.push(args[0]);
+      if (args[0] === 'focused-info') {
+        return createFakeChild({
+          stdout: JSON.stringify({
+            success: false,
+            source: 'macos_ax',
+            confidence: 'none',
+            reason: 'macos_accessibility_permission_missing',
+            appInfo: {
+              app_name: 'TextEdit',
+              app_identifier: 'com.apple.TextEdit',
+              window_title: '',
+              app_type: 'native_app',
+              app_metadata: { bundle_id: 'com.apple.TextEdit', process_id: 42 },
+              browser_context: null,
+            },
+            elementInfo: {
+              role: '',
+              focused: false,
+              editable: false,
+              selected: false,
+              bounds: { x: 0, y: 0, width: 0, height: 0 },
+            },
+          }),
+        });
+      }
+      return createFakeChild({
+        stdout: JSON.stringify({
+          success: false,
+          text: '',
+          source: 'macos_ax',
+          confidence: 'none',
+          reason: 'macos_accessibility_permission_missing',
+          selection_scope: 'focused_element',
+        }),
+      });
+    },
+  });
+
+  const snapshot = await service.getSelectionSnapshot();
+
+  assert.equal(snapshot.success, false);
+  assert.equal(snapshot.text, '');
+  assert.equal(snapshot.source, 'none');
+  assert.equal(snapshot.confidence, 'none');
+  assert.equal(snapshot.reason, 'macos_accessibility_permission_missing');
+  assert.equal(snapshot.focusInfo.appInfo.app_identifier, 'com.apple.TextEdit');
+  assert.deepEqual(helperCommands, ['focused-info', 'selected-text']);
+});
+
 test('createMacosPlatformCapabilities 在可信目标中执行 macOS 自动粘贴并恢复剪贴板', async () => {
   const clipboard = createRichClipboard();
   const helperCommands = [];
