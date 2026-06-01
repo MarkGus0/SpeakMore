@@ -173,7 +173,17 @@ function normalizeFocusedTextTargetResult(value) {
     && (confidence === 'weak' || confidence === 'confirmed')
     && matchedSignals.length > 0
     && Boolean(foregroundHwnd);
-  const success = Boolean(value.success) && (isUiaSuccess || isCaretSuccess || isAppCompatSuccess || isForegroundWindowSuccess);
+  const isMacosAxSuccess = source === 'macos_ax'
+    && confidence === 'confirmed'
+    && !isReadOnly
+    && (valuePattern || textPattern || Boolean(controlType));
+  const success = Boolean(value.success) && (
+    isUiaSuccess
+    || isCaretSuccess
+    || isAppCompatSuccess
+    || isForegroundWindowSuccess
+    || isMacosAxSuccess
+  );
 
   return {
     success,

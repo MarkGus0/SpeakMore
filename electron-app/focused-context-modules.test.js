@@ -107,6 +107,17 @@ test('normalizers 模块归一化 Win32 caret 和 app_compat 输入目标', () =
     foreground_hwnd: '300',
     matched_signals: ['same_foreground_hwnd'],
   }).success, true);
+
+  assert.equal(normalizeFocusedTextTargetResult({
+    success: true,
+    source: 'macos_ax',
+    confidence: 'confirmed',
+    reason: 'macos_focused_target_confirmed',
+    text_pattern: true,
+    control_type: 'AXTextField',
+    app_family: 'com.apple.TextEdit',
+    matched_signals: ['frontmost_app', 'role:AXTextField'],
+  }).success, true);
 });
 
 test('app_compat 模块允许常见桌面文本应用族', () => {

@@ -137,6 +137,8 @@ LLM provider、API Key 和模型名由设置页保存到本机 Electron `userDat
 
 macOS 开发态 MVP 需要先在系统设置里允许当前终端或 Electron 使用“辅助功能”权限，否则全局 Option 监听器无法创建事件 tap。
 
+设置页会显示 macOS 辅助功能权限状态，并提供打开系统设置的入口。当前阶段只做权限和平台能力诊断，听写和翻译结果仍先展示到悬浮面板，不自动粘贴。
+
 构建前端：
 
 ```powershell

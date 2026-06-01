@@ -54,6 +54,7 @@ const { createDictionaryRepository } = require('./dictionary-repository');
 const { createTextObserverService } = require('./text-observer-service');
 const { createLocalCompatState } = require('./local-compat-state');
 const { createMainIpcRegistry } = require('./main-ipc-registry');
+const { createMacosPlatformCapabilities } = require('./macos-platform-capabilities');
 const { createAutoLearningDebugLogger } = require('./auto-learning-debug-logger');
 const { createVoiceBackendService } = require('./voice-backend-service');
 
@@ -229,6 +230,15 @@ const textObserverService = createTextObserverService({
 
 const textObservationManager = textObserverService.textObservationManager;
 
+const macosPlatformCapabilities = createMacosPlatformCapabilities({
+  clipboard,
+  helperSourcePath: () => macosPlatformHelperPath(),
+  processPlatform: process.platform,
+  processEnv: process.env,
+  shell,
+  spawnProcess: spawn,
+});
+
 function debugShortcut(event, payload = {}) {
   if (!SHORTCUT_DEBUG_ENABLED) return;
   console.log(`[shortcut-debug] ${event} ${JSON.stringify(payload)}`);
@@ -241,6 +251,7 @@ function trayIconPath() { return appPaths.trayIconPath(); }
 function rightAltListenerPath() { return appPaths.rightAltListenerPath(); }
 function audioSessionControlPath() { return appPaths.audioSessionControlPath(); }
 function macosOptionListenerPath() { return appPaths.macosOptionListenerPath(); }
+function macosPlatformHelperPath() { return appPaths.macosPlatformHelperPath(); }
 
 function readFocusedInfoForPlatform(options = {}) {
   if (IS_MACOS) return Promise.resolve(createEmptyFocusedInfo());
@@ -452,12 +463,14 @@ const mainIpcRegistry = createMainIpcRegistry({
   localDataDir,
   logFilePath,
   logger: autoLearningLogger,
+  macosPlatformCapabilities,
   muteBackgroundSessionsForRecording,
   normalizeHistoryItem,
   openExternalUrl,
   os,
   processEnv: process.env,
   processExecPath: process.execPath,
+  processPlatform: process.platform,
   readFocusedInfo: readFocusedInfoForPlatform,
   readFocusedTextTarget: readFocusedTextTargetForPlatform,
   readHistoryItems,

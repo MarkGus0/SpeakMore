@@ -326,6 +326,7 @@ test('registerPermissionIpcHandlers 注册权限和更新兼容通道', async ()
   registerPermissionIpcHandlers({
     ipcMain,
     app: {},
+    processPlatform: 'win32',
   });
 
   assert.equal(await ipcMain.invoke('permission:request'), true);
@@ -335,6 +336,32 @@ test('registerPermissionIpcHandlers 注册权限和更新兼容通道', async ()
     code: 'auto_launch_disabled',
   });
   assert.equal(await ipcMain.invoke('updater:check-for-update'), null);
+});
+
+test('registerPermissionIpcHandlers 注册 macOS 权限诊断通道', async () => {
+  const ipcMain = createFakeIpcMain();
+  const calls = [];
+  registerPermissionIpcHandlers({
+    ipcMain,
+    app: {},
+    processPlatform: 'darwin',
+    macosPlatformCapabilities: {
+      getAccessibilityStatus: async () => ({ success: true, trusted: true }),
+      openAccessibilitySettings: async () => ({ success: true, reason: 'opened' }),
+      getDiagnostics: async (options) => {
+        calls.push(options);
+        return { success: true, options };
+      },
+    },
+  });
+
+  assert.deepEqual(await ipcMain.invoke('permission:macos-accessibility-status'), { success: true, trusted: true });
+  assert.deepEqual(await ipcMain.invoke('permission:open-macos-accessibility-settings'), { success: true, reason: 'opened' });
+  assert.deepEqual(await ipcMain.invoke('permission:macos-platform-diagnostics', { includeClipboard: true }), {
+    success: true,
+    options: { includeClipboard: true, includeEventInjection: false },
+  });
+  assert.deepEqual(calls, [{ includeClipboard: true, includeEventInjection: false }]);
 });
 
 test('registerCompatIpcHandlers 注册本地兼容桩通道', async () => {

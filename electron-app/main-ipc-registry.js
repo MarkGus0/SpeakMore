@@ -58,12 +58,14 @@ function createMainIpcRegistry({
   localDataDir,
   logFilePath,
   logger = console,
+  macosPlatformCapabilities,
   muteBackgroundSessionsForRecording,
   normalizeHistoryItem,
   openExternalUrl,
   os,
   processEnv,
   processExecPath,
+  processPlatform = process.platform,
   readFocusedInfo,
   readFocusedTextTarget,
   readHistoryItems,
@@ -191,6 +193,8 @@ function createMainIpcRegistry({
     registers.registerPermissionIpcHandlers({
       ipcMain,
       app,
+      macosPlatformCapabilities,
+      processPlatform,
       processExecPath,
     });
     registers.registerCompatIpcHandlers({
