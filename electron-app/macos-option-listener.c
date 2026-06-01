@@ -1,10 +1,12 @@
 #include <ApplicationServices/ApplicationServices.h>
+#include <IOKit/hidsystem/IOLLEvent.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 static const int64_t KEY_CODE_SPACE = 49;
 static const int64_t KEY_CODE_ESCAPE = 53;
+static const int64_t KEY_CODE_RIGHT_OPTION = 61;
 
 static bool option_is_down = false;
 static bool shift_is_down = false;
@@ -17,15 +19,16 @@ static void emit_key(const char *key, bool is_keydown) {
 }
 
 static void handle_flags_changed(CGEventRef event) {
+  int64_t key_code = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
   CGEventFlags flags = CGEventGetFlags(event);
-  bool option_now = (flags & kCGEventFlagMaskAlternate) != 0;
+  bool right_option_now = (flags & NX_DEVICERALTKEYMASK) != 0;
   bool shift_now = (flags & kCGEventFlagMaskShift) != 0;
 
-  if (option_now != option_is_down) {
-    option_is_down = option_now;
-    emit_key("RightAlt", option_now);
+  if (key_code == KEY_CODE_RIGHT_OPTION && right_option_now != option_is_down) {
+    option_is_down = right_option_now;
+    emit_key("RightAlt", option_is_down);
 
-    if (!option_now) {
+    if (!option_is_down) {
       if (shift_is_down) {
         shift_is_down = false;
         emit_key("RightShift", false);
@@ -37,7 +40,7 @@ static void handle_flags_changed(CGEventRef event) {
     }
   }
 
-  if (option_now) {
+  if (option_is_down) {
     if (shift_now != shift_is_down) {
       shift_is_down = shift_now;
       emit_key("RightShift", shift_now);

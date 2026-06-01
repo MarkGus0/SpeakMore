@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const EventEmitter = require('node:events');
+const fs = require('node:fs');
+const path = require('node:path');
 const { createRightAltListenerService } = require('./right-alt-listener-service');
 
 function createFakeProcess() {
@@ -49,6 +51,32 @@ test('handleListenerLine 遇到 Escape keydown 时调用专用回调，不进入
 
   assert.equal(escapeCount, 1);
   assert.equal(relayCount, 0);
+});
+
+test('handleListenerLine 忽略非右侧 Option 协议键', () => {
+  const handled = [];
+  const service = createRightAltListenerService({
+    emitKeyboardState: () => undefined,
+    createRelay: () => ({
+      handlePayload: (payload) => handled.push(payload),
+      dispose: () => undefined,
+    }),
+  });
+
+  service.handleListenerLine('{"key":"LeftAlt","isKeydown":true}');
+  service.handleListenerLine('{"key":"Option","isKeydown":true}');
+  service.handleListenerLine('{"key":"RightAlt","isKeydown":true}');
+
+  assert.deepEqual(handled, [{ key: 'RightAlt', isKeydown: true }]);
+});
+
+test('macOS Option 监听器只按右 Option keycode 映射 RightAlt', () => {
+  const source = fs.readFileSync(path.join(__dirname, 'macos-option-listener.c'), 'utf8');
+
+  assert.match(source, /KEY_CODE_RIGHT_OPTION\s*=\s*61/);
+  assert.match(source, /NX_DEVICERALTKEYMASK/);
+  assert.match(source, /key_code\s*==\s*KEY_CODE_RIGHT_OPTION/);
+  assert.doesNotMatch(source, /kCGEventFlagMaskAlternate\)\s*!=\s*0/);
 });
 
 test('start 在非 Windows 平台不启动监听进程', () => {
