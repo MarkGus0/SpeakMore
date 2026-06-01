@@ -44,6 +44,10 @@ class StreamingAsrModelSource:
 class StreamingAsrRuntime:
     model: Any
     model_id: str = SENSEVOICE_SMALL_MODEL_ID
+    device: str = "cpu"
+    requested_device: str = "cpu"
+    device_source: str = "auto"
+    device_fallback_reason: str | None = None
     chunk_size: list[int] | None = None
     encoder_chunk_look_back: int | None = None
     decoder_chunk_look_back: int | None = None
@@ -59,6 +63,14 @@ class StreamingAsrRuntime:
 @dataclass(frozen=True)
 class StreamingAsrResult:
     text: str
+
+
+@dataclass(frozen=True)
+class FunasrDeviceSelection:
+    device: str
+    requested_device: str
+    source: str
+    fallback_reason: str | None = None
 
 
 _model: StreamingAsrRuntime | None = None
@@ -78,13 +90,73 @@ def is_cuda_available() -> bool:
         return False
 
 
-def resolve_funasr_device() -> str:
+def is_mps_available() -> bool:
+    try:
+        import torch
+
+        return bool(torch.backends.mps.is_available())
+    except Exception:
+        return False
+
+
+def normalize_funasr_device(value: str | None) -> str:
+    return str(value or "").strip().lower()
+
+
+def resolve_funasr_device_selection() -> FunasrDeviceSelection:
     configured_device = os.environ.get("FUNASR_DEVICE", "").strip()
-    if configured_device:
-        if configured_device.startswith("cuda") and not is_cuda_available():
-            return "cpu"
-        return configured_device
-    return "cuda:0" if is_cuda_available() else "cpu"
+    normalized_device = normalize_funasr_device(configured_device)
+
+    if normalized_device and normalized_device != "auto":
+        if normalized_device.startswith("cuda") and not is_cuda_available():
+            return FunasrDeviceSelection(
+                device="cpu",
+                requested_device=configured_device,
+                source="explicit",
+                fallback_reason="cuda_unavailable",
+            )
+        if normalized_device == "mps" and not is_mps_available():
+            return FunasrDeviceSelection(
+                device="cpu",
+                requested_device=configured_device,
+                source="explicit",
+                fallback_reason="mps_unavailable",
+            )
+        return FunasrDeviceSelection(device=configured_device, requested_device=configured_device, source="explicit")
+
+    requested_device = "auto" if normalized_device == "auto" else "default"
+    if is_cuda_available():
+        return FunasrDeviceSelection(device="cuda:0", requested_device=requested_device, source="auto")
+    if normalized_device == "auto" and is_mps_available():
+        return FunasrDeviceSelection(device="mps", requested_device=requested_device, source="auto")
+    return FunasrDeviceSelection(
+        device="cpu",
+        requested_device=requested_device,
+        source="auto",
+        fallback_reason="accelerator_unavailable" if normalized_device == "auto" else None,
+    )
+
+
+def resolve_funasr_device() -> str:
+    return resolve_funasr_device_selection().device
+
+
+def get_asr_runtime_device_status() -> dict[str, str | None]:
+    if isinstance(_model, StreamingAsrRuntime):
+        return {
+            "device": _model.device,
+            "requested_device": _model.requested_device,
+            "device_source": _model.device_source,
+            "fallback_reason": _model.device_fallback_reason,
+        }
+
+    selection = resolve_funasr_device_selection()
+    return {
+        "device": selection.device,
+        "requested_device": selection.requested_device,
+        "device_source": selection.source,
+        "fallback_reason": selection.fallback_reason,
+    }
 
 
 def is_valid_model_dir(path: Path, required_files: tuple[str, ...]) -> bool:
@@ -194,13 +266,22 @@ def resolve_model_ref_for_build(
     return snapshot_download(source.model_ref, cache_dir=source.download_root, tqdm_class=tqdm_class)
 
 
-def create_streaming_runtime(model: Any, model_id: str) -> StreamingAsrRuntime:
+def create_streaming_runtime(
+    model: Any,
+    model_id: str,
+    device_selection: FunasrDeviceSelection | None = None,
+) -> StreamingAsrRuntime:
     if model_id != SENSEVOICE_SMALL_MODEL_ID:
         raise ValueError(f"未知 streaming ASR 模型: {model_id}")
 
+    selection = device_selection or FunasrDeviceSelection(device="cpu", requested_device="cpu", source="auto")
     return StreamingAsrRuntime(
         model=model,
         model_id=model_id,
+        device=selection.device,
+        requested_device=selection.requested_device,
+        device_source=selection.source,
+        device_fallback_reason=selection.fallback_reason,
         chunk_ms=1200,
         accumulate_audio=True,
         pass_cache=True,
@@ -212,6 +293,16 @@ def create_streaming_runtime(model: Any, model_id: str) -> StreamingAsrRuntime:
             "batch_size_s": 60,
         },
         postprocess="rich_transcription",
+    )
+
+
+def create_model_with_device(AutoModel, model_ref: str, model_id: str, device: str):
+    return AutoModel(
+        model=model_ref,
+        hub="hf",
+        device=device,
+        disable_update=True,
+        **get_auto_model_kwargs(model_id),
     )
 
 
@@ -227,17 +318,26 @@ def build_streaming_asr_model(
     ensure_funasr_repo_import_path()
     from funasr import AutoModel
 
-    device = resolve_funasr_device()
+    device_selection = resolve_funasr_device_selection()
     model_ref = resolve_model_ref_for_build(source, download_progress_callback)
-    print(f"[ASR] 从 {source.kind} 加载 {source.model_id}: {model_ref}，设备: {device}")
-    model = AutoModel(
-        model=model_ref,
-        hub="hf",
-        device=device,
-        disable_update=True,
-        **get_auto_model_kwargs(source.model_id),
-    )
-    return create_streaming_runtime(model, source.model_id)
+    print(f"[ASR] 从 {source.kind} 加载 {source.model_id}: {model_ref}，设备: {device_selection.device}")
+
+    try:
+        model = create_model_with_device(AutoModel, model_ref, source.model_id, device_selection.device)
+        return create_streaming_runtime(model, source.model_id, device_selection)
+    except Exception as error:
+        if normalize_funasr_device(device_selection.device) == "cpu":
+            raise
+
+        fallback_selection = FunasrDeviceSelection(
+            device="cpu",
+            requested_device=device_selection.requested_device,
+            source=device_selection.source,
+            fallback_reason=f"{normalize_funasr_device(device_selection.device)}_initialization_failed: {error}",
+        )
+        print(f"[ASR] {device_selection.device} 初始化失败，回退 CPU: {error}")
+        model = create_model_with_device(AutoModel, model_ref, source.model_id, fallback_selection.device)
+        return create_streaming_runtime(model, source.model_id, fallback_selection)
 
 
 def _load_streaming_asr_model(download_progress_callback: Callable[[DownloadProgress], None] | None = None):

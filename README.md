@@ -123,6 +123,8 @@ cp server/.env.example server/.env
 DEEPSEEK_API_KEY=
 DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
 SENSEVOICE_SMALL_MODEL_DIR=
+TYPELESS_MODEL_CACHE_DIR=
+FUNASR_DEVICE=
 HOST=127.0.0.1
 PORT=8000
 CORS_ALLOWED_ORIGINS=null,http://127.0.0.1:5173,http://localhost:5173
@@ -194,6 +196,18 @@ npm start
 5. 都未命中时，初始化页点击下载后保存到用户设置的 `modelCacheDir`，未设置时保存到平台默认模型目录
 
 如果手动配置 `SENSEVOICE_SMALL_MODEL_DIR`，目录内必须包含 SenseVoiceSmall 所需文件。
+
+### ASR 运行设备
+
+后端通过 `FUNASR_DEVICE` 选择 FunASR 运行设备：
+
+- 空值：保持默认稳定策略，优先 CUDA，最后 CPU，不自动启用 MPS。
+- `auto`：自动探测，优先 CUDA，其次 macOS MPS，最后 CPU。
+- `cpu`：固定 CPU，最稳定。
+- `cuda` / `cuda:0`：显式使用 CUDA；不可用时回退 CPU。
+- `mps`：显式使用 Apple Silicon MPS；不可用或初始化失败时回退 CPU。
+
+macOS MPS 目前只作为实验加速路径，不承诺性能指标。`GET /model/status` 会返回 `device`、`requested_device`、`device_source` 和 `fallback_reason`，用于确认实际运行设备和回退原因。
 
 ## 本地数据
 

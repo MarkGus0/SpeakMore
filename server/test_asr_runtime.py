@@ -46,14 +46,75 @@ class AsrRuntimeTest(unittest.TestCase):
             fake_huggingface_hub = types.SimpleNamespace(snapshot_download=fake_snapshot_download)
 
             with patch.dict(sys.modules, {"funasr": fake_funasr, "huggingface_hub": fake_huggingface_hub}), patch(
-                "asr.resolve_funasr_device",
-                return_value="cpu",
+                "asr.resolve_funasr_device_selection",
+                return_value=asr.FunasrDeviceSelection(device="cpu", requested_device="cpu", source="explicit"),
             ):
                 asr.build_streaming_asr_model(source)
 
             self.assertEqual(download_calls, [{"model": "FunAudioLLM/SenseVoiceSmall", "cache_dir": temp_dir}])
             self.assertEqual(observed["kwargs"]["model"], snapshot_dir)
             self.assertEqual(observed["kwargs"]["hub"], "hf")
+            self.assertEqual(observed["kwargs"]["device"], "cpu")
+
+    def test_resolve_funasr_device_selection_prefers_mps_when_cuda_is_unavailable(self):
+        with patch.dict(os.environ, {"FUNASR_DEVICE": "auto"}, clear=False), patch(
+            "asr.is_cuda_available",
+            return_value=False,
+        ), patch("asr.is_mps_available", return_value=True):
+            selection = asr.resolve_funasr_device_selection()
+
+        self.assertEqual(selection.device, "mps")
+        self.assertEqual(selection.requested_device, "auto")
+        self.assertEqual(selection.source, "auto")
+        self.assertIsNone(selection.fallback_reason)
+
+    def test_resolve_funasr_device_selection_keeps_default_cpu_when_only_mps_is_available(self):
+        with patch.dict(os.environ, {"FUNASR_DEVICE": ""}, clear=False), patch(
+            "asr.is_cuda_available",
+            return_value=False,
+        ), patch("asr.is_mps_available", return_value=True):
+            selection = asr.resolve_funasr_device_selection()
+
+        self.assertEqual(selection.device, "cpu")
+        self.assertEqual(selection.requested_device, "default")
+        self.assertEqual(selection.source, "auto")
+        self.assertIsNone(selection.fallback_reason)
+
+    def test_resolve_funasr_device_selection_falls_back_when_explicit_mps_is_unavailable(self):
+        with patch.dict(os.environ, {"FUNASR_DEVICE": "mps"}, clear=False), patch(
+            "asr.is_mps_available",
+            return_value=False,
+        ):
+            selection = asr.resolve_funasr_device_selection()
+
+        self.assertEqual(selection.device, "cpu")
+        self.assertEqual(selection.requested_device, "mps")
+        self.assertEqual(selection.source, "explicit")
+        self.assertEqual(selection.fallback_reason, "mps_unavailable")
+
+    def test_build_streaming_asr_model_falls_back_to_cpu_when_mps_initialization_fails(self):
+        calls = []
+
+        class FakeAutoModel:
+            def __init__(self, **kwargs):
+                calls.append(kwargs["device"])
+                if kwargs["device"] == "mps":
+                    raise RuntimeError("missing mps op")
+
+        source = asr.StreamingAsrModelSource(kind=asr.DIR_SOURCE, model_ref="/tmp/sensevoice")
+        fake_funasr = types.SimpleNamespace(AutoModel=FakeAutoModel)
+
+        with patch.dict(sys.modules, {"funasr": fake_funasr}), patch(
+            "asr.resolve_funasr_device_selection",
+            return_value=asr.FunasrDeviceSelection(device="mps", requested_device="mps", source="explicit"),
+        ):
+            runtime = asr.build_streaming_asr_model(source)
+
+        self.assertEqual(calls, ["mps", "cpu"])
+        self.assertEqual(runtime.device, "cpu")
+        self.assertEqual(runtime.requested_device, "mps")
+        self.assertEqual(runtime.device_source, "explicit")
+        self.assertIn("mps_initialization_failed", runtime.device_fallback_reason)
 
     def test_download_source_passes_progress_tqdm_to_snapshot_download(self):
         with tempfile.TemporaryDirectory() as temp_dir:

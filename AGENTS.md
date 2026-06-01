@@ -24,7 +24,7 @@
 - 旧模型管理能力已删除，Electron 不再注册 `model:*` IPC，也不提供模型切换、删除或选择入口；当前只允许单模型初始化页触发 SenseVoiceSmall 下载/加载。
 - 当前正式 ASR 模型只支持 `FunAudioLLM/SenseVoiceSmall`，用户可见层只有“初始化”页的单模型下载/加载入口。
 - `sensevoice-small` 通过 FunASR `SenseVoiceSmall` 接入，不描述为原生在线 streaming；后端通过累计音频伪流式输出维持现有 WebSocket 协议。
-- ASR 运行时优先使用 CUDA，PyTorch 不可用 CUDA 时降级到 CPU；macOS MVP 先按 CPU 跑通，MPS 只作为后续优化；模型扫描顺序固定为 `SENSEVOICE_SMALL_MODEL_DIR` → 用户设置的 `modelCacheDir` / 后端 `TYPELESS_MODEL_CACHE_DIR` → 平台默认模型目录（Windows `%LOCALAPPDATA%\Typeless\models\funasr`，macOS `~/Library/Application Support/SpeakMore/models/funasr`）→ `%USERPROFILE%\.cache\huggingface\hub` 或当前用户 Hugging Face cache → 初始化页点击下载到用户设置的 `modelCacheDir`，未设置时下载到平台默认模型目录。
+- ASR 运行时通过 `FUNASR_DEVICE` 选择设备；空值保持默认稳定策略，优先 CUDA，最后 CPU，不自动启用 MPS；`auto` 时优先 CUDA，其次 macOS MPS，最后 CPU；显式 `cuda` / `cuda:0` / `mps` 不可用或非 CPU 初始化失败时必须回退 CPU；MPS 仍是 Apple Silicon 实验加速路径，不承诺性能指标；`/model/status` 和 `/ready` 暴露 `device`、`requested_device`、`device_source` 和 `fallback_reason`；模型扫描顺序固定为 `SENSEVOICE_SMALL_MODEL_DIR` → 用户设置的 `modelCacheDir` / 后端 `TYPELESS_MODEL_CACHE_DIR` → 平台默认模型目录（Windows `%LOCALAPPDATA%\Typeless\models\funasr`，macOS `~/Library/Application Support/SpeakMore/models/funasr`）→ `%USERPROFILE%\.cache\huggingface\hub` 或当前用户 Hugging Face cache → 初始化页点击下载到用户设置的 `modelCacheDir`，未设置时下载到平台默认模型目录。
 - `electron-app/main.js` 加载 `electron-app/renderer/dist/index.html`、`floating-bar.html` 和 `floating-panel.html`。
 - `electron-app/main.js` 是 Electron 主进程组合根，主要负责创建服务、依赖接线和生命周期注册；窗口、悬浮状态、IPC、本地数据、后端客户端、音频会话、文本观察和 Right Alt 监听逻辑应放在对应独立模块。
 - `electron-app/main-ipc-registry.js` 负责按上下文注册 IPC，主进程只注入依赖，不在 `main.js` 里直接拼装各通道业务逻辑。
