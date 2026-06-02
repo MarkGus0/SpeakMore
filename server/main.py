@@ -226,15 +226,26 @@ def normalize_download_progress(progress: dict | None = None) -> dict[str, int |
     downloaded = progress.get("downloaded_bytes") if isinstance(progress, dict) else None
     total = progress.get("total_bytes") if isinstance(progress, dict) else None
     percent = progress.get("progress_percent") if isinstance(progress, dict) else None
+    downloaded_files = progress.get("downloaded_files") if isinstance(progress, dict) else None
+    total_files = progress.get("total_files") if isinstance(progress, dict) else None
+    file_percent = progress.get("file_progress_percent") if isinstance(progress, dict) else None
     downloaded_bytes = max(0, int(downloaded)) if isinstance(downloaded, (int, float)) else 0
     total_bytes = max(0, int(total)) if isinstance(total, (int, float)) else 0
     progress_percent = int(percent) if isinstance(percent, (int, float)) else None
+    downloaded_file_count = max(0, int(downloaded_files)) if isinstance(downloaded_files, (int, float)) else 0
+    total_file_count = max(0, int(total_files)) if isinstance(total_files, (int, float)) else 0
+    file_progress_percent = int(file_percent) if isinstance(file_percent, (int, float)) else None
     if progress_percent is not None:
         progress_percent = max(0, min(100, progress_percent))
+    if file_progress_percent is not None:
+        file_progress_percent = max(0, min(100, file_progress_percent))
     return {
         "downloaded_bytes": downloaded_bytes,
         "total_bytes": total_bytes,
         "progress_percent": progress_percent,
+        "downloaded_files": downloaded_file_count,
+        "total_files": total_file_count,
+        "file_progress_percent": file_progress_percent,
     }
 
 

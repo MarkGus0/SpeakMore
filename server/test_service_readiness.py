@@ -154,6 +154,9 @@ class ServiceReadinessTest(unittest.TestCase):
         self.assertEqual(payload["downloaded_bytes"], 25)
         self.assertEqual(payload["total_bytes"], 100)
         self.assertEqual(payload["progress_percent"], 25)
+        self.assertEqual(payload["downloaded_files"], 0)
+        self.assertEqual(payload["total_files"], 0)
+        self.assertIsNone(payload["file_progress_percent"])
 
 
 if __name__ == "__main__":

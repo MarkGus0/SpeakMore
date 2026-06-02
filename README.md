@@ -152,6 +152,8 @@ npm run renderer:build
 npm run server
 ```
 
+`npm run server` 会优先使用 `server/.venv` 中的 Python，避免误用 Conda 或系统 Python 导致 `funasr` 等 ASR 依赖缺失。如需临时指定其它 Python，可设置 `SPEAKMORE_SERVER_PYTHON`。
+
 检查后端状态：
 
 Windows PowerShell：
@@ -207,7 +209,7 @@ npm start
 
 macOS MPS 目前只作为实验加速路径，不承诺性能指标。`GET /model/status` 会返回 `device`、`requested_device`、`device_source` 和 `fallback_reason`，用于确认实际运行设备和回退原因。
 
-macOS 设置页提供“语音识别运行设备”入口，可选择默认、MPS 或 CPU。开发态后端通常由开发者手动启动，因此仍按需使用 `FUNASR_DEVICE=mps .venv/bin/python main.py` 验证 MPS。打包态由 Electron 启动内置后端；用户切换 MPS 后，需要真正退出应用再重新打开，后端会按本地设置注入 `FUNASR_DEVICE=mps` 并加载模型。
+macOS 设置页提供“语音识别运行设备”入口，可选择默认、MPS 或 CPU。开发态后端通常由开发者手动启动，`npm run server` 会优先使用 `server/.venv`；如需验证 MPS，可使用 `FUNASR_DEVICE=mps npm run server`。打包态由 Electron 启动内置后端；用户切换 MPS 后，需要真正退出应用再重新打开，后端会按本地设置注入 `FUNASR_DEVICE=mps` 并加载模型。
 
 ## 打包
 

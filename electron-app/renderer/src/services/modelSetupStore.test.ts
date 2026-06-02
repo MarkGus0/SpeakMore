@@ -57,3 +57,27 @@ test('getVoiceModelStatus 会保留 ASR 运行设备字段', async () => {
   assert.equal(status.device_source, 'explicit')
   assert.equal(status.fallback_reason, null)
 })
+
+test('getVoiceModelStatus 会保留模型文件数量进度字段', async () => {
+  installModelStatusResponse({
+    success: true,
+    status: 'downloading',
+    detail: '正在下载 SenseVoiceSmall 模型',
+    downloaded_bytes: 0,
+    total_bytes: 0,
+    progress_percent: null,
+    downloaded_files: 26,
+    total_files: 29,
+    file_progress_percent: 90,
+  })
+  const store = await loadModelSetupStore('model-file-progress')
+
+  const status = await store.getVoiceModelStatus()
+
+  assert.equal(status.downloaded_bytes, 0)
+  assert.equal(status.total_bytes, 0)
+  assert.equal(status.progress_percent, null)
+  assert.equal(status.downloaded_files, 26)
+  assert.equal(status.total_files, 29)
+  assert.equal(status.file_progress_percent, 90)
+})

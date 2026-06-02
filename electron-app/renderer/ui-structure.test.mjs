@@ -1031,6 +1031,9 @@ test('初始化页下载模型时显示真实百分比进度', async () => {
   assert.match(setupStore, /downloaded_bytes\?:\s*number/);
   assert.match(setupStore, /total_bytes\?:\s*number/);
   assert.match(setupStore, /progress_percent\?:\s*number\s*\|\s*null/);
+  assert.match(setupStore, /downloaded_files\?:\s*number/);
+  assert.match(setupStore, /total_files\?:\s*number/);
+  assert.match(setupStore, /file_progress_percent\?:\s*number\s*\|\s*null/);
   assert.doesNotMatch(setupPage, /setup\.elapsed/);
   assert.doesNotMatch(setupPage, /formatElapsed/);
   assert.doesNotMatch(i18n, /setup\.elapsed/);
@@ -1038,6 +1041,8 @@ test('初始化页下载模型时显示真实百分比进度', async () => {
   assert.match(setupPage, /value=\{hasDownloadProgress\s*\?\s*downloadProgressPercent\s*:\s*undefined\}/);
   assert.match(setupPage, /formatBytes\(modelStatus\?\.downloaded_bytes\)/);
   assert.match(setupPage, /formatBytes\(modelStatus\?\.total_bytes\)/);
+  assert.match(setupPage, /hasFileProgress/);
+  assert.match(setupPage, /setup\.modelFilesProgress/);
 });
 
 test('P1 设置页与设置 store 统一走主进程 JSON 数据源', async () => {

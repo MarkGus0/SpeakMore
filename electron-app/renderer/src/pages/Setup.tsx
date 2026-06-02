@@ -118,9 +118,13 @@ export default function Setup({ onOpenSettings }: SetupProps) {
   const isReady = Boolean(modelStatus?.ready || modelStatus?.status === 'ready')
   const canChooseCacheDir = !isDownloaded && !isReady && !busy
   const downloadProgressPercent = modelStatus?.progress_percent ?? null
+  const fileProgressPercent = modelStatus?.file_progress_percent ?? null
   const hasDownloadProgress = modelStatus?.status === 'downloading'
     && typeof downloadProgressPercent === 'number'
     && (modelStatus?.total_bytes ?? 0) > 0
+  const hasFileProgress = modelStatus?.status === 'downloading'
+    && typeof fileProgressPercent === 'number'
+    && (modelStatus?.total_files ?? 0) > 0
   const statusText = t(getStatusKey(modelStatus))
   const modelActionText = isReady
     ? t('setup.modelReady')
@@ -167,6 +171,10 @@ export default function Setup({ onOpenSettings }: SetupProps) {
             {hasDownloadProgress ? (
               <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.75 }}>
                 {`${downloadProgressPercent}% · ${formatBytes(modelStatus?.downloaded_bytes)} / ${formatBytes(modelStatus?.total_bytes)}`}
+              </Typography>
+            ) : hasFileProgress ? (
+              <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.75 }}>
+                {`${t('setup.modelFilesProgress')} ${modelStatus?.downloaded_files} / ${modelStatus?.total_files}`}
               </Typography>
             ) : null}
           </Box>

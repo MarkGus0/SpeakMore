@@ -30,6 +30,9 @@ export type VoiceModelStatus = {
   downloaded_bytes?: number
   total_bytes?: number
   progress_percent?: number | null
+  downloaded_files?: number
+  total_files?: number
+  file_progress_percent?: number | null
 }
 
 export type DirectorySelectionResult = {
@@ -79,6 +82,9 @@ function normalizeModelStatus(value: unknown): VoiceModelStatus {
     downloaded_bytes: normalizeNumber(status.downloaded_bytes),
     total_bytes: normalizeNumber(status.total_bytes),
     progress_percent: normalizePercent(status.progress_percent),
+    downloaded_files: normalizeNumber(status.downloaded_files),
+    total_files: normalizeNumber(status.total_files),
+    file_progress_percent: normalizePercent(status.file_progress_percent),
   }
 }
 export async function getVoiceModelStatus(cacheDir = ''): Promise<VoiceModelStatus> {
