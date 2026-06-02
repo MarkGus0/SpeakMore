@@ -209,6 +209,8 @@ npm start
 
 macOS MPS 目前只作为实验加速路径，不承诺性能指标。`GET /model/status` 会返回 `device`、`requested_device`、`device_source` 和 `fallback_reason`，用于确认实际运行设备和回退原因。
 
+macOS 设置页提供“语音识别运行设备”入口，可选择默认、MPS 或 CPU。第一版设置保存后需要重启语音后端或应用生效；开发态后端通常由开发者手动启动，因此仍按需使用 `FUNASR_DEVICE=mps .venv/bin/python main.py` 验证 MPS。
+
 ## 本地数据
 
 Electron 主进程把业务数据写到：

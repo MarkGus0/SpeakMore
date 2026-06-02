@@ -58,6 +58,7 @@ test('loadSettings 会补齐默认大模型 provider 配置', async () => {
   assert.equal(settings.llm.providers.some((provider: LlmProvider) => provider.id === 'custom'), true)
   assert.equal(settings.llm.models.deepseek, 'deepseek-chat')
   assert.equal(settings.modelCacheDir, '')
+  assert.equal(settings.asrDeviceMode, 'default')
 })
 
 test('loadSettings 会保留用户选择的模型缓存目录', async () => {
@@ -67,6 +68,18 @@ test('loadSettings 会保留用户选择的模型缓存目录', async () => {
   const settings = await settingsStore.loadSettings()
 
   assert.equal(settings.modelCacheDir, 'D:\\Models\\FunASR')
+})
+
+test('loadSettings 会保留合法 ASR 运行设备并回退未知值', async () => {
+  installSettingsResponse({ asrDeviceMode: 'mps' })
+  const settingsStore = await loadSettingsStore('asr-device-mps')
+
+  assert.equal((await settingsStore.loadSettings()).asrDeviceMode, 'mps')
+
+  installSettingsResponse({ asrDeviceMode: 'auto' })
+  const fallbackStore = await loadSettingsStore('asr-device-fallback')
+
+  assert.equal((await fallbackStore.loadSettings()).asrDeviceMode, 'default')
 })
 
 test('默认 LLM provider 元数据来自共享 JSON', async () => {

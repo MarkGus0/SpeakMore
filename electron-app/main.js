@@ -137,6 +137,10 @@ function getConfiguredModelCacheDir(settings = readLocalSettings()) {
   return typeof settings.modelCacheDir === 'string' ? settings.modelCacheDir.trim() : '';
 }
 
+function getConfiguredAsrDeviceMode(settings = readLocalSettings()) {
+  return ['mps', 'cpu'].includes(settings.asrDeviceMode) ? settings.asrDeviceMode : 'default';
+}
+
 function resolveModelCacheDirOption(options = {}) {
   const requestedCacheDir = typeof options.cacheDir === 'string' ? options.cacheDir.trim() : '';
   return requestedCacheDir || getConfiguredModelCacheDir();
@@ -147,6 +151,7 @@ const voiceBackendService = createVoiceBackendService({
   backendExecutablePath: () => appPaths.backendExecutablePath(),
   ffmpegBinDir: () => path.dirname(appPaths.ffmpegExecutablePath()),
   getModelCacheDir: () => getConfiguredModelCacheDir(),
+  getAsrDeviceMode: () => getConfiguredAsrDeviceMode(),
   spawnProcess: spawn,
   probeReady: () => voiceBackendClient.checkVoiceServerReady(),
   processEnv: process.env,

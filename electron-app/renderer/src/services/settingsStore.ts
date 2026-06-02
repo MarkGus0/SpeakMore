@@ -10,6 +10,7 @@ import llmProviders from '../../../../shared/llm-providers.json'
 export type TranslationTargetLanguage = string
 export type InterfaceLanguage = 'zh-CN' | 'en-US'
 export type LlmAuthType = 'bearer' | 'anthropic'
+export type AsrDeviceMode = 'default' | 'mps' | 'cpu'
 
 export type TranslationTargetLanguageConfig = {
   id: string
@@ -24,6 +25,7 @@ export const DEFAULT_TRANSLATION_TARGET_LANGUAGE: TranslationTargetLanguage =
 
 const translationTargetLanguageIds = new Set(TRANSLATION_TARGET_LANGUAGES.map((language) => language.id))
 const interfaceLanguageIds = new Set<InterfaceLanguage>(['zh-CN', 'en-US'])
+const asrDeviceModes = new Set<AsrDeviceMode>(['default', 'mps', 'cpu'])
 
 export type LlmProvider = {
   id: string
@@ -72,6 +74,7 @@ export type LocalSettings = {
   launchAtSystemStartup: boolean
   selectedAudioDeviceId: string
   modelCacheDir: string
+  asrDeviceMode: AsrDeviceMode
   llm: LlmSettings
 }
 
@@ -81,6 +84,7 @@ export const defaultSettings: LocalSettings = {
   launchAtSystemStartup: false,
   selectedAudioDeviceId: 'default',
   modelCacheDir: '',
+  asrDeviceMode: 'default',
   llm: createDefaultLlmSettings(),
 }
 
@@ -135,6 +139,12 @@ function normalizeOptionalPath(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+function normalizeAsrDeviceMode(value: unknown): AsrDeviceMode {
+  return typeof value === 'string' && asrDeviceModes.has(value as AsrDeviceMode)
+    ? value as AsrDeviceMode
+    : 'default'
+}
+
 export function normalizeLlmSettings(value: unknown): LlmSettings {
   const settings = isRecord(value) ? value : {}
   const providedProviders = Array.isArray(settings.providers) ? settings.providers : []
@@ -165,6 +175,7 @@ function normalizeSettings(settings?: Partial<LocalSettings> | null): LocalSetti
     launchAtSystemStartup: Boolean(settings?.launchAtSystemStartup),
     selectedAudioDeviceId: settings?.selectedAudioDeviceId || 'default',
     modelCacheDir: normalizeOptionalPath(settings?.modelCacheDir),
+    asrDeviceMode: normalizeAsrDeviceMode(settings?.asrDeviceMode),
     llm: normalizeLlmSettings(settings?.llm),
   }
 }

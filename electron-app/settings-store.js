@@ -4,7 +4,9 @@ const DEFAULT_LLM_PROVIDERS = require('../shared/llm-providers.json');
 const DEFAULT_LANGUAGE = 'zh-CN';
 const DEFAULT_LLM_PROVIDER_ID = 'deepseek';
 const DEFAULT_TRANSLATION_TARGET_LANGUAGE = TRANSLATION_TARGET_LANGUAGES[0]?.id || 'en';
+const DEFAULT_ASR_DEVICE_MODE = 'default';
 const SUPPORTED_INTERFACE_LANGUAGES = new Set(['zh-CN', 'en-US']);
+const SUPPORTED_ASR_DEVICE_MODES = new Set(['default', 'mps', 'cpu']);
 const SUPPORTED_TRANSLATION_TARGET_LANGUAGES = new Set(
   TRANSLATION_TARGET_LANGUAGES.map((language) => language.id),
 );
@@ -39,6 +41,10 @@ function normalizeStringMap(value = {}) {
 
 function normalizeOptionalPath(value) {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizeAsrDeviceMode(value) {
+  return SUPPORTED_ASR_DEVICE_MODES.has(value) ? value : DEFAULT_ASR_DEVICE_MODE;
 }
 
 function normalizeLlmProvider(candidate, fallback) {
@@ -109,6 +115,7 @@ function normalizeLocalSettings(value = {}) {
       ? settings.selectedAudioDeviceId
       : 'default',
     modelCacheDir: normalizeOptionalPath(settings.modelCacheDir),
+    asrDeviceMode: normalizeAsrDeviceMode(settings.asrDeviceMode),
     llm: normalizeLlmSettings(settings.llm),
   };
 }
@@ -164,15 +171,18 @@ function createSettingsStore({
 
 module.exports = {
   DEFAULT_LANGUAGE,
+  DEFAULT_ASR_DEVICE_MODE,
   DEFAULT_LLM_PROVIDER_ID,
   DEFAULT_LLM_PROVIDERS,
   DEFAULT_TRANSLATION_TARGET_LANGUAGE,
+  SUPPORTED_ASR_DEVICE_MODES,
   SUPPORTED_INTERFACE_LANGUAGES,
   SUPPORTED_TRANSLATION_TARGET_LANGUAGES,
   createDefaultLlmSettings,
   createDefaultLocalSettings,
   normalizeStringMap,
   normalizeOptionalPath,
+  normalizeAsrDeviceMode,
   normalizeLlmProvider,
   normalizeLlmSettings,
   normalizeLlmRequestConfig,

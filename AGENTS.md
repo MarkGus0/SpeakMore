@@ -116,6 +116,7 @@
 - 发给后端大模型 prompt 的词典不应整表注入；后续实现时间衰减时默认每轮最多发送 24 条，可配置范围为 8 到 40 条，硬上限 40 条。手动词条不应天然永久高优先级，排序应由动态 score 决定。
 - 本地设置包含 `translationTargetLanguage`，只允许共享翻译目标语言元数据中的语言代码，由主进程和 renderer 双侧归一化。
 - 本地设置包含 `modelCacheDir`，用于保存用户选择的 SenseVoiceSmall 下载目录；Electron 查询模型状态、触发下载和打包后端启动时都必须把该目录传给后端。该值是本机路径，不得写入仓库或文档示例之外的共享配置。
+- 本地设置包含 `asrDeviceMode`，只允许 `default`、`mps` 和 `cpu`；macOS 设置页可选择 ASR 运行设备；打包态 Electron 启动后端时把 `mps` / `cpu` 映射为 `FUNASR_DEVICE`，`default` 不主动启用 MPS；第一版保存后需要重启语音后端或应用生效，不做运行中热切换。
 - 听写历史保存由 `AppShell` 这类全局常驻层订阅语音会话完成事件，不要放在首页、历史页等可切换页面组件里。
 - 首页累计统计来自独立 `history-stats.json`，不得从最近 200 条 `history.json` 反推；历史列表裁剪不能影响累计听写时长、累计字数、平均速度和节省时间。
 - 后端 `refiner.py` 不直接读取 Electron 本地词典文件；润色所需词条由 Electron 随语音请求参数传入，且只传启用词条。

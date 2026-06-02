@@ -60,6 +60,49 @@ test('start 在打包态启动后端 exe 时注入用户选择的模型缓存目
   assert.equal(calls[0].options.env.TYPELESS_MODEL_CACHE_DIR, 'D:\\Models\\FunASR');
 });
 
+test('start 在打包态按 ASR 设备模式注入 FUNASR_DEVICE', async () => {
+  for (const [mode, expected] of [['mps', 'mps'], ['cpu', 'cpu']]) {
+    const child = createChild();
+    const calls = [];
+    const service = createVoiceBackendService({
+      isPackaged: true,
+      backendExecutablePath: () => 'C:\\backend.exe',
+      getAsrDeviceMode: () => mode,
+      spawnProcess: (command, args, options) => {
+        calls.push({ command, args, options });
+        return child;
+      },
+      probeReady: async () => ({ success: false, detail: 'starting' }),
+      logger: { info() {}, warn() {}, error() {} },
+    });
+
+    await service.start();
+
+    assert.equal(calls[0].options.env.FUNASR_DEVICE, expected);
+  }
+});
+
+test('start 在默认 ASR 设备模式下清理外部 FUNASR_DEVICE', async () => {
+  const child = createChild();
+  const calls = [];
+  const service = createVoiceBackendService({
+    isPackaged: true,
+    backendExecutablePath: () => 'C:\\backend.exe',
+    getAsrDeviceMode: () => 'default',
+    processEnv: { FUNASR_DEVICE: 'mps', PATH: 'C:\\Windows\\System32' },
+    spawnProcess: (command, args, options) => {
+      calls.push({ command, args, options });
+      return child;
+    },
+    probeReady: async () => ({ success: false, detail: 'starting' }),
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  await service.start();
+
+  assert.equal('FUNASR_DEVICE' in calls[0].options.env, false);
+});
+
 test('ensureReady 启动后轮询 ready 成功', async () => {
   const child = createChild();
   let probeCount = 0;

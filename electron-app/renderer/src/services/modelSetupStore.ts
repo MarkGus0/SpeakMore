@@ -22,6 +22,10 @@ export type VoiceModelStatus = {
   cache_dir?: string
   cached?: boolean
   ready?: boolean
+  device?: string
+  requested_device?: string
+  device_source?: string
+  fallback_reason?: string | null
   elapsed_ms?: number
   downloaded_bytes?: number
   total_bytes?: number
@@ -67,6 +71,10 @@ function normalizeModelStatus(value: unknown): VoiceModelStatus {
     cache_dir: typeof status.cache_dir === 'string' ? status.cache_dir : '',
     cached: Boolean(status.cached),
     ready: Boolean(status.ready || normalizedStatus === 'ready'),
+    device: typeof status.device === 'string' ? status.device : '',
+    requested_device: typeof status.requested_device === 'string' ? status.requested_device : '',
+    device_source: typeof status.device_source === 'string' ? status.device_source : '',
+    fallback_reason: typeof status.fallback_reason === 'string' ? status.fallback_reason : null,
     elapsed_ms: typeof status.elapsed_ms === 'number' ? status.elapsed_ms : 0,
     downloaded_bytes: normalizeNumber(status.downloaded_bytes),
     total_bytes: normalizeNumber(status.total_bytes),

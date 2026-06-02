@@ -1,5 +1,6 @@
 import { Box, Typography } from '@mui/material'
 import { pageSx, pageTitleSx } from '../uiTokens'
+import AsrRuntimeSettingsSection from './settings/AsrRuntimeSettingsSection'
 import AudioSettingsSection from './settings/AudioSettingsSection'
 import LanguageSettingsSection from './settings/LanguageSettingsSection'
 import LlmSettingsSection from './settings/LlmSettingsSection'
@@ -38,6 +39,7 @@ export default function Settings() {
         devices={devices}
         updateSettings={updateSettings}
       />
+      <AsrRuntimeSettingsSection settings={settings} updateSettings={updateSettings} />
       <LanguageSettingsSection settings={settings} updateSettings={updateSettings} />
       <LlmSettingsSection
         llmView={llmView}

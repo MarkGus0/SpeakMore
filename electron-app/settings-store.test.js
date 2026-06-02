@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   DEFAULT_LANGUAGE,
+  DEFAULT_ASR_DEVICE_MODE,
   DEFAULT_LLM_PROVIDERS,
   DEFAULT_TRANSLATION_TARGET_LANGUAGE,
   normalizeLocalSettings,
@@ -22,6 +23,7 @@ test('normalizeLocalSettings 会回退不支持的翻译目标语言和空设备
     selectedAudioDeviceId: '',
     launchAtSystemStartup: 1,
     modelCacheDir: 123,
+    asrDeviceMode: 'gpu',
   });
 
   assert.equal(settings.preferredLanguage, DEFAULT_LANGUAGE);
@@ -29,6 +31,7 @@ test('normalizeLocalSettings 会回退不支持的翻译目标语言和空设备
   assert.equal(settings.selectedAudioDeviceId, 'default');
   assert.equal(settings.launchAtSystemStartup, true);
   assert.equal(settings.modelCacheDir, '');
+  assert.equal(settings.asrDeviceMode, DEFAULT_ASR_DEVICE_MODE);
 });
 
 test('normalizeLocalSettings 会保留用户选择的模型缓存目录', () => {
@@ -37,6 +40,12 @@ test('normalizeLocalSettings 会保留用户选择的模型缓存目录', () => 
   });
 
   assert.equal(settings.modelCacheDir, 'D:\\Models\\SenseVoice');
+});
+
+test('normalizeLocalSettings 会保留合法的 ASR 运行设备模式', () => {
+  assert.equal(normalizeLocalSettings({ asrDeviceMode: 'mps' }).asrDeviceMode, 'mps');
+  assert.equal(normalizeLocalSettings({ asrDeviceMode: 'cpu' }).asrDeviceMode, 'cpu');
+  assert.equal(normalizeLocalSettings({ asrDeviceMode: 'auto' }).asrDeviceMode, DEFAULT_ASR_DEVICE_MODE);
 });
 
 test('normalizeLocalSettings 会保留英文界面语言并回退未知界面语言', () => {
@@ -85,6 +94,7 @@ test('createSettingsStore 读取和写入时都会同步 legacy store', () => {
       translationTargetLanguage: 'ja',
       selectedAudioDeviceId: 'mic-1',
       modelCacheDir: 'D:\\Models\\FunASR',
+      asrDeviceMode: 'mps',
       launchAtSystemStartup: true,
       llm: {
         providerId: 'openai',
@@ -106,17 +116,20 @@ test('createSettingsStore 读取和写入时都会同步 legacy store', () => {
   assert.equal(settings.translationTargetLanguage, 'ja');
   assert.equal(synced.selectedAudioDeviceId, 'mic-1');
   assert.equal(settings.modelCacheDir, 'D:\\Models\\FunASR');
+  assert.equal(settings.asrDeviceMode, 'mps');
 
   const next = store.writeLocalSettings({
     translationTargetLanguage: 'en',
     selectedAudioDeviceId: 'default',
     modelCacheDir: 'E:\\SpeakMoreModels',
+    asrDeviceMode: 'cpu',
     launchAtSystemStartup: false,
     llm: settings.llm,
   });
 
   assert.equal(written.translationTargetLanguage, 'en');
   assert.equal(written.modelCacheDir, 'E:\\SpeakMoreModels');
+  assert.equal(written.asrDeviceMode, 'cpu');
   assert.equal(next.translationTargetLanguage, 'en');
   assert.equal(synced.translationTargetLanguage, 'en');
 });

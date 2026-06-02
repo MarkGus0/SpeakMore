@@ -21,6 +21,7 @@ function createVoiceBackendService({
   backendExecutablePath = () => '',
   ffmpegBinDir = () => '',
   getModelCacheDir = () => '',
+  getAsrDeviceMode = () => 'default',
   spawnProcess,
   probeReady,
   processEnv = process.env,
@@ -30,6 +31,10 @@ function createVoiceBackendService({
 } = {}) {
   let child = null;
   let lastExit = null;
+
+  function normalizeAsrDeviceMode(value) {
+    return ['mps', 'cpu'].includes(value) ? value : 'default';
+  }
 
   function buildEnv() {
     const ffmpegDir = ffmpegBinDir();
@@ -41,6 +46,12 @@ function createVoiceBackendService({
     };
     const modelCacheDir = typeof getModelCacheDir === 'function' ? String(getModelCacheDir() || '').trim() : '';
     if (modelCacheDir) env.TYPELESS_MODEL_CACHE_DIR = modelCacheDir;
+    const asrDeviceMode = normalizeAsrDeviceMode(
+      typeof getAsrDeviceMode === 'function' ? String(getAsrDeviceMode() || '').trim() : '',
+    );
+    delete env.FUNASR_DEVICE;
+    if (asrDeviceMode === 'mps') env.FUNASR_DEVICE = 'mps';
+    if (asrDeviceMode === 'cpu') env.FUNASR_DEVICE = 'cpu';
     return env;
   }
 
