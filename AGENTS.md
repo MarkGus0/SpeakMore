@@ -19,6 +19,7 @@
 ## 当前真实架构
 
 - 开发态后端独立启动，Electron 只消费 `http://127.0.0.1:8000`；打包态 Electron 负责拉起和关闭内置后端进程。
+- macOS 打包态应用名必须设置为 `SpeakMore`，确保 `app.getPath('userData')` 指向 `~/Library/Application Support/SpeakMore`；设置页保存 `asrDeviceMode=mps` 后，用户真实退出并重开 App 时，Electron 必须按该设置给内置后端注入 `FUNASR_DEVICE=mps`。
 - 后端关键接口为 `GET /health`、`GET /model/status`、`POST /model/download`、`GET /ready`、`POST /config/reload`、`POST /ai/voice_flow` 和 `WebSocket /ws/rt_voice_flow`。
 - `/health` 表示后端进程存活；`/model/status` 表示 SenseVoiceSmall 初始化状态；`/ready` 表示当前 ASR 模型已加载完成，语音链路可接收请求。
 - 旧模型管理能力已删除，Electron 不再注册 `model:*` IPC，也不提供模型切换、删除或选择入口；当前只允许单模型初始化页触发 SenseVoiceSmall 下载/加载。
@@ -36,6 +37,7 @@
 - macOS 平台能力 helper 位于 `electron-app/macos-platform-helper.m`，由 `electron-app/macos-platform-capabilities.js` 按需编译和调用；当前用于 Accessibility 权限状态、前台应用、可输入目标、AX selected text、AX focused text 观察、剪贴板恢复和受控 `Cmd+V`。
 - `electron-app/renderer/src/components/AppShell.tsx` 只承担全局壳层和持久化订阅，页面状态拆到 `useGlobalShortcutBridge`、`useVoiceHistoryPersistence` 和 `useSettingsPageState` 之类的专用 hook。
 - 前端修改后必须在 `electron-app/renderer/` 下运行 `npm run build`，再重启 Electron 验证。
+- macOS 本地打包入口为 `npm run build:app:mac`，内容检查为 `npm run verify:app:mac`，MPS 重启生效烟测为 `npm run smoke:app-mps:mac`；公开 release 入口为 `npm run build:release:mac`，必须提供 Developer ID 签名和 Apple notarization 凭证。
 - 主窗口关闭按钮只隐藏窗口到后台，托盘“退出”或真实应用退出才结束 Electron。
 - 历史、设置、统计、日志和录音相关本地数据由 Electron 主进程写入 `app.getPath('userData')/local-data/`。
 - 词典和自动学习候选也属于本地数据，由 Electron 主进程写入 `app.getPath('userData')/local-data/`，renderer 只能通过 IPC 访问。
@@ -75,6 +77,7 @@
 - 普通听写和语音翻译启动前不得读取 UIA、AX 或剪贴板选区；只有自由提问需要读取选区作为上下文。
 - 自由提问未来如需回答实时问题，必须在后端增加意图分类和工具路由；不要只靠 prompt 假装具备联网、天气或网页检索能力。
 - 翻译录音启动时，renderer 必须从本地设置读取 `translationTargetLanguage`，并通过 WebSocket `start_audio.parameters.output_language` 传给后端；当前支持 `en` 和 `ja`，语言集合以共享翻译目标语言元数据为准。
+- 后端翻译模式必须在进入大模型前显式归一化目标语言；`output_language` 缺失、为空或未知时回退 `en`，且 prompt 中必须包含目标语言字段，避免模型回答“未指定目标语言/无法翻译”。
 - 录音启动必须先校验当前大模型 provider 的 API Key；未填写时直接拦截并提示，不得打开麦克风、连接 WebSocket 或等待后端 ready。API Key 已配置后，可以并行准备后端 ready、词典、WebSocket 和麦克风；模型未下载时必须返回 `voice_model_missing` 并提示先下载模型；`start_audio` 只能在 `/ready` 成功和所有启动资源准备完成后发送，ready 失败或取消时必须清理已打开的麦克风和 WebSocket。
 - 长按 `Right Alt` 的判定阈值为 `350ms`；快捷键提示也通过 `floating-panel` IPC 和独立悬浮面板展示，提示优先级低于录音、转写、完成、取消和错误状态。
 - 悬浮胶囊和悬浮面板不要依赖本机固定坐标，应基于当前显示器 `workArea` 计算并限制在屏幕内。
@@ -121,6 +124,7 @@
 - 首页累计统计来自独立 `history-stats.json`，不得从最近 200 条 `history.json` 反推；历史列表裁剪不能影响累计听写时长、累计字数、平均速度和节省时间。
 - 后端 `refiner.py` 不直接读取 Electron 本地词典文件；润色所需词条由 Electron 随语音请求参数传入，且只传启用词条。
 - 大模型调用失败时，听写模式可以降级返回 ASR 原文；翻译和自由提问不能把原文伪装成成功结果，必须走错误返回。
+- 翻译失败的用户可见文案必须按翻译语义展示，不能沿用“润色失败，保留原文”这类听写兜底描述。
 
 ## 已知限制
 
@@ -139,6 +143,9 @@
 - 历史统计测试：`node --test electron-app/history-stats-store.test.mjs`
 - 后端核心语音协议验证：`npm run verify:voice`
 - 后端全部测试：`cd server; python -m pytest -q`
+- macOS 本地打包验证：`npm run build:app:mac`
+- macOS 打包内容检查：`npm run verify:app:mac`
+- macOS MPS 重启生效烟测：`npm run smoke:app-mps:mac`
 
 根据改动范围选择验证命令；涉及前端运行产物时必须构建。
 

@@ -127,6 +127,26 @@ test('createVoiceBackendClient 查询并触发单模型初始化接口', async (
   assert.equal(calls[1].init.method, 'POST');
 });
 
+test('createVoiceBackendClient 在模型状态接口暂不可连接时返回 unavailable', async () => {
+  const client = createVoiceBackendClient({
+    fetchImpl: async () => {
+      throw new Error('ECONNREFUSED');
+    },
+    buildCurrentLlmRequestConfig: () => ({ provider_id: 'deepseek', base_url: 'https://api.deepseek.com/v1', api_key: '', model: 'deepseek-chat', auth_type: 'bearer' }),
+    normalizeLlmRequestConfig: (value) => value,
+  });
+
+  const status = await client.getVoiceModelStatus();
+  const download = await client.startVoiceModelDownload();
+
+  assert.equal(status.success, false);
+  assert.equal(status.status, 'unavailable');
+  assert.match(status.detail, /无法连接/);
+  assert.equal(download.success, false);
+  assert.equal(download.status, 'unavailable');
+  assert.match(download.detail, /无法连接/);
+});
+
 test('createVoiceBackendClient 会把用户选择的模型缓存目录传给后端', async () => {
   const calls = [];
   const client = createVoiceBackendClient({

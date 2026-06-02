@@ -364,6 +364,55 @@ test('registerPermissionIpcHandlers 注册 macOS 权限诊断通道', async () =
   assert.deepEqual(calls, [{ includeClipboard: true, includeEventInjection: false }]);
 });
 
+test('registerPermissionIpcHandlers 优先使用 macOS App 自身辅助功能授权状态', async () => {
+  const ipcMain = createFakeIpcMain();
+  let helperCalls = 0;
+  registerPermissionIpcHandlers({
+    ipcMain,
+    processPlatform: 'darwin',
+    systemPreferences: {
+      isTrustedAccessibilityClient: () => true,
+    },
+    macosPlatformCapabilities: {
+      getAccessibilityStatus: async () => {
+        helperCalls += 1;
+        return { success: true, trusted: false };
+      },
+    },
+  });
+
+  assert.deepEqual(await ipcMain.invoke('permission:macos-accessibility-status'), {
+    success: true,
+    source: 'electron_system_preferences',
+    confidence: 'confirmed',
+    trusted: true,
+    reason: 'accessibility_trusted',
+  });
+  assert.equal(helperCalls, 0);
+});
+
+test('registerPermissionIpcHandlers 在 Electron 授权状态读取失败时回退 helper', async () => {
+  const ipcMain = createFakeIpcMain();
+  registerPermissionIpcHandlers({
+    ipcMain,
+    processPlatform: 'darwin',
+    systemPreferences: {
+      isTrustedAccessibilityClient: () => {
+        throw new Error('status failed');
+      },
+    },
+    macosPlatformCapabilities: {
+      getAccessibilityStatus: async () => ({ success: true, trusted: true, reason: 'helper_trusted' }),
+    },
+  });
+
+  assert.deepEqual(await ipcMain.invoke('permission:macos-accessibility-status'), {
+    success: true,
+    trusted: true,
+    reason: 'helper_trusted',
+  });
+});
+
 test('registerCompatIpcHandlers 注册本地兼容桩通道', async () => {
   const ipcMain = createFakeIpcMain();
   const sent = [];

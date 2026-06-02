@@ -103,6 +103,108 @@ test('start 在默认 ASR 设备模式下清理外部 FUNASR_DEVICE', async () =
   assert.equal('FUNASR_DEVICE' in calls[0].options.env, false);
 });
 
+test('startAndPreloadCachedModel 在打包态启动后自动加载已缓存模型', async () => {
+  const child = createChild();
+  let loadCount = 0;
+  const service = createVoiceBackendService({
+    isPackaged: true,
+    backendExecutablePath: () => 'C:\\backend.exe',
+    spawnProcess: () => child,
+    probeReady: async () => ({ success: false, detail: 'starting' }),
+    probeModelStatus: async () => ({
+      success: true,
+      status: 'idle',
+      cached: true,
+      ready: false,
+    }),
+    startModelLoad: async () => {
+      loadCount += 1;
+      return { success: true, status: 'loading' };
+    },
+    wait: async () => undefined,
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  const result = await service.startAndPreloadCachedModel({ timeoutMs: 1000, intervalMs: 1 });
+
+  assert.equal(result.success, true);
+  assert.equal(result.status, 'loading');
+  assert.equal(loadCount, 1);
+});
+
+test('startAndPreloadCachedModel 会等待打包后端冷启动后加载已缓存模型', async () => {
+  const child = createChild();
+  const statuses = [
+    () => {
+      throw new Error('ECONNREFUSED');
+    },
+    () => ({
+      success: false,
+      status: 'unavailable',
+      ready: false,
+    }),
+    () => ({
+      success: true,
+      status: 'idle',
+      cached: true,
+      ready: false,
+    }),
+  ];
+  let loadCount = 0;
+  let waitCount = 0;
+  const service = createVoiceBackendService({
+    isPackaged: true,
+    backendExecutablePath: () => 'C:\\backend.exe',
+    spawnProcess: () => child,
+    probeReady: async () => ({ success: false, detail: 'starting' }),
+    probeModelStatus: async () => statuses.shift()(),
+    startModelLoad: async () => {
+      loadCount += 1;
+      return { success: true, status: 'loading' };
+    },
+    wait: async () => {
+      waitCount += 1;
+    },
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  const result = await service.startAndPreloadCachedModel({ timeoutMs: 1000, intervalMs: 1 });
+
+  assert.equal(result.success, true);
+  assert.equal(result.status, 'loading');
+  assert.equal(loadCount, 1);
+  assert.equal(waitCount, 2);
+});
+
+test('startAndPreloadCachedModel 未缓存模型时不自动加载', async () => {
+  const child = createChild();
+  let loadCount = 0;
+  const service = createVoiceBackendService({
+    isPackaged: true,
+    backendExecutablePath: () => 'C:\\backend.exe',
+    spawnProcess: () => child,
+    probeReady: async () => ({ success: false, detail: 'starting' }),
+    probeModelStatus: async () => ({
+      success: true,
+      status: 'idle',
+      cached: false,
+      ready: false,
+    }),
+    startModelLoad: async () => {
+      loadCount += 1;
+      return { success: true, status: 'loading' };
+    },
+    wait: async () => undefined,
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  const result = await service.startAndPreloadCachedModel({ timeoutMs: 1000, intervalMs: 1 });
+
+  assert.equal(result.success, true);
+  assert.equal(result.skipped, true);
+  assert.equal(loadCount, 0);
+});
+
 test('ensureReady 启动后轮询 ready 成功', async () => {
   const child = createChild();
   let probeCount = 0;

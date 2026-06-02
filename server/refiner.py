@@ -14,6 +14,7 @@ load_server_env()
 _client = None
 MAX_DICTIONARY_TERMS = 40
 DEFAULT_LLM_MODEL = "deepseek-chat"
+DEFAULT_TRANSLATION_TARGET_LANGUAGE_ID = "en"
 DEFAULT_TRANSLATION_TARGET_LANGUAGE_NAME = "English"
 FALLBACK_TRANSLATION_TARGET_LANGUAGE_NAMES = {
     "en": "English",
@@ -26,16 +27,30 @@ TRANSLATION_TARGET_LANGUAGES_PATH = (
 )
 
 
-def load_translation_target_language_names() -> dict[str, str]:
+def normalize_translation_alias(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
+def load_translation_target_language_metadata() -> tuple[dict[str, str], dict[str, str]]:
     try:
         with TRANSLATION_TARGET_LANGUAGES_PATH.open("r", encoding="utf-8") as file:
             items = json.load(file)
     except (OSError, json.JSONDecodeError):
-        return FALLBACK_TRANSLATION_TARGET_LANGUAGE_NAMES.copy()
+        names = FALLBACK_TRANSLATION_TARGET_LANGUAGE_NAMES.copy()
+        return names, {
+            normalize_translation_alias(alias): language_id
+            for language_id, name in names.items()
+            for alias in (language_id, name)
+        }
 
     names = FALLBACK_TRANSLATION_TARGET_LANGUAGE_NAMES.copy()
+    aliases = {
+        normalize_translation_alias(alias): language_id
+        for language_id, name in names.items()
+        for alias in (language_id, name)
+    }
     if not isinstance(items, list):
-        return names
+        return names, aliases
 
     for item in items:
         if not isinstance(item, dict):
@@ -45,11 +60,25 @@ def load_translation_target_language_names() -> dict[str, str]:
         prompt_name = str(item.get("promptName", "")).strip()
         if language_id and prompt_name:
             names[language_id] = prompt_name
+            for alias in (
+                language_id,
+                prompt_name,
+                item.get("label", ""),
+                item.get("displayName", ""),
+            ):
+                normalized_alias = normalize_translation_alias(alias)
+                if normalized_alias:
+                    aliases[normalized_alias] = language_id
 
+    return names, aliases
+
+
+def load_translation_target_language_names() -> dict[str, str]:
+    names, _aliases = load_translation_target_language_metadata()
     return names
 
 
-TRANSLATION_TARGET_LANGUAGE_NAMES = load_translation_target_language_names()
+TRANSLATION_TARGET_LANGUAGE_NAMES, TRANSLATION_TARGET_LANGUAGE_ALIASES = load_translation_target_language_metadata()
 
 
 def summarize_text_for_log(value: object) -> dict:
@@ -61,8 +90,17 @@ def summarize_text_for_log(value: object) -> dict:
     }
 
 
+def normalize_translation_target_language_id(value: object) -> str:
+    language_id = TRANSLATION_TARGET_LANGUAGE_ALIASES.get(normalize_translation_alias(value), "")
+    if language_id:
+        return language_id
+    if DEFAULT_TRANSLATION_TARGET_LANGUAGE_ID in TRANSLATION_TARGET_LANGUAGE_NAMES:
+        return DEFAULT_TRANSLATION_TARGET_LANGUAGE_ID
+    return next(iter(TRANSLATION_TARGET_LANGUAGE_NAMES), DEFAULT_TRANSLATION_TARGET_LANGUAGE_ID)
+
+
 def format_target_language_for_prompt(value: object) -> str:
-    language_id = str(value or "").strip()
+    language_id = normalize_translation_target_language_id(value)
     return TRANSLATION_TARGET_LANGUAGE_NAMES.get(
         language_id,
         TRANSLATION_TARGET_LANGUAGE_NAMES.get("en", DEFAULT_TRANSLATION_TARGET_LANGUAGE_NAME),
@@ -245,9 +283,12 @@ def build_refiner_user_message(
     elif mode == "transcript" and dictionary_context:
         user_message = f"Transcription to refine:\n{raw_text}"
 
-    elif mode == "translation" and parameters:
-        target_lang = format_target_language_for_prompt(parameters.get("output_language", "en"))
-        user_message = f"目标语言：{target_lang}\n\n待翻译的语音转写文本：\n{raw_text}"
+    elif mode == "translation":
+        target_language_id = normalize_translation_target_language_id(
+            parameters.get("output_language") if isinstance(parameters, dict) else None,
+        )
+        target_lang = format_target_language_for_prompt(target_language_id)
+        user_message = f"目标语言：{target_lang}（语言代码：{target_language_id}）\n\n待翻译的语音转写文本：\n{raw_text}"
 
     elif mode == "ask_anything" and parameters:
         selected_text = parameters.get("selected_text", "")

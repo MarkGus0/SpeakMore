@@ -40,6 +40,25 @@ export default function MacOSPermissionSection() {
     void refresh()
   }, [])
 
+  useEffect(() => {
+    if (!isMacOSRuntime()) return undefined
+
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') void refresh()
+    }
+    const refreshWhenFocused = () => {
+      void refresh()
+    }
+
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+    window.addEventListener('focus', refreshWhenFocused)
+
+    return () => {
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+      window.removeEventListener('focus', refreshWhenFocused)
+    }
+  }, [])
+
   if (!isMacOSRuntime()) return null
 
   const trusted = status?.trusted === true

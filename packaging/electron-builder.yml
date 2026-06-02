@@ -29,6 +29,29 @@ asar: true
 asarUnpack:
   - electron-app/right-alt-listener.ps1
   - electron-app/audio-session-control.ps1
+  - electron-app/macos-option-listener.c
+  - electron-app/macos-platform-helper.m
+mac:
+  category: public.app-category.productivity
+  target:
+    - target: dmg
+      arch:
+        - arm64
+    - target: zip
+      arch:
+        - arm64
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  notarize: true
+  entitlements: packaging/macos/entitlements.mac.plist
+  entitlementsInherit: packaging/macos/entitlements.mac.inherit.plist
+  minimumSystemVersion: "13.0"
+  extendInfo:
+    NSMicrophoneUsageDescription: SpeakMore 需要访问麦克风来进行本地语音识别。
+    NSAppleEventsUsageDescription: SpeakMore 需要和当前输入应用协作，以便在授权后粘贴听写结果。
+    NSCameraUseContinuityCameraDeviceType: true
+dmg:
+  sign: false
 win:
   target:
     - target: zip

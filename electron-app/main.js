@@ -7,6 +7,7 @@ const {
   nativeImage,
   ipcMain,
   clipboard,
+  systemPreferences,
   shell,
   screen,
   session,
@@ -73,6 +74,10 @@ const SHORTCUT_DEBUG_ENABLED = ['1', 'true', 'yes', 'on'].includes(
   String(process.env.TYPELESS_SHORTCUT_DEBUG || '').toLowerCase(),
 );
 const IS_MACOS = process.platform === 'darwin';
+
+if (app.isPackaged) {
+  app.setName('SpeakMore');
+}
 
 const appPaths = createAppPaths({
   baseDir: __dirname,
@@ -154,6 +159,8 @@ const voiceBackendService = createVoiceBackendService({
   getAsrDeviceMode: () => getConfiguredAsrDeviceMode(),
   spawnProcess: spawn,
   probeReady: () => voiceBackendClient.checkVoiceServerReady(),
+  probeModelStatus: () => voiceBackendClient.getVoiceModelStatus({ cacheDir: getConfiguredModelCacheDir() }),
+  startModelLoad: () => voiceBackendClient.startVoiceModelDownload({ cacheDir: getConfiguredModelCacheDir() }),
   processEnv: process.env,
   logger: console,
 });
@@ -458,6 +465,7 @@ const mainIpcRegistry = createMainIpcRegistry({
   processEnv: process.env,
   processExecPath: process.execPath,
   processPlatform: process.platform,
+  systemPreferences,
   readFocusedInfo: readFocusedInfoForPlatform,
   readFocusedTextTarget: readFocusedTextTargetForPlatform,
   readHistoryItems,
@@ -537,7 +545,7 @@ app.whenReady().then(() => {
   });
 
   registerIpcHandlers();
-  if (app.isPackaged) void voiceBackendService.start();
+  if (app.isPackaged) void voiceBackendService.startAndPreloadCachedModel();
   createTray();
   createMainWindow();
   createFloatingBar();

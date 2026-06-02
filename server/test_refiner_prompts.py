@@ -105,7 +105,9 @@ class RefinerPromptTest(unittest.TestCase):
         translation_prompt = SYSTEM_PROMPTS["translation"]
 
         self.assertIn("目标语言", translation_prompt)
+        self.assertIn("目标语言”字段就是最终翻译目标", translation_prompt)
         self.assertIn("仅输出翻译结果", translation_prompt)
+        self.assertIn("禁止回答“无法翻译”“未指定目标语言”", translation_prompt)
 
     def test_translation_prompt_handles_voice_asr_noise_and_instruction_boundary(self):
         translation_prompt = SYSTEM_PROMPTS["translation"]
@@ -129,7 +131,7 @@ class RefinerPromptTest(unittest.TestCase):
         self.assertEqual(result, "translated text")
         call = fake_client.chat.completions.calls[0]
         user_message = call["messages"][1]["content"]
-        self.assertEqual(user_message, "目标语言：English\n\n待翻译的语音转写文本：\n把这个翻译成英文")
+        self.assertEqual(user_message, "目标语言：English（语言代码：en）\n\n待翻译的语音转写文本：\n把这个翻译成英文")
         self.assertNotIn("Translate to en", user_message)
 
     def test_translation_user_message_formats_japanese_target_language(self):
@@ -139,7 +141,7 @@ class RefinerPromptTest(unittest.TestCase):
             parameters={"output_language": "ja"},
         )
 
-        self.assertEqual(message, "目标语言：Japanese\n\n待翻译的语音转写文本：\n请把这句话翻译过去")
+        self.assertEqual(message, "目标语言：Japanese（语言代码：ja）\n\n待翻译的语音转写文本：\n请把这句话翻译过去")
 
     def test_translation_user_message_falls_back_for_unknown_target_language(self):
         message = refiner.build_refiner_user_message(
@@ -148,7 +150,25 @@ class RefinerPromptTest(unittest.TestCase):
             parameters={"output_language": "xx"},
         )
 
-        self.assertEqual(message, "目标语言：English\n\n待翻译的语音转写文本：\n你好")
+        self.assertEqual(message, "目标语言：English（语言代码：en）\n\n待翻译的语音转写文本：\n你好")
+
+    def test_translation_user_message_uses_default_target_when_parameters_missing(self):
+        message = refiner.build_refiner_user_message(
+            raw_text="你好",
+            mode="translation",
+            parameters=None,
+        )
+
+        self.assertEqual(message, "目标语言：English（语言代码：en）\n\n待翻译的语音转写文本：\n你好")
+
+    def test_translation_target_language_accepts_prompt_name_alias(self):
+        message = refiner.build_refiner_user_message(
+            raw_text="你好",
+            mode="translation",
+            parameters={"output_language": "Japanese"},
+        )
+
+        self.assertEqual(message, "目标语言：Japanese（语言代码：ja）\n\n待翻译的语音转写文本：\n你好")
 
     def test_build_dictionary_context_formats_enabled_terms(self):
         context = refiner.build_dictionary_context([

@@ -40,6 +40,7 @@ from runtime_config import (
 load_server_env()
 
 MODEL_MISSING_DETAIL = "还没有下载语音模型，请先下载模型。"
+MODEL_CACHED_IDLE_DETAIL = "语音模型已下载，尚未加载，请加载模型后使用。"
 
 
 def should_enable_reload() -> bool:
@@ -245,9 +246,13 @@ def create_voice_service_state(
 ) -> dict[str, str | int | bool | None]:
     now = time.time()
     device_status = get_asr_runtime_device_status()
+    cached = is_sensevoice_cached()
+    normalized_detail = detail
+    if status == "idle" and (not detail or detail == MODEL_MISSING_DETAIL):
+        normalized_detail = MODEL_CACHED_IDLE_DETAIL if cached else MODEL_MISSING_DETAIL
     return {
         "status": status,
-        "detail": detail,
+        "detail": normalized_detail,
         "model_id": SENSEVOICE_SMALL_MODEL_ID,
         "repo_id": SENSEVOICE_SMALL_REPO_ID,
         "device": device_status.get("device"),
@@ -255,7 +260,7 @@ def create_voice_service_state(
         "device_source": device_status.get("device_source"),
         "fallback_reason": device_status.get("fallback_reason"),
         "cache_dir": get_model_cache_dir(),
-        "cached": is_sensevoice_cached(),
+        "cached": cached,
         "ready": status == "ready",
         "started_at": started_at,
         "updated_at": now,
@@ -822,9 +827,10 @@ app = create_app()
 if __name__ == "__main__":
     import uvicorn
 
+    reload_enabled = should_enable_reload()
     uvicorn.run(
-        "main:app",
+        "main:app" if reload_enabled else app,
         host=get_server_host(),
         port=get_server_port(),
-        reload=should_enable_reload(),
+        reload=reload_enabled,
     )

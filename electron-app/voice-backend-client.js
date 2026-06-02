@@ -60,13 +60,25 @@ function createVoiceBackendClient({
   }
 
   async function getVoiceModelStatus(options = {}) {
-    const response = await fetchImpl(withModelCacheDirQuery(urls.modelStatusUrl, options));
-    const payload = await readJsonSafely(response);
+    const url = withModelCacheDirQuery(urls.modelStatusUrl, options);
+    let response = null;
+    let payload = null;
+    try {
+      response = await fetchImpl(url);
+      payload = await readJsonSafely(response);
+    } catch {
+      return {
+        success: false,
+        status: 'unavailable',
+        detail: resolveVoiceServerProbeDetail(url, 0, null),
+        payload: null,
+      };
+    }
     if (!response.ok || !payload || typeof payload !== 'object') {
       return {
         success: false,
         status: 'unavailable',
-        detail: resolveVoiceServerProbeDetail(urls.modelStatusUrl, response.status, payload),
+        detail: resolveVoiceServerProbeDetail(url, response.status, payload),
         payload,
       };
     }
@@ -78,8 +90,19 @@ function createVoiceBackendClient({
   }
 
   async function startVoiceModelDownload(options = {}) {
-    const response = await fetchImpl(urls.modelDownloadUrl, buildModelDownloadInit(options));
-    const payload = await readJsonSafely(response);
+    let response = null;
+    let payload = null;
+    try {
+      response = await fetchImpl(urls.modelDownloadUrl, buildModelDownloadInit(options));
+      payload = await readJsonSafely(response);
+    } catch {
+      return {
+        success: false,
+        status: 'unavailable',
+        detail: resolveVoiceServerProbeDetail(urls.modelDownloadUrl, 0, null),
+        payload: null,
+      };
+    }
     if (!response.ok || !payload || typeof payload !== 'object') {
       return {
         success: false,

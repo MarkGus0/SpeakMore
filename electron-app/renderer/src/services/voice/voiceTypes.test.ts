@@ -52,3 +52,18 @@ test('普通听写录音态不覆盖悬浮胶囊默认监听文案', () => {
   assert.equal(floatingBarState.mode, 'Dictate')
   assert.equal(floatingBarState.displayText, undefined)
 })
+
+test('翻译失败会给悬浮胶囊提供翻译语义的错误文案', () => {
+  const session = {
+    ...initialVoiceSession,
+    status: 'error' as const,
+    mode: 'Translate' as const,
+    error: createVoiceError('refine_failed', 'provider down'),
+  }
+
+  const floatingBarState = toFloatingBarState(session)
+
+  assert.equal(session.error?.detail, 'provider down')
+  assert.equal(floatingBarState.status, 'error')
+  assert.equal(floatingBarState.errorMessage, '翻译失败，请检查大模型配置后重试')
+})

@@ -2,6 +2,7 @@ function registerPermissionIpcHandlers({
   ipcMain,
   macosPlatformCapabilities = null,
   processPlatform = process.platform,
+  systemPreferences = null,
 } = {}) {
   if (!ipcMain || typeof ipcMain.handle !== 'function') {
     throw new Error('ipcMain is required');
@@ -20,12 +21,41 @@ function registerPermissionIpcHandlers({
     };
   }
 
+  function readMacOSAppAccessibilityStatus() {
+    if (!isMacOS() || typeof systemPreferences?.isTrustedAccessibilityClient !== 'function') {
+      return null;
+    }
+
+    try {
+      const trusted = systemPreferences.isTrustedAccessibilityClient(false);
+      return {
+        success: true,
+        source: 'electron_system_preferences',
+        confidence: trusted ? 'confirmed' : 'none',
+        trusted,
+        reason: trusted ? 'accessibility_trusted' : 'macos_accessibility_permission_missing',
+      };
+    } catch (error) {
+      return {
+        success: false,
+        source: 'electron_system_preferences',
+        confidence: 'none',
+        trusted: false,
+        reason: 'macos_accessibility_status_failed',
+        detail: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
   ipcMain.handle('permission:request', () => true);
   ipcMain.handle('permission:check-with-child-process', () => true);
   ipcMain.handle('permission:reset-accessibility-permission', () => true);
   ipcMain.handle('permission:macos-accessibility-status', () => {
+    const appStatus = readMacOSAppAccessibilityStatus();
+    if (appStatus?.success) return appStatus;
+
     if (!isMacOS() || !macosPlatformCapabilities?.getAccessibilityStatus) {
-      return macosCapabilityUnavailable();
+      return appStatus || macosCapabilityUnavailable();
     }
     return macosPlatformCapabilities.getAccessibilityStatus();
   });

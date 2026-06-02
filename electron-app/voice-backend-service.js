@@ -16,6 +16,18 @@ function isModelMissingReadyState(result) {
   );
 }
 
+function isCachedIdleModelStatus(result) {
+  if (!result || typeof result !== 'object') return false;
+  const status = typeof result.status === 'string' ? result.status : '';
+  return result.cached === true && result.ready !== true && status === 'idle';
+}
+
+function isTerminalOrBusyModelStatus(result) {
+  if (!result || typeof result !== 'object') return false;
+  const status = typeof result.status === 'string' ? result.status : '';
+  return result.ready === true || ['ready', 'loading', 'downloading'].includes(status);
+}
+
 function createVoiceBackendService({
   isPackaged = false,
   backendExecutablePath = () => '',
@@ -24,6 +36,8 @@ function createVoiceBackendService({
   getAsrDeviceMode = () => 'default',
   spawnProcess,
   probeReady,
+  probeModelStatus,
+  startModelLoad,
   processEnv = process.env,
   pathDelimiter = path.delimiter,
   wait = delay,
@@ -87,6 +101,50 @@ function createVoiceBackendService({
     return { success: true, skipped: false, detail: '后端启动中' };
   }
 
+  async function startAndPreloadCachedModel({ timeoutMs = 60000, intervalMs = 700 } = {}) {
+    const startResult = await start();
+    if (startResult?.success === false) return startResult;
+    if (typeof probeModelStatus !== 'function' || typeof startModelLoad !== 'function') {
+      return { success: true, skipped: true, detail: '未配置模型自动加载' };
+    }
+
+    const startedAt = Date.now();
+    let latest = null;
+    while (Date.now() - startedAt <= timeoutMs) {
+      try {
+        latest = await probeModelStatus();
+      } catch (error) {
+        latest = {
+          success: false,
+          status: 'unavailable',
+          detail: String(error?.message || error || '语音后端暂不可用'),
+        };
+      }
+      if (isCachedIdleModelStatus(latest)) {
+        logger.info?.('[voice-backend] cached model found, starting preload');
+        return startModelLoad();
+      }
+      if (isTerminalOrBusyModelStatus(latest) || latest?.cached === false) {
+        return { success: true, skipped: true, detail: '无需自动加载模型', payload: latest };
+      }
+      if (lastExit) {
+        return {
+          success: false,
+          detail: `语音后端已退出: ${JSON.stringify(lastExit)}`,
+          code: 'backend_exited',
+        };
+      }
+      await wait(intervalMs);
+    }
+
+    return {
+      success: false,
+      detail: latest?.detail || '等待语音模型状态超时',
+      code: 'model_status_timeout',
+      payload: latest,
+    };
+  }
+
   async function ensureReady({ timeoutMs = 120000, intervalMs = 700 } = {}) {
     const startResult = await start();
     if (startResult?.success === false) return startResult;
@@ -129,6 +187,7 @@ function createVoiceBackendService({
 
   return {
     start,
+    startAndPreloadCachedModel,
     ensureReady,
     stop,
     getProcess: () => child,

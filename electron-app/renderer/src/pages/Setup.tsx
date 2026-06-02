@@ -48,6 +48,7 @@ function getStatusKey(status: VoiceModelStatus | null): TranslationKey {
   if (status?.status === 'ready') return 'setup.modelStatus.ready'
   if (status?.status === 'failed') return 'setup.modelStatus.failed'
   if (status?.status === 'unavailable') return 'setup.modelStatus.unavailable'
+  if (status?.cached) return 'setup.modelStatus.cached'
   return 'setup.modelStatus.idle'
 }
 
@@ -121,6 +122,11 @@ export default function Setup({ onOpenSettings }: SetupProps) {
     && typeof downloadProgressPercent === 'number'
     && (modelStatus?.total_bytes ?? 0) > 0
   const statusText = t(getStatusKey(modelStatus))
+  const modelActionText = isReady
+    ? t('setup.modelReady')
+    : isDownloaded
+      ? t('setup.loadModel')
+      : t('setup.startDownload')
 
   return (
     <Box sx={{ ...pageSx, maxWidth: 760 }}>
@@ -182,7 +188,7 @@ export default function Setup({ onOpenSettings }: SetupProps) {
             onClick={() => void handleStartDownload()}
             disabled={busy || modelStatus?.status === 'ready'}
           >
-            {modelStatus?.status === 'ready' ? t('setup.modelReady') : t('setup.startDownload')}
+            {modelActionText}
           </Button>
           <Button
             variant="outlined"

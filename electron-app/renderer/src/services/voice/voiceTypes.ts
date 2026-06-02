@@ -111,15 +111,24 @@ export function createVoiceError(code: VoiceErrorCode, detail?: string): VoiceEr
   }
 }
 
+function getFloatingBarErrorMessage(session: VoiceSession) {
+  if (session.error?.code === 'refine_failed' && session.mode === 'Translate') {
+    return '翻译失败，请检查大模型配置后重试'
+  }
+  return session.error?.message
+}
+
 export function toFloatingBarState(session: VoiceSession): FloatingBarState {
+  const errorMessage = getFloatingBarErrorMessage(session)
+
   if (session.error?.code === 'audio_empty') {
     return {
       visible: true,
       status: 'cancelled',
       mode: session.mode,
       inputLevel: 0,
-      displayText: session.error.message,
-      errorMessage: session.error.message,
+      displayText: errorMessage,
+      errorMessage,
     }
   }
 
@@ -133,6 +142,6 @@ export function toFloatingBarState(session: VoiceSession): FloatingBarState {
     ...(session.noticeText ? { displayText: session.noticeText } : {}),
     ...(!session.noticeText && session.status === 'recording' && session.mode === 'Ask' ? { displayText: '请随意提出问题' } : {}),
     ...(session.status === 'cancelled' ? { displayText: '当前转录已取消' } : {}),
-    errorMessage: session.error?.message,
+    errorMessage,
   }
 }

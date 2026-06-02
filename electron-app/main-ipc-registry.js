@@ -85,6 +85,7 @@ function createMainIpcRegistry({
   shell,
   spawnProcess,
   startVoiceModelDownload,
+  systemPreferences,
   textObservationManager,
   upsertHistoryItem,
   writeHistoryItems,
@@ -198,6 +199,7 @@ function createMainIpcRegistry({
       macosPlatformCapabilities,
       processPlatform,
       processExecPath,
+      systemPreferences,
     });
     registers.registerCompatIpcHandlers({
       ipcMain,

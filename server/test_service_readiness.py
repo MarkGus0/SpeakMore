@@ -94,6 +94,19 @@ class ServiceReadinessTest(unittest.TestCase):
         self.assertIsNone(status.json()["fallback_reason"])
         self.assertEqual(ready.status_code, 503)
 
+    def test_model_status_distinguishes_cached_but_not_loaded_model(self):
+        app = main.create_app(preload_model=lambda: None, exit_scheduler=lambda _code: None)
+
+        with patch("main.find_cached_model_snapshot", return_value="/tmp/sensevoice-snapshot"), TestClient(app) as client:
+            status = client.get("/model/status")
+
+        self.assertEqual(status.status_code, 200)
+        payload = status.json()
+        self.assertEqual(payload["status"], "idle")
+        self.assertEqual(payload["cached"], True)
+        self.assertIn("已下载", payload["detail"])
+        self.assertNotIn("还没有下载", payload["detail"])
+
     def test_model_download_endpoint_starts_preload_task(self):
         app = main.create_app(preload_model=lambda: None, exit_scheduler=lambda _code: None)
 
