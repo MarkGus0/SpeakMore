@@ -262,8 +262,7 @@ test('createWindowManager 创建悬浮条、悬浮面板和托盘', () => {
   assert.equal(tray.tooltip, 'SpeakMore');
   assert.deepEqual(nativeImageCalls, ['C:\\repo\\SpeakMore\\release-artifacts\\assets\\tray-placeholder.png']);
   assert.deepEqual(tray.menu[0].label, '打开主窗口');
-  assert.deepEqual(tray.menu[1].label, '显示悬浮条');
-  assert.deepEqual(tray.menu[2].label, '退出');
+  assert.deepEqual(tray.menu[1].label, '退出');
 
   tray.emit('click');
   assert.equal(manager.getMainWindow().shown, true);

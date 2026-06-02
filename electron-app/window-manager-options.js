@@ -56,12 +56,10 @@ function buildFloatingWindowOptions({
 
 function buildTrayMenuTemplate({
   createMainWindow,
-  createFloatingBar,
   quit,
 } = {}) {
   return [
     { label: '打开主窗口', click: createMainWindow },
-    { label: '显示悬浮条', click: createFloatingBar },
     { label: '退出', click: quit },
   ];
 }

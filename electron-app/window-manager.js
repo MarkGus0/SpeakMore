@@ -229,7 +229,6 @@ function createWindowManager({
     tray.on('click', createMainWindow);
     tray.setContextMenu(Menu.buildFromTemplate(buildTrayMenuTemplate({
       createMainWindow,
-      createFloatingBar,
       quit: () => app.quit(),
     })));
     return tray;

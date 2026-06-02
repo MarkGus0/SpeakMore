@@ -1305,6 +1305,7 @@ test('首页壳层和用户可见文案符合 SpeakMore 中文化要求', async 
   assert.doesNotMatch(floatingBar, /Listening\.\.\./);
   assert.match(main, /title:\s*['"]SpeakMore['"]/);
   assert.match(main, /tray\.setToolTip\(['"]SpeakMore['"]\)/);
+  assert.doesNotMatch(main, /显示悬浮条/);
 });
 
 test('主页面一级标题复用设置页的左上基准和字号', async () => {

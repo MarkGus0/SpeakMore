@@ -76,15 +76,13 @@ test('buildTrayMenuTemplate 保持托盘菜单文案和点击行为', () => {
   const calls = [];
   const template = buildTrayMenuTemplate({
     createMainWindow: () => calls.push('main'),
-    createFloatingBar: () => calls.push('bar'),
     quit: () => calls.push('quit'),
   });
 
-  assert.deepEqual(template.map((item) => item.label), ['打开主窗口', '显示悬浮条', '退出']);
+  assert.deepEqual(template.map((item) => item.label), ['打开主窗口', '退出']);
 
   template[0].click();
   template[1].click();
-  template[2].click();
 
-  assert.deepEqual(calls, ['main', 'bar', 'quit']);
+  assert.deepEqual(calls, ['main', 'quit']);
 });
