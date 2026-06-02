@@ -9,6 +9,8 @@ fail() {
 }
 
 APP_OPENED=false
+REMOVE_USER_DATA_DIR=false
+SMOKE_USER_DATA_DIR="${SPEAKMORE_USER_DATA_DIR:-}"
 
 json_field() {
   python3 -c 'import json, sys; payload = json.load(sys.stdin); value = payload.get(sys.argv[1], ""); print("" if value is None else value)' "$1"
@@ -33,6 +35,9 @@ cleanup() {
   if [[ "$APP_OPENED" == "true" ]]; then
     quit_app
     wait_for_port_free 30 >/dev/null 2>&1 || true
+  fi
+  if [[ "$REMOVE_USER_DATA_DIR" == "true" && -n "$SMOKE_USER_DATA_DIR" ]]; then
+    rm -rf "$SMOKE_USER_DATA_DIR"
   fi
 }
 
@@ -82,7 +87,14 @@ if lsof -nP -iTCP:8000 -sTCP:LISTEN >/dev/null 2>&1; then
   fail "8000 端口已被占用，请先关闭开发态后端或其它 SpeakMore 实例"
 fi
 
-USER_DATA_DIR="${SPEAKMORE_USER_DATA_DIR:-$HOME/Library/Application Support/SpeakMore}"
+if [[ -z "$SMOKE_USER_DATA_DIR" ]]; then
+  SMOKE_USER_DATA_DIR="$(mktemp -d "${TMPDIR:-/tmp}/speakmore-mps-smoke.XXXXXX")"
+  REMOVE_USER_DATA_DIR=true
+fi
+
+export SPEAKMORE_USER_DATA_DIR="$SMOKE_USER_DATA_DIR"
+
+USER_DATA_DIR="$SMOKE_USER_DATA_DIR"
 LOCAL_DATA_DIR="$USER_DATA_DIR/local-data"
 SETTINGS_FILE="$LOCAL_DATA_DIR/settings.json"
 mkdir -p "$LOCAL_DATA_DIR"

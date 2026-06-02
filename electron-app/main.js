@@ -79,6 +79,13 @@ if (app.isPackaged) {
   app.setName('SpeakMore');
 }
 
+const userDataDirOverride = String(process.env.SPEAKMORE_USER_DATA_DIR || '').trim();
+if (userDataDirOverride) {
+  // 打包态烟测需要隔离本机用户数据，避免改写真实 settings.json。
+  fs.mkdirSync(userDataDirOverride, { recursive: true });
+  app.setPath('userData', userDataDirOverride);
+}
+
 const appPaths = createAppPaths({
   baseDir: __dirname,
   resourcesPath: process.resourcesPath,
