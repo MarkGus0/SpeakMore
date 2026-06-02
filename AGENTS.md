@@ -20,6 +20,8 @@
 
 - 开发态后端独立启动，Electron 只消费 `http://127.0.0.1:8000`；打包态 Electron 负责拉起和关闭内置后端进程。
 - 开发态后端通过 `npm run server` 启动时必须优先使用 `server/.venv` 中的 Python；不要直接依赖裸 `python main.py`，避免误用 Conda 或系统 Python 导致 `funasr` 等 ASR 依赖缺失。
+- `main` 是统一源码主线，保留 Windows 和 macOS 源码、测试、配置、打包脚本和发布说明；ZIP、DMG、EXE、APP、blockmap、`release/` 和 `release-artifacts/` 等打包产物不得提交到仓库，正式产物只上传 GitHub Releases。
+- 发布准备应从 `main` 拉 `release/vX.Y.Z` 分支处理版本号、签名、公证和 release note；不要创建用于长期保存打包产物的 Git 分支。
 - macOS 打包态应用名必须设置为 `SpeakMore`，确保 `app.getPath('userData')` 指向 `~/Library/Application Support/SpeakMore`；设置页保存 `asrDeviceMode=mps` 后，用户真实退出并重开 App 时，Electron 必须按该设置给内置后端注入 `FUNASR_DEVICE=mps`。
 - 后端关键接口为 `GET /health`、`GET /model/status`、`POST /model/download`、`GET /ready`、`POST /config/reload`、`POST /ai/voice_flow` 和 `WebSocket /ws/rt_voice_flow`。
 - `/health` 表示后端进程存活；`/model/status` 表示 SenseVoiceSmall 初始化状态；`/ready` 表示当前 ASR 模型已加载完成，语音链路可接收请求。

@@ -29,6 +29,17 @@ Windows x64 当前生成解压即用 zip。macOS 当前可生成本地 `.app`、
 
 模型不打包。首次运行需要联网下载 SenseVoiceSmall，Windows 默认缓存到 `%LOCALAPPDATA%\Typeless\models\funasr`，macOS 默认缓存到 `~/Library/Application Support/SpeakMore/models/funasr`。用户在“初始化”页点击下载后，页面会显示下载/加载状态、耗时、成功或失败结果。离线环境可以提前准备模型目录，并通过 `SENSEVOICE_SMALL_MODEL_DIR` 指向该目录。
 
+## 分支与发布策略
+
+`main` 是统一源码主线，Windows 和 macOS 代码都合并在这里。源码仓库只保存代码、测试、配置、打包脚本和文档，不提交打包后的 ZIP、DMG、EXE、APP、blockmap、`release/` 或 `release-artifacts/`。
+
+发布时从 `main` 拉 `release/vX.Y.Z` 分支，只做版本号、签名、公证和 release note 等发布准备。打包产物由本机或 CI 生成后上传到 GitHub Releases 附件，不用 Git 分支长期保存产物。
+
+开发者从源码使用时直接拉 `main` 并按“开发安装”和“启动”章节运行。普通用户使用时不需要拉源码，应在 GitHub Releases 下载对应平台产物：
+
+- Windows：下载 ZIP，解压后运行 `SpeakMore.exe`。
+- macOS：下载 DMG 或 ZIP，安装或解压后运行 `SpeakMore.app`。
+
 ## 项目结构
 
 ```text
@@ -212,6 +223,8 @@ macOS MPS 目前只作为实验加速路径，不承诺性能指标。`GET /mode
 macOS 设置页提供“语音识别运行设备”入口，可选择默认、MPS 或 CPU。开发态后端通常由开发者手动启动，`npm run server` 会优先使用 `server/.venv`；如需验证 MPS，可使用 `FUNASR_DEVICE=mps npm run server`。打包态由 Electron 启动内置后端；用户切换 MPS 后，需要真正退出应用再重新打开，后端会按本地设置注入 `FUNASR_DEVICE=mps` 并加载模型。
 
 ## 打包
+
+打包脚本可以保留在 `main`，但产物不能提交到 Git。生成的 ZIP、DMG、EXE、APP 和 blockmap 只用于本机验证或上传到 GitHub Releases。
 
 Windows 便携包：
 

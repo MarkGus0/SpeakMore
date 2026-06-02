@@ -11,6 +11,15 @@ electron-app/windows-text-observer/obj/
 release/
 release-artifacts/
 
+# 发布产物只上传到 GitHub Releases，不提交到源码仓库
+SpeakMore-*.zip
+SpeakMore-*.dmg
+SpeakMore-*.exe
+*.dmg
+*.dmg.blockmap
+*.zip.blockmap
+*.app/
+
 # 本地环境与密钥
 .env
 .env.*
