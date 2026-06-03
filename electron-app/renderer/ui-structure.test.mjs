@@ -389,8 +389,12 @@ test('旧模型管理能力已删除，只保留单模型初始化入口', async
 
 test('项目根启动脚本指向本地 Electron 壳而不是逆向资料目录', async () => {
   const rootPackage = JSON.parse(await readProjectFile('../../package.json'));
+  const startElectronDev = await readProjectFile('../../scripts/start-electron-dev.mjs');
 
-  assert.equal(rootPackage.scripts.start, 'electron ./electron-app');
+  assert.equal(rootPackage.scripts.start, 'node scripts/start-electron-dev.mjs');
+  assert.equal(rootPackage.scripts['start:electron'], 'node scripts/start-electron-dev.mjs');
+  assert.match(startElectronDev, /\['\.\/electron-app'\]/);
+  assert.doesNotMatch(startElectronDev, /app-extracted|reverse/i);
 });
 
 test('本地壳默认使用简体中文并允许英文界面语言', async () => {

@@ -1,44 +1,31 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  checkServerPythonPackages,
-  resolveServerPython,
+  checkElectronDevPrereqs,
+  getElectronBinPath,
 } from './dev-prereqs.mjs';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(scriptDir, '..');
-const serverDir = path.join(rootDir, 'server');
 
-const pythonResult = resolveServerPython({
-  env: process.env,
+const prereqs = checkElectronDevPrereqs({
   existsSync,
   platform: process.platform,
   rootDir,
 });
 
-if (!pythonResult.ok) {
-  console.error(pythonResult.message);
+if (!prereqs.ok) {
+  console.error(prereqs.message);
   process.exit(1);
 }
 
-console.log(`使用后端 Python: ${pythonResult.pythonBin}`);
-
-const dependencyResult = checkServerPythonPackages({
-  platform: process.platform,
-  pythonBin: pythonResult.pythonBin,
-  spawnSync,
-});
-
-if (!dependencyResult.ok) {
-  console.error(dependencyResult.message);
-  process.exit(1);
-}
-
-const child = spawn(pythonResult.pythonBin, ['main.py'], {
-  cwd: serverDir,
+const electronBin = getElectronBinPath({ rootDir, platform: process.platform });
+const child = spawn(electronBin, ['./electron-app'], {
+  cwd: rootDir,
   env: process.env,
+  shell: process.platform === 'win32',
   stdio: 'inherit',
 });
 
@@ -52,7 +39,7 @@ const exitFromChild = (code, signal) => {
 };
 
 child.on('error', (error) => {
-  console.error(`后端启动失败: ${error.message}`);
+  console.error(`Electron 启动失败: ${error.message}`);
   process.exit(1);
 });
 
