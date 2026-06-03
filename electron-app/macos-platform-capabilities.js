@@ -16,6 +16,18 @@ const ACCESSIBILITY_SETTINGS_URL = 'x-apple.systempreferences:com.apple.preferen
 const DEFAULT_HELPER_TIMEOUT_MS = 3000;
 const DEFAULT_PASTE_SETTLE_MS = 180;
 const OBSERVATION_BOUNDS_TOLERANCE = 4;
+const MACOS_WECHAT_BLOCKED_TITLE_PATTERNS = [
+  /登录/,
+  /设置/,
+  /图片查看/,
+  /文件预览/,
+  /偏好设置/,
+  /Login/i,
+  /Sign in/i,
+  /Settings/i,
+  /Preferences/i,
+  /Preview/i,
+];
 
 function unavailable(reason = 'macos_capability_unavailable', detail = '') {
   return {
@@ -127,6 +139,129 @@ function createMacosPlatformCapabilities({
     if (startBundleId && currentBundleId && startBundleId !== currentBundleId) return true;
     if (startProcessId && currentProcessId && startProcessId !== currentProcessId) return true;
     return false;
+  }
+
+  function normalizeLower(value) {
+    return String(value || '').trim().toLowerCase();
+  }
+
+  function isMacosWechatIdentifier(value) {
+    const normalized = normalizeLower(value);
+    return Boolean(normalized)
+      && (
+        normalized.includes('wechat')
+        || normalized.includes('weixin')
+        || normalized.includes('微信')
+        || normalized.includes('com.tencent.xin')
+      );
+  }
+
+  function isMacosWechatFocusInfo(focusInfo = {}) {
+    const metadata = focusInfo?.appInfo?.app_metadata || {};
+    return [
+      focusInfo?.appInfo?.app_identifier,
+      focusInfo?.appInfo?.app_name,
+      metadata.bundle_id,
+      metadata.process_name,
+    ].some(isMacosWechatIdentifier);
+  }
+
+  function isMacosWechatTextTarget(textTarget = {}) {
+    return [
+      textTarget.appFamily,
+      textTarget.foregroundHwnd,
+      textTarget.processName,
+    ].some(isMacosWechatIdentifier);
+  }
+
+  function isBlockedWechatWindowTitle(title) {
+    return MACOS_WECHAT_BLOCKED_TITLE_PATTERNS.some((pattern) => pattern.test(String(title || '')));
+  }
+
+  function hasFocusedInfoChanged(startFocusInfo, currentFocusInfo) {
+    if (!startFocusInfo || typeof startFocusInfo !== 'object') return true;
+
+    const startMetadata = startFocusInfo.appInfo?.app_metadata || {};
+    const currentMetadata = currentFocusInfo.appInfo?.app_metadata || {};
+    const startBundleId = String(startFocusInfo.appInfo?.app_identifier || startMetadata.bundle_id || '');
+    const currentBundleId = String(currentFocusInfo.appInfo?.app_identifier || currentMetadata.bundle_id || '');
+    const startProcessId = String(startMetadata.process_id || '');
+    const currentProcessId = String(currentMetadata.process_id || '');
+
+    if (startBundleId && currentBundleId && startBundleId !== currentBundleId) return true;
+    if (startProcessId && currentProcessId && startProcessId !== currentProcessId) return true;
+    return false;
+  }
+
+  function createMacosWechatCompatTarget({ textTarget, startFocusInfo, currentFocusInfo }) {
+    const normalizedCurrentFocus = normalizeFocusedInfo(currentFocusInfo);
+    const normalizedStartFocus = normalizeFocusedInfo(startFocusInfo);
+    const currentTitle = normalizedCurrentFocus.appInfo.window_title;
+    const startTitle = normalizedStartFocus.appInfo.window_title;
+    const currentMetadata = normalizedCurrentFocus.appInfo.app_metadata || {};
+    const currentBundleId = String(normalizedCurrentFocus.appInfo.app_identifier || currentMetadata.bundle_id || '');
+    const currentProcessId = String(currentMetadata.process_id || '');
+    const currentIsWechat = isMacosWechatFocusInfo(normalizedCurrentFocus) || isMacosWechatTextTarget(textTarget);
+
+    if (!currentIsWechat) {
+      return {
+        ...textTarget,
+        success: false,
+        source: 'none',
+        confidence: 'none',
+        reason: textTarget.reason || 'macos_focused_target_unavailable',
+      };
+    }
+
+    if (!startFocusInfo || !isMacosWechatFocusInfo(normalizedStartFocus)) {
+      return {
+        ...textTarget,
+        success: false,
+        source: 'none',
+        confidence: 'none',
+        reason: 'macos_app_compat_start_not_wechat',
+      };
+    }
+
+    if (hasFocusedInfoChanged(normalizedStartFocus, normalizedCurrentFocus)) {
+      return {
+        ...textTarget,
+        success: false,
+        source: 'none',
+        confidence: 'none',
+        reason: 'macos_focused_target_changed',
+      };
+    }
+
+    if (isBlockedWechatWindowTitle(currentTitle) || isBlockedWechatWindowTitle(startTitle)) {
+      return {
+        ...textTarget,
+        success: false,
+        source: 'none',
+        confidence: 'none',
+        reason: 'macos_app_compat_blocked_window_title',
+      };
+    }
+
+    return normalizeFocusedTextTargetResult({
+      success: true,
+      source: 'macos_app_compat',
+      confidence: 'weak',
+      reason: 'macos_app_compat_wechat',
+      value_pattern: false,
+      text_pattern: false,
+      is_read_only: false,
+      control_type: '',
+      app_family: 'wechat',
+      foreground_hwnd: currentBundleId,
+      focus_hwnd: currentProcessId,
+      caret_hwnd: '',
+      matched_signals: [
+        'process:wechat',
+        'same_frontmost_app',
+        ...(currentTitle ? ['window_title_present'] : []),
+      ],
+    });
   }
 
   function toFiniteNumber(value, fallback = 0) {
@@ -335,7 +470,14 @@ function createMacosPlatformCapabilities({
 
   async function getFocusedTextTargetForPaste({ startFocusInfo = null } = {}) {
     const textTarget = await getFocusedTextTarget();
-    if (!textTarget.success) return textTarget;
+    if (!textTarget.success) {
+      const currentFocusInfo = await getFocusedInfo();
+      return createMacosWechatCompatTarget({
+        textTarget,
+        startFocusInfo,
+        currentFocusInfo,
+      });
+    }
 
     if (hasFocusedTargetChanged(startFocusInfo, textTarget)) {
       return {

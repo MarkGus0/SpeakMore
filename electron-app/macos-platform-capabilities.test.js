@@ -358,6 +358,153 @@ test('createMacosPlatformCapabilities 在焦点漂移时拒绝自动粘贴', asy
   assert.equal(clipboard.current().text, '旧文本');
 });
 
+test('createMacosPlatformCapabilities 在 macOS 微信 AX 目标不可用时走兼容自动粘贴', async () => {
+  const clipboard = createRichClipboard();
+  const helperCommands = [];
+  const service = createMacosPlatformCapabilities({
+    processPlatform: 'darwin',
+    clipboard,
+    pasteSettleMs: 0,
+    helperSourcePath: () => '/repo/electron-app/macos-platform-helper.m',
+    helperExecutablePath: () => '/tmp/speakmore-macos-platform-helper',
+    spawnSyncProcess: () => ({ status: 0, stdout: '', stderr: '' }),
+    spawnProcess: (_command, args) => {
+      helperCommands.push(args[0]);
+      if (args[0] === 'focused-text-target') {
+        return createFakeChild({
+          stdout: JSON.stringify({
+            success: false,
+            source: 'none',
+            confidence: 'none',
+            reason: 'macos_focused_target_unavailable',
+            app_family: 'com.tencent.xinWeChat',
+            foreground_hwnd: 'com.tencent.xinWeChat',
+            focus_hwnd: '88',
+            matched_signals: [],
+          }),
+        });
+      }
+      if (args[0] === 'focused-info') {
+        return createFakeChild({
+          stdout: JSON.stringify({
+            success: true,
+            source: 'macos_ax',
+            confidence: 'confirmed',
+            appInfo: {
+              app_name: 'WeChat',
+              app_identifier: 'com.tencent.xinWeChat',
+              window_title: '文件传输助手',
+              app_type: 'native_app',
+              app_metadata: { bundle_id: 'com.tencent.xinWeChat', process_id: 88 },
+              browser_context: null,
+            },
+            elementInfo: {
+              role: 'AXGroup',
+              focused: true,
+              editable: false,
+              selected: false,
+              bounds: { x: 1, y: 2, width: 300, height: 40 },
+            },
+          }),
+        });
+      }
+      return createFakeChild({
+        stdout: JSON.stringify({
+          success: true,
+          source: 'macos_cgevent',
+          confidence: 'sent',
+          reason: 'macos_event_injection_sent',
+        }),
+      });
+    },
+  });
+
+  const result = await service.pasteText('微信输入', {
+    startFocusInfo: {
+      appInfo: {
+        app_name: 'WeChat',
+        app_identifier: 'com.tencent.xinWeChat',
+        window_title: '文件传输助手',
+        app_metadata: { bundle_id: 'com.tencent.xinWeChat', process_id: 88 },
+      },
+    },
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.textTarget.source, 'macos_app_compat');
+  assert.equal(result.textTarget.appFamily, 'wechat');
+  assert.equal(result.textTarget.reason, 'macos_app_compat_wechat');
+  assert.deepEqual(helperCommands, ['focused-text-target', 'focused-info', 'send-paste-shortcut']);
+  assert.equal(clipboard.current().text, '旧文本');
+});
+
+test('createMacosPlatformCapabilities 在 macOS 微信阻断窗口中拒绝兼容自动粘贴', async () => {
+  const clipboard = createRichClipboard();
+  const helperCommands = [];
+  const service = createMacosPlatformCapabilities({
+    processPlatform: 'darwin',
+    clipboard,
+    helperSourcePath: () => '/repo/electron-app/macos-platform-helper.m',
+    helperExecutablePath: () => '/tmp/speakmore-macos-platform-helper',
+    spawnSyncProcess: () => ({ status: 0, stdout: '', stderr: '' }),
+    spawnProcess: (_command, args) => {
+      helperCommands.push(args[0]);
+      if (args[0] === 'focused-text-target') {
+        return createFakeChild({
+          stdout: JSON.stringify({
+            success: false,
+            source: 'none',
+            confidence: 'none',
+            reason: 'macos_focused_target_unavailable',
+            app_family: 'com.tencent.xinWeChat',
+            foreground_hwnd: 'com.tencent.xinWeChat',
+            focus_hwnd: '88',
+            matched_signals: [],
+          }),
+        });
+      }
+      return createFakeChild({
+        stdout: JSON.stringify({
+          success: true,
+          source: 'macos_ax',
+          confidence: 'confirmed',
+          appInfo: {
+            app_name: 'WeChat',
+            app_identifier: 'com.tencent.xinWeChat',
+            window_title: '设置',
+            app_type: 'native_app',
+            app_metadata: { bundle_id: 'com.tencent.xinWeChat', process_id: 88 },
+            browser_context: null,
+          },
+          elementInfo: {
+            role: 'AXGroup',
+            focused: true,
+            editable: false,
+            selected: false,
+            bounds: { x: 1, y: 2, width: 300, height: 40 },
+          },
+        }),
+      });
+    },
+  });
+
+  const result = await service.pasteText('微信输入', {
+    startFocusInfo: {
+      appInfo: {
+        app_name: 'WeChat',
+        app_identifier: 'com.tencent.xinWeChat',
+        window_title: '文件传输助手',
+        app_metadata: { bundle_id: 'com.tencent.xinWeChat', process_id: 88 },
+      },
+    },
+  });
+
+  assert.equal(result.success, false);
+  assert.equal(result.reason, 'macos_app_compat_blocked_window_title');
+  assert.deepEqual(helperCommands, ['focused-text-target', 'focused-info']);
+  assert.equal(clipboard.current().text, '旧文本');
+});
+
 test('createMacosPlatformCapabilities 读取 macOS 自动学习观察文本', async () => {
   const helperCommands = [];
   const service = createMacosPlatformCapabilities({
