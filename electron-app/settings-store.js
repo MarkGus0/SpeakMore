@@ -6,7 +6,7 @@ const DEFAULT_LLM_PROVIDER_ID = 'deepseek';
 const DEFAULT_TRANSLATION_TARGET_LANGUAGE = TRANSLATION_TARGET_LANGUAGES[0]?.id || 'en';
 const DEFAULT_ASR_DEVICE_MODE = 'default';
 const SUPPORTED_INTERFACE_LANGUAGES = new Set(['zh-CN', 'en-US']);
-const SUPPORTED_ASR_DEVICE_MODES = new Set(['default', 'mps', 'cpu']);
+const SUPPORTED_ASR_DEVICE_MODES = new Set(['default', 'mps', 'cuda', 'cpu']);
 const SUPPORTED_TRANSLATION_TARGET_LANGUAGES = new Set(
   TRANSLATION_TARGET_LANGUAGES.map((language) => language.id),
 );

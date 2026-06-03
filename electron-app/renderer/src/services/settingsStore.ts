@@ -10,7 +10,7 @@ import llmProviders from '../../../../shared/llm-providers.json'
 export type TranslationTargetLanguage = string
 export type InterfaceLanguage = 'zh-CN' | 'en-US'
 export type LlmAuthType = 'bearer' | 'anthropic'
-export type AsrDeviceMode = 'default' | 'mps' | 'cpu'
+export type AsrDeviceMode = 'default' | 'mps' | 'cuda' | 'cpu'
 
 export type TranslationTargetLanguageConfig = {
   id: string
@@ -25,7 +25,7 @@ export const DEFAULT_TRANSLATION_TARGET_LANGUAGE: TranslationTargetLanguage =
 
 const translationTargetLanguageIds = new Set(TRANSLATION_TARGET_LANGUAGES.map((language) => language.id))
 const interfaceLanguageIds = new Set<InterfaceLanguage>(['zh-CN', 'en-US'])
-const asrDeviceModes = new Set<AsrDeviceMode>(['default', 'mps', 'cpu'])
+const asrDeviceModes = new Set<AsrDeviceMode>(['default', 'mps', 'cuda', 'cpu'])
 
 export type LlmProvider = {
   id: string

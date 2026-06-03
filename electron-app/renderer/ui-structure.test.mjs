@@ -1101,8 +1101,10 @@ test('P1 设置页与设置 store 统一走主进程 JSON 数据源', async () =
   assert.match(settingsState, /navigator\.mediaDevices\.enumerateDevices/);
   assert.match(settingsState, /reloadLlmBackendConfig/);
   assert.match(audioSection, /selectedAudioDeviceId/);
-  assert.match(asrRuntimeSection, /isMacOSRuntime/);
+  assert.match(asrRuntimeSection, /ipcClient\.platform/);
   assert.match(asrRuntimeSection, /asrDeviceMode/);
+  assert.match(asrRuntimeSection, /platform === 'win32'/);
+  assert.match(asrRuntimeSection, /value:\s*'cuda'/);
   assert.match(asrRuntimeSection, /getVoiceModelStatus/);
   assert.match(asrRuntimeSection, /settings\.asrRuntime\.title/);
   assert.match(asrRuntimeSection, /fallback_reason/);

@@ -150,7 +150,7 @@ function getConfiguredModelCacheDir(settings = readLocalSettings()) {
 }
 
 function getConfiguredAsrDeviceMode(settings = readLocalSettings()) {
-  return ['mps', 'cpu'].includes(settings.asrDeviceMode) ? settings.asrDeviceMode : 'default';
+  return ['mps', 'cuda', 'cpu'].includes(settings.asrDeviceMode) ? settings.asrDeviceMode : 'default';
 }
 
 function resolveModelCacheDirOption(options = {}) {

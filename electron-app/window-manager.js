@@ -102,11 +102,21 @@ function createWindowManager({
     window.show();
   }
 
+  function keepFloatingWindowOnTop(targetWindow, { moveToTop = true } = {}) {
+    if (!targetWindow || targetWindow.isDestroyed()) return;
+    targetWindow.setAlwaysOnTop(true, 'screen-saver', 1);
+    targetWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+    if (moveToTop && typeof targetWindow.moveTop === 'function') {
+      targetWindow.moveTop();
+    }
+  }
+
   function showFloatingBar() {
     if (!floatingBar || floatingBar.isDestroyed()) return;
     positionFloatingBar();
     floatingBar.setIgnoreMouseEvents(false);
     showWindowWithoutActivation(floatingBar);
+    keepFloatingWindowOnTop(floatingBar);
   }
 
   function hideFloatingBar() {
@@ -121,6 +131,7 @@ function createWindowManager({
     positionFloatingPanel();
     floatingPanelWindow.setIgnoreMouseEvents(false);
     showWindowWithoutActivation(floatingPanelWindow);
+    keepFloatingWindowOnTop(floatingPanelWindow);
   }
 
   function hideFloatingPanel() {
@@ -138,10 +149,7 @@ function createWindowManager({
   }
 
   function handleFloatingBarSetAlwaysOnTopForWindows() {
-    if (floatingBar && !floatingBar.isDestroyed()) {
-      floatingBar.setAlwaysOnTop(true, 'screen-saver', 1);
-      floatingBar.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
-    }
+    keepFloatingWindowOnTop(floatingBar);
     return true;
   }
 
@@ -188,8 +196,7 @@ function createWindowManager({
 
     floatingBar.loadFile(floatingBarRendererPath());
     floatingBar.setIgnoreMouseEvents(true, { forward: true });
-    floatingBar.setAlwaysOnTop(true, 'screen-saver', 1);
-    floatingBar.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+    keepFloatingWindowOnTop(floatingBar, { moveToTop: false });
     floatingBar.setFullScreenable(false);
     floatingBar.on('closed', () => {
       floatingBar = null;
@@ -209,8 +216,7 @@ function createWindowManager({
 
     floatingPanelWindow.loadFile(floatingPanelRendererPath());
     floatingPanelWindow.setIgnoreMouseEvents(true, { forward: true });
-    floatingPanelWindow.setAlwaysOnTop(true, 'screen-saver', 1);
-    floatingPanelWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+    keepFloatingWindowOnTop(floatingPanelWindow, { moveToTop: false });
     floatingPanelWindow.setFullScreenable(false);
     floatingPanelWindow.on('closed', () => {
       floatingWindowController?.handleFloatingPanelClosed();
