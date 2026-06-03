@@ -12,26 +12,74 @@ export type AudioSender = {
   stop: () => void
 }
 
+function createAudioConstraints(selectedAudioDeviceId: string, relaxed = false): MediaStreamConstraints {
+  const deviceConstraint = selectedAudioDeviceId === 'default' ? {} : { deviceId: { exact: selectedAudioDeviceId } }
+  if (relaxed) {
+    return {
+      audio: Object.keys(deviceConstraint).length ? deviceConstraint : true,
+    }
+  }
+
+  return {
+    audio: {
+      ...deviceConstraint,
+      // 耳机/蓝牙麦克风常见采样率较低；这些只能作为偏好，不能作为硬约束。
+      sampleRate: { ideal: 16000 },
+      channelCount: { ideal: 1 },
+      echoCancellation: { ideal: false },
+      noiseSuppression: { ideal: false },
+      autoGainControl: { ideal: false },
+    },
+  }
+}
+
+function isConstraintFailure(error: unknown) {
+  const name = error instanceof DOMException ? error.name : ''
+  return name === 'OverconstrainedError' || name === 'ConstraintNotSatisfiedError'
+}
+
+function isDeviceLookupFailure(error: unknown) {
+  const name = error instanceof DOMException ? error.name : ''
+  return name === 'NotFoundError' || name === 'DevicesNotFoundError'
+}
+
+function isPermissionFailure(error: unknown) {
+  const name = error instanceof DOMException ? error.name : ''
+  return name === 'NotAllowedError' || name === 'SecurityError'
+}
+
 export async function getAudioStream() {
+  const selectedAudioDeviceId = await getSelectedAudioDeviceId()
   try {
-    const selectedAudioDeviceId = await getSelectedAudioDeviceId()
-    const deviceConstraint = selectedAudioDeviceId === 'default' ? {} : { deviceId: { exact: selectedAudioDeviceId } }
-    // 这里关闭浏览器音频增强，避免 ASR 输入被浏览器自动处理成不可控结果。
-    return await navigator.mediaDevices.getUserMedia({
-      audio: {
-        ...deviceConstraint,
-        sampleRate: 32000,
-        channelCount: 1,
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false,
-      },
-    })
+    // 这里关闭浏览器音频增强，避免 ASR 输入被浏览器自动处理成不可控结果；采样率和声道只作为偏好。
+    return await navigator.mediaDevices.getUserMedia(createAudioConstraints(selectedAudioDeviceId))
   } catch (error) {
-    const name = error instanceof DOMException ? error.name : ''
-    if (name === 'NotAllowedError' || name === 'SecurityError') {
+    if (isPermissionFailure(error)) {
       throw createVoiceError('microphone_permission_denied', String(error))
     }
+
+    if (isConstraintFailure(error)) {
+      try {
+        return await navigator.mediaDevices.getUserMedia(createAudioConstraints(selectedAudioDeviceId, true))
+      } catch (fallbackError) {
+        if (isPermissionFailure(fallbackError)) {
+          throw createVoiceError('microphone_permission_denied', String(fallbackError))
+        }
+        throw createVoiceError('microphone_unavailable', String(fallbackError))
+      }
+    }
+
+    if (selectedAudioDeviceId !== 'default' && isDeviceLookupFailure(error)) {
+      try {
+        return await navigator.mediaDevices.getUserMedia(createAudioConstraints('default', true))
+      } catch (fallbackError) {
+        if (isPermissionFailure(fallbackError)) {
+          throw createVoiceError('microphone_permission_denied', String(fallbackError))
+        }
+        throw createVoiceError('microphone_unavailable', String(fallbackError))
+      }
+    }
+
     throw createVoiceError('microphone_unavailable', String(error))
   }
 }
@@ -42,19 +90,31 @@ export function stopStreamTracks(stream: MediaStream | null) {
   stream.getTracks().forEach((track) => track.stop())
 }
 
-export function downsampleToSampleRate(input: Float32Array, inputSampleRate: number, targetSampleRate: number) {
-  // 浏览器采样率可能高于后端要求，发送前需要降采样；低于目标时不做插值放大。
-  if (inputSampleRate <= targetSampleRate) return input
+export function resampleToSampleRate(input: Float32Array, inputSampleRate: number, targetSampleRate: number) {
+  const sourceRate = Number(inputSampleRate)
+  const outputRate = Number(targetSampleRate)
+  if (!input.length || !Number.isFinite(sourceRate) || !Number.isFinite(outputRate) || sourceRate <= 0 || outputRate <= 0) {
+    return input
+  }
+  if (sourceRate === outputRate) return input
 
-  // 流式模型固定吃 16k 单声道 PCM，浏览器实际采样率需要降到目标采样率。
-  const ratio = inputSampleRate / targetSampleRate
-  const outputLength = Math.floor(input.length / ratio)
+  // 流式模型固定吃 16k 单声道 PCM。蓝牙耳机麦克风可能只有 8k，也必须升采样到 16k。
+  const ratio = sourceRate / outputRate
+  const outputLength = Math.max(1, Math.round(input.length / ratio))
   const output = new Float32Array(outputLength)
   for (let index = 0; index < outputLength; index += 1) {
-    output[index] = input[Math.floor(index * ratio)] ?? 0
+    const sourceIndex = index * ratio
+    const leftIndex = Math.floor(sourceIndex)
+    const rightIndex = Math.min(input.length - 1, leftIndex + 1)
+    const weight = sourceIndex - leftIndex
+    const left = input[leftIndex] ?? 0
+    const right = input[rightIndex] ?? left
+    output[index] = left + (right - left) * weight
   }
   return output
 }
+
+export const downsampleToSampleRate = resampleToSampleRate
 
 export function encodePcm16(samples: Float32Array) {
   const pcm = new Int16Array(samples.length)
@@ -70,7 +130,7 @@ export function sendPcm16Chunk(socket: WebSocket, samples: Float32Array, inputSa
   // PCM 发送路径只负责实时推 chunk，不缓存整段音频。
   if (socket.readyState !== WebSocket.OPEN) return
 
-  const downsampled = downsampleToSampleRate(samples, inputSampleRate, 16000)
+  const downsampled = resampleToSampleRate(samples, inputSampleRate, 16000)
   if (!downsampled.length) return
 
   const pcm = encodePcm16(downsampled)
