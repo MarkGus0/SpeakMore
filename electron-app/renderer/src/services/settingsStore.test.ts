@@ -76,6 +76,11 @@ test('loadSettings 会保留合法 ASR 运行设备并回退未知值', async ()
 
   assert.equal((await settingsStore.loadSettings()).asrDeviceMode, 'mps')
 
+  installSettingsResponse({ asrDeviceMode: 'cuda' })
+  const cudaStore = await loadSettingsStore('asr-device-cuda')
+
+  assert.equal((await cudaStore.loadSettings()).asrDeviceMode, 'cuda')
+
   installSettingsResponse({ asrDeviceMode: 'auto' })
   const fallbackStore = await loadSettingsStore('asr-device-fallback')
 

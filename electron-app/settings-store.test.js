@@ -44,6 +44,7 @@ test('normalizeLocalSettings 会保留用户选择的模型缓存目录', () => 
 
 test('normalizeLocalSettings 会保留合法的 ASR 运行设备模式', () => {
   assert.equal(normalizeLocalSettings({ asrDeviceMode: 'mps' }).asrDeviceMode, 'mps');
+  assert.equal(normalizeLocalSettings({ asrDeviceMode: 'cuda' }).asrDeviceMode, 'cuda');
   assert.equal(normalizeLocalSettings({ asrDeviceMode: 'cpu' }).asrDeviceMode, 'cpu');
   assert.equal(normalizeLocalSettings({ asrDeviceMode: 'auto' }).asrDeviceMode, DEFAULT_ASR_DEVICE_MODE);
 });

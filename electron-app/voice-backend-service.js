@@ -47,7 +47,7 @@ function createVoiceBackendService({
   let lastExit = null;
 
   function normalizeAsrDeviceMode(value) {
-    return ['mps', 'cpu'].includes(value) ? value : 'default';
+    return ['mps', 'cuda', 'cpu'].includes(value) ? value : 'default';
   }
 
   function buildEnv() {
@@ -65,6 +65,7 @@ function createVoiceBackendService({
     );
     delete env.FUNASR_DEVICE;
     if (asrDeviceMode === 'mps') env.FUNASR_DEVICE = 'mps';
+    if (asrDeviceMode === 'cuda') env.FUNASR_DEVICE = 'cuda:0';
     if (asrDeviceMode === 'cpu') env.FUNASR_DEVICE = 'cpu';
     return env;
   }

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Box, Button, Chip, ToggleButton, ToggleButtonGroup, Typography } from '@mui/material'
 import RefreshIcon from '@mui/icons-material/Refresh'
-import { useI18n } from '../../i18n'
-import { isMacOSRuntime } from '../../services/macosPermissions'
+import { useI18n, type TranslationKey } from '../../i18n'
+import { ipcClient } from '../../services/ipc'
 import { getVoiceModelStatus, type VoiceModelStatus } from '../../services/modelSetupStore'
 import { type AsrDeviceMode, type LocalSettings } from '../../services/settingsStore'
 
@@ -23,8 +23,26 @@ const rowSx = {
 const sectionTitle = { fontSize: 16, fontWeight: 500, mt: 3, mb: 1 }
 
 function normalizeMode(value: string | null): AsrDeviceMode | null {
-  if (value === 'default' || value === 'mps' || value === 'cpu') return value
+  if (value === 'default' || value === 'mps' || value === 'cuda' || value === 'cpu') return value
   return null
+}
+
+type RuntimeDeviceOption = {
+  value: AsrDeviceMode
+  labelKey: TranslationKey
+}
+
+function getRuntimeDeviceOptions(platform: string): RuntimeDeviceOption[] {
+  const accelerator: RuntimeDeviceOption | null = platform === 'darwin'
+    ? { value: 'mps' as const, labelKey: 'settings.asrRuntime.mps' }
+    : platform === 'win32'
+      ? { value: 'cuda' as const, labelKey: 'settings.asrRuntime.cuda' }
+      : null
+  return [
+    { value: 'default', labelKey: 'settings.asrRuntime.default' },
+    ...(accelerator ? [accelerator] : []),
+    { value: 'cpu', labelKey: 'settings.asrRuntime.cpu' },
+  ]
 }
 
 function formatDeviceStatus(status: VoiceModelStatus | null) {
@@ -42,6 +60,10 @@ export default function AsrRuntimeSettingsSection({
   const { t } = useI18n()
   const [modelStatus, setModelStatus] = useState<VoiceModelStatus | null>(null)
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const deviceOptions = getRuntimeDeviceOptions(ipcClient.platform())
+  const selectedMode = deviceOptions.some((option) => option.value === settings.asrDeviceMode)
+    ? settings.asrDeviceMode
+    : 'default'
 
   const refreshStatus = async () => {
     setIsRefreshing(true)
@@ -53,11 +75,8 @@ export default function AsrRuntimeSettingsSection({
   }
 
   useEffect(() => {
-    if (!isMacOSRuntime()) return
     void refreshStatus()
   }, [settings.modelCacheDir])
-
-  if (!isMacOSRuntime()) return null
 
   const deviceStatus = formatDeviceStatus(modelStatus)
   const fallbackReason = modelStatus?.fallback_reason || ''
@@ -78,16 +97,16 @@ export default function AsrRuntimeSettingsSection({
         <ToggleButtonGroup
           exclusive
           size="small"
-          value={settings.asrDeviceMode}
+          value={selectedMode}
           onChange={(_, value) => {
             const mode = normalizeMode(value)
             if (!mode || mode === settings.asrDeviceMode) return
             void updateSettings({ ...settings, asrDeviceMode: mode })
           }}
         >
-          <ToggleButton value="default">{t('settings.asrRuntime.default')}</ToggleButton>
-          <ToggleButton value="mps">{t('settings.asrRuntime.mps')}</ToggleButton>
-          <ToggleButton value="cpu">{t('settings.asrRuntime.cpu')}</ToggleButton>
+          {deviceOptions.map((option) => (
+            <ToggleButton key={option.value} value={option.value}>{t(option.labelKey)}</ToggleButton>
+          ))}
         </ToggleButtonGroup>
       </Box>
       <Box sx={{ ...rowSx, borderBottom: 'none' }}>

@@ -61,7 +61,7 @@ test('start 在打包态启动后端 exe 时注入用户选择的模型缓存目
 });
 
 test('start 在打包态按 ASR 设备模式注入 FUNASR_DEVICE', async () => {
-  for (const [mode, expected] of [['mps', 'mps'], ['cpu', 'cpu']]) {
+  for (const [mode, expected] of [['mps', 'mps'], ['cuda', 'cuda:0'], ['cpu', 'cpu']]) {
     const child = createChild();
     const calls = [];
     const service = createVoiceBackendService({

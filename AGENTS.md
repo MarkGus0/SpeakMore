@@ -22,7 +22,7 @@
 - 开发态后端通过 `npm run server` 启动时必须优先使用 `server/.venv` 中的 Python；不要直接依赖裸 `python main.py`，避免误用 Conda 或系统 Python 导致 `funasr` 等 ASR 依赖缺失。
 - `main` 是统一源码主线，保留 Windows 和 macOS 源码、测试、配置、打包脚本和发布说明；ZIP、DMG、EXE、APP、blockmap、`release/` 和 `release-artifacts/` 等打包产物不得提交到仓库，正式产物只上传 GitHub Releases。
 - 发布准备应从 `main` 拉 `release/vX.Y.Z` 分支处理版本号、签名、公证和 release note；不要创建用于长期保存打包产物的 Git 分支。
-- macOS 打包态应用名必须设置为 `SpeakMore`，确保 `app.getPath('userData')` 指向 `~/Library/Application Support/SpeakMore`；设置页保存 `asrDeviceMode=mps` 后，用户真实退出并重开 App 时，Electron 必须按该设置给内置后端注入 `FUNASR_DEVICE=mps`。
+- macOS 打包态应用名必须设置为 `SpeakMore`，确保 `app.getPath('userData')` 指向 `~/Library/Application Support/SpeakMore`；设置页保存 `asrDeviceMode=mps` 后，用户真实退出并重开 App 时，Electron 必须按该设置给内置后端注入 `FUNASR_DEVICE=mps`；Windows 设置页保存 `asrDeviceMode=cuda` 后，打包态 Electron 必须给内置后端注入 `FUNASR_DEVICE=cuda:0`。
 - 后端关键接口为 `GET /health`、`GET /model/status`、`POST /model/download`、`GET /ready`、`POST /config/reload`、`POST /ai/voice_flow` 和 `WebSocket /ws/rt_voice_flow`。
 - `/health` 表示后端进程存活；`/model/status` 表示 SenseVoiceSmall 初始化状态；`/ready` 表示当前 ASR 模型已加载完成，语音链路可接收请求。
 - 旧模型管理能力已删除，Electron 不再注册 `model:*` IPC，也不提供模型切换、删除或选择入口；当前只允许单模型初始化页触发 SenseVoiceSmall 下载/加载。
@@ -123,7 +123,7 @@
 - 发给后端大模型 prompt 的词典不应整表注入；后续实现时间衰减时默认每轮最多发送 24 条，可配置范围为 8 到 40 条，硬上限 40 条。手动词条不应天然永久高优先级，排序应由动态 score 决定。
 - 本地设置包含 `translationTargetLanguage`，只允许共享翻译目标语言元数据中的语言代码，由主进程和 renderer 双侧归一化。
 - 本地设置包含 `modelCacheDir`，用于保存用户选择的 SenseVoiceSmall 下载目录；Electron 查询模型状态、触发下载和打包后端启动时都必须把该目录传给后端。该值是本机路径，不得写入仓库或文档示例之外的共享配置。
-- 本地设置包含 `asrDeviceMode`，只允许 `default`、`mps` 和 `cpu`；macOS 设置页可选择 ASR 运行设备；打包态 Electron 启动后端时把 `mps` / `cpu` 映射为 `FUNASR_DEVICE`，`default` 不主动启用 MPS；第一版保存后需要重启语音后端或应用生效，不做运行中热切换。
+- 本地设置包含 `asrDeviceMode`，只允许 `default`、`mps`、`cuda` 和 `cpu`；macOS 设置页展示 `默认 / MPS / CPU`，Windows 设置页展示 `默认 / CUDA / CPU`；打包态 Electron 启动后端时把 `mps`、`cuda`、`cpu` 分别映射为 `FUNASR_DEVICE=mps`、`FUNASR_DEVICE=cuda:0`、`FUNASR_DEVICE=cpu`；`default` 不主动启用 MPS，仍由后端默认策略优先 CUDA 后 CPU；设置保存后需要重启语音后端或应用生效，不做运行中热切换。
 - 听写历史保存由 `AppShell` 这类全局常驻层订阅语音会话完成事件，不要放在首页、历史页等可切换页面组件里。
 - 首页累计统计来自独立 `history-stats.json`，不得从最近 200 条 `history.json` 反推；历史列表裁剪不能影响累计听写时长、累计字数、平均速度和节省时间。
 - 后端 `refiner.py` 不直接读取 Electron 本地词典文件；润色所需词条由 Electron 随语音请求参数传入，且只传启用词条。
@@ -133,6 +133,7 @@
 ## 已知限制
 
 - 大模型 provider 默认模型只是首次配置建议，可能随服务商策略变化；如果调用失败，优先让用户在设置页修改模型名或 API Key，不要写死单一模型假设。
+- Windows CUDA 选项只适用于 NVIDIA CUDA 环境；Intel Arc 等非 NVIDIA GPU 不会因为选择 CUDA 自动获得加速，后端会回退 CPU 并通过 `/model/status.fallback_reason` 暴露原因。
 - 当前 Windows 可信选区读取依赖 Windows UI Automation；目标应用不支持 UIA 选区时会按无选区处理。当前 macOS 可信选区读取依赖 Accessibility API focused element selected text；目标应用不暴露 AX selected text 时会按无选区处理。
 - 当前 `ask_anything` 只调用 DeepSeek 文本模型，没有联网搜索、天气查询或工具调用链路；实时信息问题必须明确能力边界。
 - 当前没有单独的选区文本翻译快捷键；`Right Alt` 固定为听写，`Right Alt + Right Shift` 固定为语音翻译粘贴。翻译目标语言当前支持 `en` 和 `ja`。
