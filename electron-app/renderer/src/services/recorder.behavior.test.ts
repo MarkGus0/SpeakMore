@@ -873,6 +873,7 @@ test('ready 失败时不发送 start_audio，并清理已打开的麦克风', as
       .map((payload) => JSON.parse(payload))
 
     assert.equal(sentMessages.some((message) => message.type === 'start_audio'), false)
+    await new Promise((resolve) => setTimeout(resolve, 0))
     assert.equal(env.getTrackStops(), 1)
     assert.equal(env.sockets[0]?.readyState, 3)
     assert.equal(recorder.getVoiceSession().status, 'error')
