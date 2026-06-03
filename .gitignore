@@ -24,6 +24,7 @@ SpeakMore-*.exe
 .env
 .env.*
 !.env.example
+server/.venv/
 server/.env
 server/.env.*
 !server/.env.example

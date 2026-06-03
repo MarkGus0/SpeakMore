@@ -20,6 +20,7 @@
 
 - 开发态后端独立启动，Electron 只消费 `http://127.0.0.1:8000`；打包态 Electron 负责拉起和关闭内置后端进程。
 - 开发态后端通过 `npm run server` 启动时必须优先使用 `server/.venv` 中的 Python；不要直接依赖裸 `python main.py`，避免误用 Conda 或系统 Python 导致 `funasr` 等 ASR 依赖缺失。
+- 开发启动脚本只做前置检查和进程拉起，不自动安装依赖；缺少 `server/.venv`、后端核心包、根目录 Electron 依赖或 renderer `dist/index.html` 时必须快速失败并提示明确准备命令。
 - `main` 是统一源码主线，保留 Windows 和 macOS 源码、测试、配置、打包脚本和发布说明；ZIP、DMG、EXE、APP、blockmap、`release/` 和 `release-artifacts/` 等打包产物不得提交到仓库，正式产物只上传 GitHub Releases。
 - 发布准备应从 `main` 拉 `release/vX.Y.Z` 分支处理版本号、签名、公证和 release note；不要创建用于长期保存打包产物的 Git 分支。
 - macOS 打包态应用名必须设置为 `SpeakMore`，确保 `app.getPath('userData')` 指向 `~/Library/Application Support/SpeakMore`；设置页保存 `asrDeviceMode=mps` 后，用户真实退出并重开 App 时，Electron 必须按该设置给内置后端注入 `FUNASR_DEVICE=mps`；Windows 设置页保存 `asrDeviceMode=cuda` 后，打包态 Electron 必须给内置后端注入 `FUNASR_DEVICE=cuda:0`。
@@ -143,6 +144,8 @@
 
 - 前端测试：`cd electron-app/renderer; npm test`
 - 前端构建：`npm run renderer:build`
+- 开发启动前置检查测试：`node --test scripts/dev-prereqs.test.mjs`
+- 本地开发前置检查：`npm run doctor`
 - 主进程语法检查：`node --check electron-app/main.js`
 - 快捷键转发测试：`node --test electron-app/right-alt-relay.test.js`
 - 历史统计测试：`node --test electron-app/history-stats-store.test.mjs`

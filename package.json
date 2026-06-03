@@ -3,9 +3,10 @@
   "version": "1.0.0",
   "main": "electron-app/main.js",
   "scripts": {
-    "start": "electron ./electron-app",
-    "start:electron": "electron ./electron-app",
+    "start": "node scripts/start-electron-dev.mjs",
+    "start:electron": "node scripts/start-electron-dev.mjs",
     "server": "node scripts/start-server-dev.mjs",
+    "doctor": "node scripts/check-dev-prereqs.mjs",
     "renderer:build": "cd electron-app/renderer && npm run build",
     "verify:voice": "python -m pytest server/test_runtime_config.py server/test_service_readiness.py server/test_model_api.py server/test_asr_runtime.py server/test_asr_config.py server/test_voice_flow_contract.py server/test_ws_protocol_contract.py -q",
     "build:backend:mac": "bash scripts/build-backend-macos.sh",
