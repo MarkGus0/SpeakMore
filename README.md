@@ -218,9 +218,13 @@ npm start
 - `cuda` / `cuda:0`：显式使用 CUDA；不可用时回退 CPU。
 - `mps`：显式使用 Apple Silicon MPS；不可用或初始化失败时回退 CPU。
 
-macOS MPS 目前只作为实验加速路径，不承诺性能指标。`GET /model/status` 会返回 `device`、`requested_device`、`device_source` 和 `fallback_reason`，用于确认实际运行设备和回退原因。
+`GET /model/status` 会返回 `device`、`requested_device`、`device_source` 和 `fallback_reason`，用于确认实际运行设备和回退原因。
 
 macOS 设置页提供“语音识别运行设备”入口，可选择默认、MPS 或 CPU。开发态后端通常由开发者手动启动，`npm run server` 会优先使用 `server/.venv`；如需验证 MPS，可使用 `FUNASR_DEVICE=mps npm run server`。打包态由 Electron 启动内置后端；用户切换 MPS 后，需要真正退出应用再重新打开，后端会按本地设置注入 `FUNASR_DEVICE=mps` 并加载模型。
+
+Windows 设置页提供“语音识别运行设备”入口，可选择默认、CUDA 或 CPU。开发态后端通常由开发者手动启动；如需验证 CUDA，可使用 `$env:FUNASR_DEVICE='cuda:0'; npm run server`。打包态由 Electron 启动内置后端；用户切换 CUDA 后，需要真正退出应用再重新打开，后端会按本地设置注入 `FUNASR_DEVICE=cuda:0` 并加载模型。
+
+macOS MPS 目前只作为 Apple Silicon 实验加速路径，不承诺性能指标。Windows CUDA 选项只适用于 NVIDIA CUDA 环境；Intel Arc 等非 NVIDIA GPU 不会因为选择 CUDA 自动获得加速，后端会回退 CPU 并通过 `fallback_reason` 暴露原因。
 
 ## 打包
 
