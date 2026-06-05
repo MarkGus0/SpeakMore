@@ -223,6 +223,39 @@ class RefinerPromptTest(unittest.TestCase):
             user_message,
             "[Selected text in editor: const a = 1]\n\nUser's voice command:\n解释一下这段代码",
         )
+    def test_custom_command_requires_configured_prompt(self):
+        with self.assertRaises(ValueError):
+            refiner.resolve_system_prompt("custom_command", {})
+
+    def test_custom_command_prompt_wraps_user_configuration_and_voice_input(self):
+        system_prompt = refiner.resolve_system_prompt(
+            "custom_command",
+            {"custom_prompt": "Output a single shell command only."},
+        )
+        message = refiner.build_refiner_user_message(
+            raw_text="list all mp4 files",
+            mode="custom_command",
+            parameters={
+                "command_id": "terminal_assistant",
+                "command_name": "Terminal Assistant",
+            },
+        )
+
+        self.assertIn("Never execute terminal commands", system_prompt)
+        self.assertIn("Output a single shell command only.", system_prompt)
+        self.assertEqual(
+            message,
+            "Command name: Terminal Assistant\nCommand id: terminal_assistant\n\nVoice input:\nlist all mp4 files",
+        )
+
+    def test_meeting_notes_user_message_uses_transcript_input(self):
+        message = refiner.build_refiner_user_message(
+            raw_text="Alice will send the report tomorrow.",
+            mode="meeting_notes",
+        )
+
+        self.assertIn("meeting notes assistant", SYSTEM_PROMPTS["meeting_notes"])
+        self.assertEqual(message, "Meeting transcript:\nAlice will send the report tomorrow.")
 
 
 if __name__ == "__main__":

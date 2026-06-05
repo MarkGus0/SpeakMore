@@ -52,6 +52,9 @@ const { createAppPaths } = require('./app-paths');
 const { createLocalJsonStore } = require('./local-json-store');
 const { createHistoryRepository } = require('./history-repository');
 const { createDictionaryRepository } = require('./dictionary-repository');
+const { createShortcutCommandRepository } = require('./shortcut-command-repository');
+const { createShortcutCommandRegistrar } = require('./shortcut-command-registrar');
+const { createMeetingNoteRepository } = require('./meeting-note-repository');
 const { createTextObserverService } = require('./text-observer-service');
 const { createLocalCompatState } = require('./local-compat-state');
 const { createMainIpcRegistry } = require('./main-ipc-registry');
@@ -70,6 +73,8 @@ const HISTORY_FILE_NAME = 'history.json';
 const HISTORY_STATS_FILE_NAME = 'history-stats.json';
 const DICTIONARY_FILE_NAME = 'dictionary.json';
 const DICTIONARY_CANDIDATES_FILE_NAME = 'dictionary-candidates.json';
+const SHORTCUT_COMMANDS_FILE_NAME = 'shortcut-commands.json';
+const MEETING_NOTES_FILE_NAME = 'meeting-notes.json';
 const SHORTCUT_DEBUG_ENABLED = ['1', 'true', 'yes', 'on'].includes(
   String(process.env.TYPELESS_SHORTCUT_DEBUG || '').toLowerCase(),
 );
@@ -211,6 +216,25 @@ const dictionaryRepository = createDictionaryRepository({
   logger: autoLearningLogger,
 });
 
+const shortcutCommandRepository = createShortcutCommandRepository({
+  readJsonFile,
+  writeJsonFile,
+  fileName: SHORTCUT_COMMANDS_FILE_NAME,
+});
+
+const shortcutCommandRegistrar = createShortcutCommandRegistrar({
+  globalShortcut,
+  readShortcutCommands: () => shortcutCommandRepository.readShortcutCommands(),
+  emitTriggered: (command) => sendToMain('shortcut-command:triggered', command),
+  logger: console,
+});
+
+const meetingNoteRepository = createMeetingNoteRepository({
+  readJsonFile,
+  writeJsonFile,
+  fileName: MEETING_NOTES_FILE_NAME,
+});
+
 function readHistoryItems() {
   return historyRepository.readHistoryItems();
 }
@@ -335,6 +359,20 @@ function emitDictionaryChanged(payload = {}) {
   });
 }
 
+function emitShortcutCommandsChanged(payload = {}) {
+  sendToMain('shortcut-command:changed', {
+    ...payload,
+    changedAt: new Date().toISOString(),
+  });
+}
+
+function emitMeetingNotesChanged(payload = {}) {
+  sendToMain('meeting-note:changed', {
+    ...payload,
+    changedAt: new Date().toISOString(),
+  });
+}
+
 function sendToFloatingBar(channel, payload) {
   const target = getFloatingBar();
   if (target && !target.isDestroyed()) {
@@ -447,6 +485,8 @@ const mainIpcRegistry = createMainIpcRegistry({
   dictionaryRepository,
   dialog,
   emitDictionaryChanged,
+  emitMeetingNotesChanged,
+  emitShortcutCommandsChanged,
   ensureVoiceBackendStarted,
   ensureVoiceServer,
   fs,
@@ -489,12 +529,15 @@ const mainIpcRegistry = createMainIpcRegistry({
   restoreMutedBackgroundSessions,
   sendToMain,
   sendToFloatingBar,
+  shortcutCommandRepository,
+  shortcutCommandRegistrar,
   setInteractiveCardPayload: (payload) => {
     pendingInteractiveCardPayload = payload;
   },
   shell,
   spawnProcess: spawn,
   startVoiceModelDownload,
+  meetingNoteRepository,
   textObservationManager,
   upsertHistoryItem,
   writeHistoryItems,
@@ -559,6 +602,7 @@ app.whenReady().then(() => {
   createMainWindow();
   createFloatingBar();
   startRightAltListener();
+  shortcutCommandRegistrar.registerAll();
 });
 
 app.on('window-all-closed', (event) => event.preventDefault());
@@ -578,6 +622,7 @@ app.on('before-quit', (event) => {
 app.on('will-quit', () => {
   voiceBackendService.stop();
   windowManager?.dispose();
+  shortcutCommandRegistrar.dispose();
   rightAltListenerService.dispose();
   stopRightAltListener();
   globalShortcut.unregisterAll();

@@ -13,7 +13,13 @@ import { createVoiceSocketManager } from './voice/voiceSocket'
 import { createRecordingTransportRuntime } from './voice/recordingTransportRuntime'
 import { createVoiceSessionLifecycle } from './voice/voiceSessionLifecycle'
 import { createVoiceSessionStore, type VoiceSessionListener } from './voice/voiceSessionStore'
-import { resolveVoiceTask, type VoiceTask } from './voice/voiceTaskResolver'
+import {
+  createMeetingNotesVoiceTask,
+  resolveShortcutCommandVoiceTask,
+  resolveVoiceTask,
+  type VoiceTask,
+} from './voice/voiceTaskResolver'
+import type { ShortcutCommand } from './shortcutCommandStore'
 import {
   createVoiceError,
   initialVoiceSession,
@@ -111,6 +117,36 @@ export async function toggleRecordingByShortcut(intent: ShortcutIntent) {
   await startRecordingFromIntent(intent)
 }
 
+export async function toggleRecordingByShortcutCommand(command: ShortcutCommand) {
+  if (!command.enabled) return
+
+  const session = getVoiceSession()
+  if (session.status === 'recording') {
+    stopRecording()
+    return
+  }
+
+  if (session.status === 'connecting' || session.status === 'stopping' || session.status === 'transcribing') {
+    return
+  }
+
+  await startRecordingFromShortcutCommand(command)
+}
+
+export async function toggleMeetingNotesRecording() {
+  const session = getVoiceSession()
+  if (session.status === 'recording') {
+    stopRecording()
+    return
+  }
+
+  if (session.status === 'connecting' || session.status === 'stopping' || session.status === 'transcribing') {
+    return
+  }
+
+  await startRecordingWithTask('MeetingNotes', async () => createMeetingNotesVoiceTask())
+}
+
 function toShortcutIntent(mode: VoiceMode): ShortcutIntent {
   if (mode === 'Ask') return 'AskShortcut'
   if (mode === 'Translate') return 'TranslateShortcut'
@@ -129,6 +165,19 @@ function getInitialModeForIntent(intent: ShortcutIntent): VoiceMode {
 }
 
 async function startRecordingFromIntent(intent: ShortcutIntent) {
+  await startRecordingWithTask(getInitialModeForIntent(intent), () => resolveVoiceTask(intent))
+}
+
+async function startRecordingFromShortcutCommand(command: ShortcutCommand) {
+  const initialMode: VoiceMode = command.action === 'ask'
+    ? 'Ask'
+    : command.action === 'custom-command'
+      ? 'CustomCommand'
+      : 'Dictate'
+  await startRecordingWithTask(initialMode, () => resolveShortcutCommandVoiceTask(command))
+}
+
+async function startRecordingWithTask(initialMode: VoiceMode, resolveTask: () => Promise<VoiceTask>) {
   // audioId 是本轮录音的唯一边界，后续 WebSocket 消息必须匹配它才会被接受。
   // 新录音开始前先隐藏旧结果，避免用户看到上一轮悬浮面板误以为是当前结果。
   hideFloatingPanel()
@@ -138,13 +187,13 @@ async function startRecordingFromIntent(intent: ShortcutIntent) {
   setSession({
     ...initialVoiceSession,
     status: 'connecting',
-    mode: getInitialModeForIntent(intent),
+    mode: initialMode,
     audioId,
   })
 
   try {
     // 快捷键只表达意图，真正的语音模式、选区上下文和结果交付方式在这里解析。
-    const task = await resolveVoiceTask(intent)
+    const task = await resolveTask()
     if (!isSessionActive(audioId)) return
     activeTask = task
     const currentSession = getVoiceSession()

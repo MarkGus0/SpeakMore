@@ -16,6 +16,7 @@ MAX_DICTIONARY_TERMS = 40
 DEFAULT_LLM_MODEL = "deepseek-chat"
 DEFAULT_TRANSLATION_TARGET_LANGUAGE_ID = "en"
 DEFAULT_TRANSLATION_TARGET_LANGUAGE_NAME = "English"
+MAX_CUSTOM_PROMPT_CHARS = 12000
 FALLBACK_TRANSLATION_TARGET_LANGUAGE_NAMES = {
     "en": "English",
     "ja": "Japanese",
@@ -105,6 +106,27 @@ def format_target_language_for_prompt(value: object) -> str:
         language_id,
         TRANSLATION_TARGET_LANGUAGE_NAMES.get("en", DEFAULT_TRANSLATION_TARGET_LANGUAGE_NAME),
     )
+
+
+def normalize_custom_command_prompt(parameters: dict | None) -> str:
+    if not isinstance(parameters, dict):
+        return ""
+    prompt = str(parameters.get("custom_prompt", "") or "").strip()
+    if len(prompt) > MAX_CUSTOM_PROMPT_CHARS:
+        return prompt[:MAX_CUSTOM_PROMPT_CHARS]
+    return prompt
+
+
+def resolve_system_prompt(mode: str, parameters: dict | None = None) -> str:
+    if mode != "custom_command":
+        return SYSTEM_PROMPTS.get(mode, SYSTEM_PROMPTS["transcript"])
+
+    custom_prompt = normalize_custom_command_prompt(parameters)
+    if not custom_prompt:
+        raise ValueError("custom_prompt is required for custom_command mode")
+
+    safety_boundary = SYSTEM_PROMPTS["custom_command"]
+    return f"{safety_boundary}\n\nUser-configured command prompt:\n{custom_prompt}"
 
 
 class RefineFailedError(RuntimeError):
@@ -290,6 +312,27 @@ def build_refiner_user_message(
         target_lang = format_target_language_for_prompt(target_language_id)
         user_message = f"目标语言：{target_lang}（语言代码：{target_language_id}）\n\n待翻译的语音转写文本：\n{raw_text}"
 
+    elif mode == "custom_command":
+        command_name = ""
+        command_id = ""
+        if isinstance(parameters, dict):
+            command_name = str(parameters.get("command_name", "") or "").strip()
+            command_id = str(parameters.get("command_id", "") or "").strip()
+        command_parts = []
+        if command_name:
+            command_parts.append(f"Command name: {command_name}")
+        if command_id:
+            command_parts.append(f"Command id: {command_id}")
+        command_header = "\n".join(command_parts)
+        user_message = (
+            f"{command_header}\n\nVoice input:\n{raw_text}"
+            if command_header
+            else f"Voice input:\n{raw_text}"
+        )
+
+    elif mode == "meeting_notes":
+        user_message = f"Meeting transcript:\n{raw_text}"
+
     elif mode == "ask_anything" and parameters:
         selected_text = parameters.get("selected_text", "")
         print(
@@ -326,7 +369,7 @@ async def refine_text(
     if not raw_text or not raw_text.strip():
         return ""
 
-    system_prompt = SYSTEM_PROMPTS.get(mode, SYSTEM_PROMPTS["transcript"])
+    system_prompt = resolve_system_prompt(mode, parameters)
 
     # 词典属于用户偏好上下文，只影响术语纠错，不改变任务边界。
     user_message = build_refiner_user_message(

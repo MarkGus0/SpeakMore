@@ -10,6 +10,8 @@ function createFakeRegisters(calls) {
     'registerDictionaryIpcHandlers',
     'registerAudioIpcHandlers',
     'registerVoiceModelIpcHandlers',
+    'registerShortcutCommandIpcHandlers',
+    'registerMeetingNoteIpcHandlers',
     'registerFocusedContextIpcHandlers',
     'registerFileIpcHandlers',
     'registerKeyboardIpcHandlers',
@@ -114,7 +116,7 @@ test('createMainIpcRegistry 只注册一次并按固定顺序分发依赖', () =
   registry.registerIpcHandlers();
   registry.registerIpcHandlers();
 
-  assert.equal(calls.length, 12);
+  assert.equal(calls.length, 14);
   assert.deepEqual(calls.map(([name]) => name), [
     'registerClipboardUserIpcHandlers',
     'registerHistoryIpcHandlers',
@@ -122,6 +124,8 @@ test('createMainIpcRegistry 只注册一次并按固定顺序分发依赖', () =
     'registerDictionaryIpcHandlers',
     'registerAudioIpcHandlers',
     'registerVoiceModelIpcHandlers',
+    'registerShortcutCommandIpcHandlers',
+    'registerMeetingNoteIpcHandlers',
     'registerFocusedContextIpcHandlers',
     'registerFileIpcHandlers',
     'registerKeyboardIpcHandlers',
@@ -136,14 +140,14 @@ test('createMainIpcRegistry 只注册一次并按固定顺序分发依赖', () =
   assert.equal(calls[3][1].emitDictionaryChanged, emitDictionaryChanged);
   assert.equal(typeof calls[4][1].ensureVoiceServer, 'function');
   assert.equal(typeof calls[5][1].startVoiceModelDownload, 'function');
-  assert.equal(calls[7][1].dialog, dialog);
-  assert.equal(calls[8][1].randomUUID(), 'uuid-1');
-  assert.equal(calls[8][1].macosPlatformCapabilities, macosPlatformCapabilities);
-  assert.equal(calls[8][1].platform, 'win32');
-  assert.equal(calls[9][1].createMainWindow(), 'main-window');
-  assert.equal(typeof calls[9][1].handleFloatingWindowsBringToFront, 'function');
+  assert.equal(calls[9][1].dialog, dialog);
+  assert.equal(calls[10][1].randomUUID(), 'uuid-1');
   assert.equal(calls[10][1].macosPlatformCapabilities, macosPlatformCapabilities);
-  assert.equal(calls[10][1].processPlatform, 'win32');
-  assert.equal(calls[11][1].localStores, localCompatState.localStores);
-  assert.equal('getSystemInfo' in calls[11][1], false);
+  assert.equal(calls[10][1].platform, 'win32');
+  assert.equal(calls[11][1].createMainWindow(), 'main-window');
+  assert.equal(typeof calls[11][1].handleFloatingWindowsBringToFront, 'function');
+  assert.equal(calls[12][1].macosPlatformCapabilities, macosPlatformCapabilities);
+  assert.equal(calls[12][1].processPlatform, 'win32');
+  assert.equal(calls[13][1].localStores, localCompatState.localStores);
+  assert.equal('getSystemInfo' in calls[13][1], false);
 });

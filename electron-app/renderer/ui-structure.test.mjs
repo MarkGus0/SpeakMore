@@ -38,6 +38,13 @@ const readMainProcessSurface = () => readProjectFiles([
   '../permission-ipc.js',
   '../right-alt-relay.js',
   '../right-alt-listener-service.js',
+  '../shortcut-command-store.js',
+  '../shortcut-command-repository.js',
+  '../shortcut-command-registrar.js',
+  '../shortcut-command-ipc.js',
+  '../meeting-note-store.js',
+  '../meeting-note-repository.js',
+  '../meeting-note-ipc.js',
   '../settings-ipc.js',
   '../settings-store.js',
   '../text-observer-service.js',
@@ -337,6 +344,14 @@ test('主进程注册真实 bundle 首屏所需的 IPC shim', async () => {
     'test:generate-test-records',
     'test:clear-test-records',
     'clipboard:write-text',
+    'shortcut-command:list',
+    'shortcut-command:upsert',
+    'shortcut-command:delete',
+    'shortcut-command:registration-status',
+    'meeting-note:list',
+    'meeting-note:get',
+    'meeting-note:upsert',
+    'meeting-note:delete',
     'focused-context:get-last-focused-info',
     'focused-context:get-selected-text',
     'page:restart-typeless-bar',
@@ -418,6 +433,8 @@ test('主窗口页面和侧边栏通过轻量 i18n 切换中英文', async () =>
     'src/pages/Dashboard.tsx',
     'src/pages/History.tsx',
     'src/pages/Dictionary.tsx',
+    'src/pages/Shortcuts.tsx',
+    'src/pages/MeetingNotes.tsx',
     'src/pages/Settings.tsx',
   ]);
 
@@ -429,6 +446,8 @@ test('主窗口页面和侧边栏通过轻量 i18n 切换中英文', async () =>
   assert.match(i18n, /Dashboard/);
   assert.match(i18n, /History/);
   assert.match(i18n, /Dictionary/);
+  assert.match(i18n, /Shortcuts/);
+  assert.match(i18n, /Meeting Notes/);
   assert.match(i18n, /Settings/);
   assert.match(appShell, /I18nProvider/);
   assert.match(appShell, /loadSettings/);
@@ -1322,6 +1341,8 @@ test('主页面一级标题复用设置页的左上基准和字号', async () =>
     'src/pages/Dashboard.tsx',
     'src/pages/History.tsx',
     'src/pages/Dictionary.tsx',
+    'src/pages/Shortcuts.tsx',
+    'src/pages/MeetingNotes.tsx',
     'src/pages/Settings.tsx',
   ];
 
@@ -1345,6 +1366,8 @@ test('除首页个性化进度和悬浮粒子外主前端页面不使用蓝色�
     'src/theme.ts',
     'src/pages/History.tsx',
     'src/pages/Dictionary.tsx',
+    'src/pages/Shortcuts.tsx',
+    'src/pages/MeetingNotes.tsx',
     'src/pages/Settings.tsx',
     'src/uiTokens.ts',
     'public/floating-panel.html',

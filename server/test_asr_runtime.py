@@ -196,8 +196,8 @@ class AsrRuntimeTest(unittest.TestCase):
             "asr.create_streaming_asr_session",
             return_value=fake_session,
         ), patch(
-            "asr.subprocess.run",
-            return_value=type("CompletedProcess", (), {"stdout": b"\x01\x00\x02\x00"})(),
+            "asr.iter_audio_file_pcm16_chunks",
+            return_value=[b"\x01\x00", b"\x02\x00"],
         ):
             result = asyncio.run(asr.transcribe_audio("audio.wav"))
 

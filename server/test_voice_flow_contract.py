@@ -172,6 +172,54 @@ class VoiceFlowContractTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
 
+    def test_voice_flow_rejects_unsupported_media_extension(self):
+        app = self.create_ready_app()
+
+        with TestClient(app) as client:
+            self.wait_until_ready(client)
+            response = client.post(
+                "/ai/voice_flow",
+                data={
+                    "audio_id": "audio-1",
+                    "mode": "meeting_notes",
+                    "audio_context": "{}",
+                    "audio_metadata": "{}",
+                    "parameters": "{}",
+                    "is_retry": "false",
+                    "device_name": "mic",
+                    "user_over_time": "12",
+                    "send_time": "123456",
+                },
+                files={"audio_file": ("sample.txt", b"hello", "text/plain")},
+            )
+
+        self.assertEqual(response.status_code, 415)
+
+    def test_save_upload_to_temp_file_enforces_one_gb_limit(self):
+        class FakeUpload:
+            filename = "meeting.wav"
+
+            def __init__(self):
+                self.calls = 0
+
+            async def read(self, _size):
+                self.calls += 1
+                if self.calls == 1:
+                    return b"aa"
+                if self.calls == 2:
+                    return b"aa"
+                return b""
+
+        async def run_case():
+            return await main.save_upload_to_temp_file(FakeUpload(), ".wav")
+
+        with patch("main.MAX_UPLOAD_AUDIO_BYTES", 3), self.assertRaises(main.HTTPException) as raised:
+            import asyncio
+
+            asyncio.run(run_case())
+
+        self.assertEqual(raised.exception.status_code, 413)
+
 
 if __name__ == "__main__":
     unittest.main()

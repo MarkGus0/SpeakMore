@@ -4,6 +4,8 @@ import Sidebar from './Sidebar'
 import Dashboard from '../pages/Dashboard'
 import History from '../pages/History'
 import Dictionary from '../pages/Dictionary'
+import Shortcuts from '../pages/Shortcuts'
+import MeetingNotes from '../pages/MeetingNotes'
 import Settings from '../pages/Settings'
 import Setup from '../pages/Setup'
 import { type Page } from '../navigation'
@@ -44,6 +46,8 @@ export default function AppShell() {
     home: <Dashboard />,
     history: <History />,
     dictionary: <Dictionary />,
+    shortcuts: <Shortcuts />,
+    meetingNotes: <MeetingNotes />,
     settings: <Settings />,
   }), [])
 

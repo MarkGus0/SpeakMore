@@ -75,6 +75,7 @@ class FunasrDeviceSelection:
 
 _model: StreamingAsrRuntime | None = None
 _model_lock = threading.Lock()
+PCM16_STREAM_CHUNK_BYTES = 64 * 1024
 
 
 def get_hf_cache_root() -> Path:
@@ -403,6 +404,45 @@ def convert_audio_file_to_pcm16_bytes(source_path: str) -> bytes:
     return completed.stdout
 
 
+def iter_audio_file_pcm16_chunks(source_path: str, chunk_bytes: int = PCM16_STREAM_CHUNK_BYTES):
+    process = subprocess.Popen(
+        [
+            "ffmpeg",
+            "-y",
+            "-i",
+            source_path,
+            "-f",
+            "s16le",
+            "-acodec",
+            "pcm_s16le",
+            "-ar",
+            "16000",
+            "-ac",
+            "1",
+            "pipe:1",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    stderr = b""
+
+    try:
+        while True:
+            chunk = process.stdout.read(chunk_bytes) if process.stdout else b""
+            if not chunk:
+                break
+            yield chunk
+        if process.stderr:
+            stderr = process.stderr.read()[-4000:]
+        return_code = process.wait(timeout=5)
+        if return_code != 0:
+            raise subprocess.CalledProcessError(return_code, "ffmpeg", stderr=stderr)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+
+
 def pcm16_bytes_to_float32(pcm_bytes: bytes):
     import numpy as np
 
@@ -549,5 +589,7 @@ async def transcribe_audio(audio_path: str, language: str | None = None) -> str:
 
 
 def _transcribe_sync(audio_path: str) -> str:
-    pcm_bytes = convert_audio_file_to_pcm16_bytes(audio_path)
-    return transcribe_pcm16_bytes(pcm_bytes)
+    session = create_streaming_asr_session()
+    for pcm_chunk in iter_audio_file_pcm16_chunks(audio_path):
+        session.append_pcm16(pcm_chunk)
+    return session.finalize().text

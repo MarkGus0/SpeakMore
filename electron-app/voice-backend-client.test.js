@@ -38,6 +38,8 @@ test('normalizeVoiceMode 统一兼容听写、翻译和自由提问模式', () =
   assert.equal(normalizeVoiceMode('dictation'), 'transcript');
   assert.equal(normalizeVoiceMode('ask_anything'), 'ask_anything');
   assert.equal(normalizeVoiceMode('translation'), 'translation');
+  assert.equal(normalizeVoiceMode('custom-command'), 'custom_command');
+  assert.equal(normalizeVoiceMode('meeting-notes'), 'meeting_notes');
   assert.equal(normalizeVoiceMode('unknown'), 'transcript');
 });
 

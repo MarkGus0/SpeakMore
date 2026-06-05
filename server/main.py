@@ -39,6 +39,22 @@ from runtime_config import (
 
 load_server_env()
 
+MAX_UPLOAD_AUDIO_BYTES = 1024 * 1024 * 1024
+UPLOAD_CHUNK_BYTES = 1024 * 1024
+SUPPORTED_UPLOAD_AUDIO_SUFFIXES = {
+    ".m4a",
+    ".mp3",
+    ".mp4",
+    ".wav",
+    ".ogg",
+    ".flac",
+    ".mov",
+    ".avi",
+    ".mkv",
+    ".webm",
+    ".opus",
+}
+
 MODEL_MISSING_DETAIL = "还没有下载语音模型，请先下载模型。"
 MODEL_CACHED_IDLE_DETAIL = "语音模型已下载，尚未加载，请加载模型后使用。"
 
@@ -49,9 +65,11 @@ def should_enable_reload() -> bool:
 
 def detect_uploaded_audio_suffix(filename: str | None) -> str:
     suffix = Path(filename or "").suffix.lower()
-    if suffix in {".wav", ".ogg", ".webm", ".mp3", ".m4a", ".opus"}:
+    if not suffix:
+        return ".wav"
+    if suffix in SUPPORTED_UPLOAD_AUDIO_SUFFIXES:
         return suffix
-    return ".wav"
+    return ""
 
 
 def detect_realtime_audio_suffix(audio_data: bytes) -> str:
@@ -67,6 +85,33 @@ def detect_realtime_audio_suffix(audio_data: bytes) -> str:
 async def transcribe_audio_with_wav_conversion(source_path: str, suffix: str) -> str:
     del suffix
     return await transcribe_audio(source_path)
+
+
+async def save_upload_to_temp_file(audio_file: UploadFile, suffix: str) -> str:
+    if not suffix:
+        raise HTTPException(status_code=415, detail="Unsupported media file format")
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    tmp_path = tmp.name
+    total_bytes = 0
+
+    try:
+        while True:
+            chunk = await audio_file.read(UPLOAD_CHUNK_BYTES)
+            if not chunk:
+                break
+            total_bytes += len(chunk)
+            if total_bytes > MAX_UPLOAD_AUDIO_BYTES:
+                raise HTTPException(status_code=413, detail="Uploaded media file exceeds 1 GB")
+            tmp.write(chunk)
+        return tmp_path
+    except Exception:
+        tmp.close()
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
+    finally:
+        tmp.close()
 
 
 def create_ws_message(message_type: str, payload: dict | None = None) -> dict:
@@ -431,10 +476,7 @@ async def handle_voice_flow_request(
     parameters: str,
 ) -> dict:
     suffix = detect_uploaded_audio_suffix(audio_file.filename)
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        content = await audio_file.read()
-        tmp.write(content)
-        tmp_path = tmp.name
+    tmp_path = await save_upload_to_temp_file(audio_file, suffix)
 
     try:
         context = normalize_json_object_field(audio_context)
@@ -452,6 +494,8 @@ async def handle_voice_flow_request(
         )
 
         return create_flow_success_payload(refined_text=refined, raw_text=raw_text)
+    except HTTPException:
+        raise
     except Exception as error:
         return create_flow_error_payload(detail=str(error), code="voice_flow_failed")
     finally:

@@ -33,6 +33,12 @@ type StartAudioParameterInputs = {
   translationTargetLanguage: TranslationTargetLanguage | null
 }
 
+type StartAudioCustomCommand = {
+  id: string
+  name: string
+  prompt: string
+}
+
 function assertLlmConfigReady(llm: LlmRequestConfig) {
   if (!llm.api_key.trim()) {
     throw createVoiceError('llm_api_key_missing')
@@ -80,7 +86,7 @@ export async function prepareRecordingStart(
       readyPromise,
       parameterInputsPromise,
     ])
-    const parameters = getStartAudioParameters(task.mode, task.selectedText, transport, parameterInputs)
+    const parameters = getStartAudioParameters(task.mode, task.selectedText, transport, parameterInputs, task.customCommand)
     console.info('[voice][startup] start_audio 参数已准备', {
       mode: task.mode,
       hasSelectedTextParameter: typeof parameters.selected_text === 'string' && Boolean(String(parameters.selected_text).trim()),
@@ -128,6 +134,7 @@ export function getStartAudioParameters(
   selectedText = '',
   _transport: RecordingTransport = 'pcm16',
   inputs: StartAudioParameterInputs,
+  customCommand?: StartAudioCustomCommand,
 ): Record<string, unknown> {
   // 词典和 LLM 配置是本轮请求参数，必须在 start_audio 前固定下来，避免录音中途变化。
   const { dictionaryTerms, llm, translationTargetLanguage } = inputs
@@ -149,6 +156,15 @@ export function getStartAudioParameters(
       ...summarizeSelectedText(selectedText),
     })
     return parameters
+  }
+
+  if (mode === 'CustomCommand') {
+    return {
+      ...baseParameters,
+      custom_prompt: customCommand?.prompt || '',
+      command_id: customCommand?.id || '',
+      command_name: customCommand?.name || '',
+    }
   }
 
   if (mode !== 'Translate') return baseParameters

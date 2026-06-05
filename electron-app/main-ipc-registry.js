@@ -10,6 +10,8 @@ const { registerPageIpcHandlers } = require('./page-ipc');
 const { registerPermissionIpcHandlers } = require('./permission-ipc');
 const { registerCompatIpcHandlers } = require('./compat-ipc');
 const { registerVoiceModelIpcHandlers } = require('./voice-model-ipc');
+const { registerShortcutCommandIpcHandlers } = require('./shortcut-command-ipc');
+const { registerMeetingNoteIpcHandlers } = require('./meeting-note-ipc');
 
 const defaultRegisters = {
   registerAudioIpcHandlers,
@@ -23,7 +25,9 @@ const defaultRegisters = {
   registerPageIpcHandlers,
   registerPermissionIpcHandlers,
   registerSettingsIpcHandlers,
+  registerShortcutCommandIpcHandlers,
   registerVoiceModelIpcHandlers,
+  registerMeetingNoteIpcHandlers,
 };
 
 function createMainIpcRegistry({
@@ -40,6 +44,8 @@ function createMainIpcRegistry({
   dictionaryRepository,
   dialog,
   emitDictionaryChanged = () => undefined,
+  emitMeetingNotesChanged = () => undefined,
+  emitShortcutCommandsChanged = () => undefined,
   ensureVoiceBackendStarted,
   ensureVoiceServer,
   fs,
@@ -87,6 +93,9 @@ function createMainIpcRegistry({
   spawnProcess,
   startVoiceModelDownload,
   systemPreferences,
+  shortcutCommandRepository,
+  shortcutCommandRegistrar,
+  meetingNoteRepository,
   textObservationManager,
   upsertHistoryItem,
   writeHistoryItems,
@@ -143,6 +152,17 @@ function createMainIpcRegistry({
       ensureVoiceBackendStarted,
       getVoiceModelStatus,
       startVoiceModelDownload,
+    });
+    registers.registerShortcutCommandIpcHandlers({
+      ipcMain,
+      shortcutCommandRepository,
+      shortcutCommandRegistrar,
+      emitShortcutCommandsChanged,
+    });
+    registers.registerMeetingNoteIpcHandlers({
+      ipcMain,
+      meetingNoteRepository,
+      emitMeetingNotesChanged,
     });
     registers.registerFocusedContextIpcHandlers({
       ipcMain,

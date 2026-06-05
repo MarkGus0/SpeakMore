@@ -45,7 +45,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     return subscribeVoiceSession((voiceSession) => {
-      if (voiceSession.status === 'completed' && voiceSession.mode !== 'Ask') {
+      if (voiceSession.status === 'completed' && voiceSession.mode !== 'Ask' && voiceSession.mode !== 'MeetingNotes') {
         const { refinedText, rawText } = voiceSession
         const result = refinedText || rawText
         const id = voiceSession.audioId || `live-${Date.now()}`

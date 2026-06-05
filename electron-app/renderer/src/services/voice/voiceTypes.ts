@@ -3,11 +3,11 @@
  *
  * 需要理解 VoiceSession、错误码、模式映射或悬浮胶囊状态时看这里。
  */
-export const voiceModes = ['Dictate', 'Ask', 'Translate'] as const
+export const voiceModes = ['Dictate', 'Ask', 'Translate', 'CustomCommand', 'MeetingNotes'] as const
 
 export type VoiceMode = typeof voiceModes[number]
 
-export type VoiceFlowMode = 'transcript' | 'ask_anything' | 'translation'
+export type VoiceFlowMode = 'transcript' | 'ask_anything' | 'translation' | 'custom_command' | 'meeting_notes'
 
 export type VoiceStatus =
   | 'idle'
@@ -81,6 +81,8 @@ export const initialVoiceSession: VoiceSession = {
 export function toVoiceFlowMode(mode: VoiceMode): VoiceFlowMode {
   if (mode === 'Ask') return 'ask_anything'
   if (mode === 'Translate') return 'translation'
+  if (mode === 'CustomCommand') return 'custom_command'
+  if (mode === 'MeetingNotes') return 'meeting_notes'
   return 'transcript'
 }
 

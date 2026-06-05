@@ -4,6 +4,8 @@ import FormatListBulletedIcon from '@mui/icons-material/FormatListBulleted'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import SettingsIcon from '@mui/icons-material/Settings'
 import CloudDownloadIcon from '@mui/icons-material/CloudDownload'
+import KeyboardIcon from '@mui/icons-material/Keyboard'
+import NotesIcon from '@mui/icons-material/Notes'
 import { pages, type Page } from '../navigation'
 import { useI18n } from '../i18n'
 
@@ -12,6 +14,8 @@ const iconByPage: Record<Page, React.ReactNode> = {
   home: <HomeIcon sx={{ fontSize: 18 }} />,
   history: <FormatListBulletedIcon sx={{ fontSize: 18 }} />,
   dictionary: <AutoAwesomeIcon sx={{ fontSize: 18 }} />,
+  shortcuts: <KeyboardIcon sx={{ fontSize: 18 }} />,
+  meetingNotes: <NotesIcon sx={{ fontSize: 18 }} />,
   settings: <SettingsIcon sx={{ fontSize: 18 }} />,
 }
 

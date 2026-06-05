@@ -16,7 +16,7 @@ function normalizeHistoryItem(item = {}) {
   return {
     id: String(item.id || crypto.randomUUID()),
     createdAt: String(item.createdAt || new Date().toISOString()),
-    mode: ['Dictate', 'Ask', 'Translate'].includes(item.mode) ? item.mode : 'Dictate',
+    mode: ['Dictate', 'Ask', 'Translate', 'CustomCommand'].includes(item.mode) ? item.mode : 'Dictate',
     status: item.status === 'error' ? 'error' : 'completed',
     rawText,
     refinedText,

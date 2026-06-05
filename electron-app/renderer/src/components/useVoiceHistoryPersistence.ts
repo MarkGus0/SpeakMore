@@ -13,6 +13,7 @@ export function useVoiceHistoryPersistence() {
   useEffect(() => {
     return subscribeVoiceSession((voiceSession) => {
       if (!voiceSession.audioId) return
+      if (voiceSession.mode === 'MeetingNotes') return
       if (voiceSession.status !== 'completed' && voiceSession.status !== 'error') return
       if (savedAudioIds.current.has(voiceSession.audioId)) return
 
