@@ -59,6 +59,33 @@ test('loadSettings 会补齐默认大模型 provider 配置', async () => {
   assert.equal(settings.llm.models.deepseek, 'deepseek-chat')
   assert.equal(settings.modelCacheDir, '')
   assert.equal(settings.asrDeviceMode, 'default')
+  assert.equal(settings.interactionSoundsEnabled, true)
+  assert.equal(settings.muteBackgroundAudioDuringRecording, true)
+  assert.equal(settings.showActiveMicrophoneHint, true)
+  assert.equal(settings.remindOnNewAudioDevice, true)
+  assert.equal(settings.showFloatingBar, true)
+  assert.equal(settings.hideMainWindowOnClose, true)
+})
+
+test('loadSettings 会保留音频和应用行为开关', async () => {
+  installSettingsResponse({
+    interactionSoundsEnabled: false,
+    muteBackgroundAudioDuringRecording: false,
+    showActiveMicrophoneHint: false,
+    remindOnNewAudioDevice: false,
+    showFloatingBar: false,
+    hideMainWindowOnClose: false,
+  })
+  const settingsStore = await loadSettingsStore('audio-app-switches')
+
+  const settings = await settingsStore.loadSettings()
+
+  assert.equal(settings.interactionSoundsEnabled, false)
+  assert.equal(settings.muteBackgroundAudioDuringRecording, false)
+  assert.equal(settings.showActiveMicrophoneHint, false)
+  assert.equal(settings.remindOnNewAudioDevice, false)
+  assert.equal(settings.showFloatingBar, false)
+  assert.equal(settings.hideMainWindowOnClose, false)
 })
 
 test('loadSettings 会保留用户选择的模型缓存目录', async () => {

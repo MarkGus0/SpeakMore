@@ -37,6 +37,9 @@ function createWindowManager({
   sendToFloatingBar = () => undefined,
   sendToFloatingPanel = () => undefined,
   getAppIsQuitting = () => false,
+  isFloatingBarEnabled = () => true,
+  shouldHideMainWindowOnClose = () => true,
+  requestAppQuit = () => app?.quit?.(),
   setTimer = setTimeout,
   clearTimer = clearTimeout,
   processPlatform = process.platform,
@@ -118,8 +121,12 @@ function createWindowManager({
 
   function showFloatingBar() {
     if (!floatingBar || floatingBar.isDestroyed()) return;
+    if (!isFloatingBarEnabled()) {
+      hideFloatingBar();
+      return;
+    }
     positionFloatingBar();
-    floatingBar.setIgnoreMouseEvents(false);
+    floatingBar.setIgnoreMouseEvents(true, { forward: true });
     showWindowWithoutActivation(floatingBar);
     keepFloatingWindowOnTop(floatingBar, { forceRefresh: shouldRefreshFloatingWindowLayer });
   }
@@ -147,8 +154,7 @@ function createWindowManager({
 
   function handleFloatingBarUpdatePositions(payload = []) {
     if (floatingBar && !floatingBar.isDestroyed()) {
-      const positions = Array.isArray(payload) ? payload : payload?.positions;
-      floatingBar.setIgnoreMouseEvents(!Array.isArray(positions) || positions.length === 0, { forward: false });
+      floatingBar.setIgnoreMouseEvents(true, { forward: true });
     }
     return true;
   }
@@ -163,10 +169,13 @@ function createWindowManager({
     return handleFloatingWindowsBringToFront();
   }
 
-  function createMainWindow() {
+  function createMainWindow(options = {}) {
+    const shouldShow = options?.show !== false;
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.show();
-      mainWindow.focus();
+      if (shouldShow) {
+        mainWindow.show();
+        mainWindow.focus();
+      }
       return mainWindow;
     }
 
@@ -177,12 +186,18 @@ function createWindowManager({
         preloadPath: preloadPath(),
         iconPath: iconPath(),
         session: mainSession,
+        show: shouldShow,
       }),
     });
 
     mainWindow.loadFile(mainRendererPath());
     mainWindow.on('close', (event) => {
       if (getAppIsQuitting()) return;
+      if (!shouldHideMainWindowOnClose()) {
+        event.preventDefault();
+        requestAppQuit();
+        return;
+      }
       event.preventDefault();
       mainWindow.hide();
       sendToMain('page-event--hub--window-blurred');
@@ -254,6 +269,7 @@ function createWindowManager({
     isActiveVoiceState,
     isErrorVoiceState,
     isTerminalVoiceState,
+    isFloatingBarEnabled,
     shouldShowShortcutHint,
     showFloatingBar,
     hideFloatingBar,

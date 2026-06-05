@@ -57,6 +57,14 @@ export type BackendReloadResult = {
   code?: string
 }
 
+export type AutoLaunchUpdateResult = {
+  success: boolean
+  skipped?: boolean
+  enabled?: boolean
+  code?: string
+  detail?: string
+}
+
 export const DEFAULT_LLM_PROVIDERS: LlmProvider[] = llmProviders as LlmProvider[]
 
 function createDefaultLlmSettings(): LlmSettings {
@@ -73,6 +81,12 @@ export type LocalSettings = {
   translationTargetLanguage: TranslationTargetLanguage
   launchAtSystemStartup: boolean
   selectedAudioDeviceId: string
+  interactionSoundsEnabled: boolean
+  muteBackgroundAudioDuringRecording: boolean
+  showActiveMicrophoneHint: boolean
+  remindOnNewAudioDevice: boolean
+  showFloatingBar: boolean
+  hideMainWindowOnClose: boolean
   modelCacheDir: string
   asrDeviceMode: AsrDeviceMode
   llm: LlmSettings
@@ -83,6 +97,12 @@ export const defaultSettings: LocalSettings = {
   translationTargetLanguage: DEFAULT_TRANSLATION_TARGET_LANGUAGE,
   launchAtSystemStartup: false,
   selectedAudioDeviceId: 'default',
+  interactionSoundsEnabled: true,
+  muteBackgroundAudioDuringRecording: true,
+  showActiveMicrophoneHint: true,
+  remindOnNewAudioDevice: true,
+  showFloatingBar: true,
+  hideMainWindowOnClose: true,
   modelCacheDir: '',
   asrDeviceMode: 'default',
   llm: createDefaultLlmSettings(),
@@ -139,6 +159,12 @@ function normalizeOptionalPath(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+function normalizeBoolean(value: unknown, fallback = false): boolean {
+  if (typeof value === 'boolean') return value
+  if (value === undefined || value === null) return fallback
+  return Boolean(value)
+}
+
 function normalizeAsrDeviceMode(value: unknown): AsrDeviceMode {
   return typeof value === 'string' && asrDeviceModes.has(value as AsrDeviceMode)
     ? value as AsrDeviceMode
@@ -167,13 +193,19 @@ export function normalizeLlmSettings(value: unknown): LlmSettings {
   return { providerId, providers, apiKeys, models }
 }
 
-function normalizeSettings(settings?: Partial<LocalSettings> | null): LocalSettings {
+export function normalizeSettings(settings?: Partial<LocalSettings> | null): LocalSettings {
   return {
     ...defaultSettings,
     preferredLanguage: normalizeInterfaceLanguage(settings?.preferredLanguage),
     translationTargetLanguage: normalizeTranslationTargetLanguage(settings?.translationTargetLanguage),
-    launchAtSystemStartup: Boolean(settings?.launchAtSystemStartup),
+    launchAtSystemStartup: normalizeBoolean(settings?.launchAtSystemStartup, false),
     selectedAudioDeviceId: settings?.selectedAudioDeviceId || 'default',
+    interactionSoundsEnabled: normalizeBoolean(settings?.interactionSoundsEnabled, true),
+    muteBackgroundAudioDuringRecording: normalizeBoolean(settings?.muteBackgroundAudioDuringRecording, true),
+    showActiveMicrophoneHint: normalizeBoolean(settings?.showActiveMicrophoneHint, true),
+    remindOnNewAudioDevice: normalizeBoolean(settings?.remindOnNewAudioDevice, true),
+    showFloatingBar: normalizeBoolean(settings?.showFloatingBar, true),
+    hideMainWindowOnClose: normalizeBoolean(settings?.hideMainWindowOnClose, true),
     modelCacheDir: normalizeOptionalPath(settings?.modelCacheDir),
     asrDeviceMode: normalizeAsrDeviceMode(settings?.asrDeviceMode),
     llm: normalizeLlmSettings(settings?.llm),
@@ -206,6 +238,24 @@ export async function reloadLlmBackendConfig(): Promise<BackendReloadResult> {
       detail: error instanceof Error ? error.message : String(error),
     }
   }
+}
+
+export async function updateAutoLaunchPreference(enable: boolean): Promise<AutoLaunchUpdateResult> {
+  try {
+    return await ipcClient.invoke<AutoLaunchUpdateResult>('permission:update-auto-launch', { enable })
+  } catch (error) {
+    return {
+      success: false,
+      code: 'auto_launch_update_failed',
+      detail: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
+export function subscribeSettingsChanges(listener: (settings: LocalSettings) => void) {
+  return ipcClient.on('settings:changed', (_event, payload) => {
+    listener(normalizeSettings(payload as Partial<LocalSettings>))
+  })
 }
 
 export async function getSelectedAudioDeviceId(): Promise<string> {

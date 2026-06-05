@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Box } from '@mui/material'
+import AudioDeviceReminder from './AudioDeviceReminder'
 import Sidebar from './Sidebar'
 import Dashboard from '../pages/Dashboard'
 import History from '../pages/History'
@@ -10,7 +11,13 @@ import Settings from '../pages/Settings'
 import Setup from '../pages/Setup'
 import { type Page } from '../navigation'
 import { I18nProvider } from '../i18n'
-import { defaultSettings, loadSettings, type InterfaceLanguage } from '../services/settingsStore'
+import {
+  defaultSettings,
+  loadSettings,
+  subscribeSettingsChanges,
+  type InterfaceLanguage,
+  type LocalSettings,
+} from '../services/settingsStore'
 import { disposeRecorder } from '../services/recorder'
 import { useGlobalShortcutBridge } from './useGlobalShortcutBridge'
 import { useVoiceHistoryPersistence } from './useVoiceHistoryPersistence'
@@ -18,6 +25,7 @@ import { useVoiceHistoryPersistence } from './useVoiceHistoryPersistence'
 export default function AppShell() {
   const [page, setPage] = useState<Page>('setup')
   const [language, setLanguage] = useState<InterfaceLanguage>(defaultSettings.preferredLanguage)
+  const [appSettings, setAppSettings] = useState<LocalSettings>(defaultSettings)
   useGlobalShortcutBridge()
   useVoiceHistoryPersistence()
 
@@ -26,7 +34,10 @@ export default function AppShell() {
 
     loadSettings()
       .then((settings) => {
-        if (!cancelled) setLanguage(settings.preferredLanguage)
+        if (!cancelled) {
+          setAppSettings(settings)
+          setLanguage(settings.preferredLanguage)
+        }
       })
       .catch(() => undefined)
 
@@ -34,6 +45,11 @@ export default function AppShell() {
       cancelled = true
     }
   }, [])
+
+  useEffect(() => subscribeSettingsChanges((settings) => {
+    setAppSettings(settings)
+    setLanguage(settings.preferredLanguage)
+  }), [])
 
   useEffect(() => {
     return () => {
@@ -54,6 +70,7 @@ export default function AppShell() {
   return (
     <I18nProvider language={language} setLanguage={setLanguage}>
       <Box sx={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column' }}>
+        <AudioDeviceReminder settings={appSettings} onSettingsChange={setAppSettings} />
         <Box
           sx={{
             height: 48,

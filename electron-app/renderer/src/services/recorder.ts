@@ -4,6 +4,8 @@
  * 需要理解录音启动、停止、取消、状态订阅和 UI 对接时看这里。
  */
 import { ipcClient } from './ipc'
+import { playInteractionSound } from './interactionSounds'
+import { loadSettings } from './settingsStore'
 import { muteBackgroundAudio, resetBackgroundAudioRestoreState, restoreBackgroundAudio } from './voice/backgroundAudio'
 import { cleanupPreparedStart, prepareRecordingStart } from './voice/recordingStartup'
 import { deliverVoiceResult, hideFloatingPanel } from './voice/voiceResultDelivery'
@@ -37,6 +39,14 @@ const RECORDING_LIMIT_MS = 60000
 const RECORDING_LIMIT_WARNING_TEXT = '录音将在 10 秒后自动结束'
 // 只有这些状态代表本轮语音还没有产出最终结果，Escape 才允许取消。
 const CANCELABLE_STATUSES = new Set<VoiceStatus>(['connecting', 'recording', 'stopping', 'transcribing'])
+
+async function buildActiveMicrophoneNotice(stream: MediaStream, mode: VoiceMode) {
+  if (mode === 'Ask') return ''
+  const settings = await loadSettings()
+  if (!settings.showActiveMicrophoneHint) return ''
+  const label = stream.getAudioTracks()[0]?.label?.trim()
+  return label ? `正在使用麦克风：${label}` : ''
+}
 
 // recorder 是渲染进程里的语音状态机，模块级变量用于保存当前唯一一轮录音会话。
 // 这里不放进 React state，是因为快捷键、悬浮窗、WebSocket 和页面组件都要共享同一份录音事实。
@@ -224,8 +234,14 @@ async function startRecordingWithTask(initialMode: VoiceMode, resolveTask: () =>
     transportRuntime.start()
     lifecycle.markRecordingStarted()
     lifecycle.startRecordingLimitTimers()
+    const microphoneNotice = await buildActiveMicrophoneNotice(prepared.stream, task.mode)
+    if (!isSessionActive(audioId)) return
+    if (microphoneNotice) {
+      setSession({ ...getVoiceSession(), noticeText: microphoneNotice })
+    }
     setSessionStatus('recording')
-    void muteBackgroundAudio()
+    void playInteractionSound('start')
+    await muteBackgroundAudio()
   } catch (error) {
     if (!isSessionActive(audioId) || lifecycle.isIgnoredAudioId(audioId)) return
     cleanupRecording()
@@ -242,6 +258,7 @@ export function stopRecording() {
     // 正常停止需要发送 end_audio，让后端 flush 音频并进入转写/润色阶段。
     lifecycle.clearRecordingLimitTimers()
     setSessionStatus('stopping')
+    void playInteractionSound('stop')
     cleanupRecording()
 
     const socket = voiceSocket.getSocket()

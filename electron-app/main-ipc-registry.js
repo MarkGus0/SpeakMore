@@ -45,6 +45,7 @@ function createMainIpcRegistry({
   dialog,
   emitDictionaryChanged = () => undefined,
   emitMeetingNotesChanged = () => undefined,
+  emitSettingsChanged = () => undefined,
   emitShortcutCommandsChanged = () => undefined,
   ensureVoiceBackendStarted,
   ensureVoiceServer,
@@ -132,6 +133,7 @@ function createMainIpcRegistry({
       readLocalSettings,
       writeLocalSettings,
       reloadVoiceServerConfig,
+      emitSettingsChanged,
     });
     registers.registerDictionaryIpcHandlers({
       ipcMain,

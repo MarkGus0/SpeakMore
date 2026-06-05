@@ -30,8 +30,32 @@ test('normalizeLocalSettings 会回退不支持的翻译目标语言和空设备
   assert.equal(settings.translationTargetLanguage, DEFAULT_TRANSLATION_TARGET_LANGUAGE);
   assert.equal(settings.selectedAudioDeviceId, 'default');
   assert.equal(settings.launchAtSystemStartup, true);
+  assert.equal(settings.interactionSoundsEnabled, true);
+  assert.equal(settings.muteBackgroundAudioDuringRecording, true);
+  assert.equal(settings.showActiveMicrophoneHint, true);
+  assert.equal(settings.remindOnNewAudioDevice, true);
+  assert.equal(settings.showFloatingBar, true);
+  assert.equal(settings.hideMainWindowOnClose, true);
   assert.equal(settings.modelCacheDir, '');
   assert.equal(settings.asrDeviceMode, DEFAULT_ASR_DEVICE_MODE);
+});
+
+test('normalizeLocalSettings 会保留音频和应用行为开关', () => {
+  const settings = normalizeLocalSettings({
+    interactionSoundsEnabled: false,
+    muteBackgroundAudioDuringRecording: false,
+    showActiveMicrophoneHint: false,
+    remindOnNewAudioDevice: false,
+    showFloatingBar: false,
+    hideMainWindowOnClose: false,
+  });
+
+  assert.equal(settings.interactionSoundsEnabled, false);
+  assert.equal(settings.muteBackgroundAudioDuringRecording, false);
+  assert.equal(settings.showActiveMicrophoneHint, false);
+  assert.equal(settings.remindOnNewAudioDevice, false);
+  assert.equal(settings.showFloatingBar, false);
+  assert.equal(settings.hideMainWindowOnClose, false);
 });
 
 test('normalizeLocalSettings 会保留用户选择的模型缓存目录', () => {
@@ -97,6 +121,8 @@ test('createSettingsStore 读取和写入时都会同步 legacy store', () => {
       modelCacheDir: 'D:\\Models\\FunASR',
       asrDeviceMode: 'mps',
       launchAtSystemStartup: true,
+      muteBackgroundAudioDuringRecording: false,
+      showFloatingBar: false,
       llm: {
         providerId: 'openai',
         providers: [],
@@ -118,6 +144,8 @@ test('createSettingsStore 读取和写入时都会同步 legacy store', () => {
   assert.equal(synced.selectedAudioDeviceId, 'mic-1');
   assert.equal(settings.modelCacheDir, 'D:\\Models\\FunASR');
   assert.equal(settings.asrDeviceMode, 'mps');
+  assert.equal(settings.muteBackgroundAudioDuringRecording, false);
+  assert.equal(synced.showFloatingBar, false);
 
   const next = store.writeLocalSettings({
     translationTargetLanguage: 'en',
@@ -125,14 +153,23 @@ test('createSettingsStore 读取和写入时都会同步 legacy store', () => {
     modelCacheDir: 'E:\\SpeakMoreModels',
     asrDeviceMode: 'cpu',
     launchAtSystemStartup: false,
+    interactionSoundsEnabled: false,
+    muteBackgroundAudioDuringRecording: true,
+    showActiveMicrophoneHint: false,
+    remindOnNewAudioDevice: false,
+    showFloatingBar: true,
+    hideMainWindowOnClose: false,
     llm: settings.llm,
   });
 
   assert.equal(written.translationTargetLanguage, 'en');
   assert.equal(written.modelCacheDir, 'E:\\SpeakMoreModels');
   assert.equal(written.asrDeviceMode, 'cpu');
+  assert.equal(written.interactionSoundsEnabled, false);
+  assert.equal(written.hideMainWindowOnClose, false);
   assert.equal(next.translationTargetLanguage, 'en');
   assert.equal(synced.translationTargetLanguage, 'en');
+  assert.equal(synced.muteBackgroundAudioDuringRecording, true);
 });
 
 test('buildCurrentLlmRequestConfig 会按当前 provider 生成请求配置', () => {

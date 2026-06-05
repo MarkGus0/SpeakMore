@@ -74,8 +74,7 @@ async function getDefaultAudioStreamOrThrow() {
   }
 }
 
-export async function getAudioStream() {
-  const selectedAudioDeviceId = await getSelectedAudioDeviceId()
+export async function getAudioStreamForDevice(selectedAudioDeviceId: string) {
   try {
     // 浏览器音频增强对蓝牙/降噪耳机更稳定；采样率和声道只作为偏好。
     return await getAudioStreamWithConstraints(selectedAudioDeviceId)
@@ -104,6 +103,10 @@ export async function getAudioStream() {
 
     throw toMicrophoneUnavailable(error)
   }
+}
+
+export async function getAudioStream() {
+  return getAudioStreamForDevice(await getSelectedAudioDeviceId())
 }
 
 export function stopStreamTracks(stream: MediaStream | null) {

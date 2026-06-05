@@ -26,6 +26,12 @@ function createDefaultLocalSettings() {
     translationTargetLanguage: DEFAULT_TRANSLATION_TARGET_LANGUAGE,
     launchAtSystemStartup: false,
     selectedAudioDeviceId: 'default',
+    interactionSoundsEnabled: true,
+    muteBackgroundAudioDuringRecording: true,
+    showActiveMicrophoneHint: true,
+    remindOnNewAudioDevice: true,
+    showFloatingBar: true,
+    hideMainWindowOnClose: true,
     llm: createDefaultLlmSettings(),
   });
 }
@@ -41,6 +47,12 @@ function normalizeStringMap(value = {}) {
 
 function normalizeOptionalPath(value) {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizeBoolean(value, fallback = false) {
+  if (typeof value === 'boolean') return value;
+  if (value === undefined || value === null) return fallback;
+  return Boolean(value);
 }
 
 function normalizeAsrDeviceMode(value) {
@@ -110,10 +122,16 @@ function normalizeLocalSettings(value = {}) {
     translationTargetLanguage: SUPPORTED_TRANSLATION_TARGET_LANGUAGES.has(settings.translationTargetLanguage)
       ? settings.translationTargetLanguage
       : DEFAULT_TRANSLATION_TARGET_LANGUAGE,
-    launchAtSystemStartup: Boolean(settings.launchAtSystemStartup),
+    launchAtSystemStartup: normalizeBoolean(settings.launchAtSystemStartup, false),
     selectedAudioDeviceId: typeof settings.selectedAudioDeviceId === 'string' && settings.selectedAudioDeviceId
       ? settings.selectedAudioDeviceId
       : 'default',
+    interactionSoundsEnabled: normalizeBoolean(settings.interactionSoundsEnabled, true),
+    muteBackgroundAudioDuringRecording: normalizeBoolean(settings.muteBackgroundAudioDuringRecording, true),
+    showActiveMicrophoneHint: normalizeBoolean(settings.showActiveMicrophoneHint, true),
+    remindOnNewAudioDevice: normalizeBoolean(settings.remindOnNewAudioDevice, true),
+    showFloatingBar: normalizeBoolean(settings.showFloatingBar, true),
+    hideMainWindowOnClose: normalizeBoolean(settings.hideMainWindowOnClose, true),
     modelCacheDir: normalizeOptionalPath(settings.modelCacheDir),
     asrDeviceMode: normalizeAsrDeviceMode(settings.asrDeviceMode),
     llm: normalizeLlmSettings(settings.llm),
@@ -186,6 +204,7 @@ module.exports = {
   normalizeLlmProvider,
   normalizeLlmSettings,
   normalizeLlmRequestConfig,
+  normalizeBoolean,
   normalizeLocalSettings,
   buildCurrentLlmRequestConfig,
   createSettingsStore,

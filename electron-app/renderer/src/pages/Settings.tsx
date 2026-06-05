@@ -1,5 +1,6 @@
 import { Box, Typography } from '@mui/material'
 import { pageSx, pageTitleSx } from '../uiTokens'
+import ApplicationBehaviorSettingsSection from './settings/ApplicationBehaviorSettingsSection'
 import AsrRuntimeSettingsSection from './settings/AsrRuntimeSettingsSection'
 import AudioSettingsSection from './settings/AudioSettingsSection'
 import LanguageSettingsSection from './settings/LanguageSettingsSection'
@@ -18,7 +19,9 @@ export default function Settings() {
     isLlmEditing,
     isSavingLlm,
     llmSaveMessage,
+    settingsSaveMessage,
     devices,
+    refreshDevices,
     updateSettings,
     updateProvider,
     updateCurrentProvider,
@@ -37,6 +40,12 @@ export default function Settings() {
       <AudioSettingsSection
         settings={settings}
         devices={devices}
+        refreshDevices={refreshDevices}
+        updateSettings={updateSettings}
+      />
+      <ApplicationBehaviorSettingsSection
+        settings={settings}
+        settingsSaveMessage={settingsSaveMessage}
         updateSettings={updateSettings}
       />
       <AsrRuntimeSettingsSection settings={settings} updateSettings={updateSettings} />

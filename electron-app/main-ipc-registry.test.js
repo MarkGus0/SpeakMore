@@ -29,6 +29,7 @@ test('createMainIpcRegistry 只注册一次并按固定顺序分发依赖', () =
   const dialog = { name: 'dialog' };
   const localUser = { name: 'SpeakMore' };
   const emitDictionaryChanged = () => undefined;
+  const emitSettingsChanged = () => undefined;
   const macosPlatformCapabilities = { name: 'macosPlatformCapabilities' };
   const localCompatState = {
     localStores: { 'app-settings': { enabledMuteBackgroundAudio: true } },
@@ -79,6 +80,7 @@ test('createMainIpcRegistry 只注册一次并按固定顺序分发依赖', () =
     reloadVoiceServerConfig: () => undefined,
     dictionaryRepository: { name: 'dictionaryRepository' },
     emitDictionaryChanged,
+    emitSettingsChanged,
     callVoiceFlowBackend: () => undefined,
     checkVoiceServerReady: () => undefined,
     ensureVoiceBackendStarted: () => undefined,
@@ -137,6 +139,7 @@ test('createMainIpcRegistry 只注册一次并按固定顺序分发依赖', () =
   assert.equal(calls[0][1].clipboard, clipboard);
   assert.equal(calls[0][1].getLocalUser(), localUser);
   assert.equal(calls[1][1].getDeviceId(), 'device-1');
+  assert.equal(calls[2][1].emitSettingsChanged, emitSettingsChanged);
   assert.equal(calls[3][1].emitDictionaryChanged, emitDictionaryChanged);
   assert.equal(typeof calls[4][1].ensureVoiceServer, 'function');
   assert.equal(typeof calls[5][1].startVoiceModelDownload, 'function');

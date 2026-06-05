@@ -27,6 +27,8 @@ function createDefaultLocalStores({
       enableShowAppInDock: true,
       historyDurationSeconds: -1,
       enabledMuteBackgroundAudio: true,
+      showFloatingBar: true,
+      hideMainWindowOnClose: true,
       enabledOpusCompression: false,
     },
     'app-storage': {},
@@ -80,6 +82,10 @@ function createLocalCompatState({
 
   function syncLocalSettingsToLegacyStore(settings) {
     localStores['app-settings'].launchAtSystemStartup = settings.launchAtSystemStartup;
+    localStores['app-settings'].enableInteractionSoundEffects = settings.interactionSoundsEnabled !== false;
+    localStores['app-settings'].enabledMuteBackgroundAudio = settings.muteBackgroundAudioDuringRecording !== false;
+    localStores['app-settings'].showFloatingBar = settings.showFloatingBar !== false;
+    localStores['app-settings'].hideMainWindowOnClose = settings.hideMainWindowOnClose !== false;
     localStores['app-settings'].translationTargetLanguage = settings.translationTargetLanguage;
     localStores['app-settings'].selectedMicrophoneDevice = settings.selectedAudioDeviceId === 'default'
       ? null

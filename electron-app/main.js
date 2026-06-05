@@ -79,6 +79,7 @@ const SHORTCUT_DEBUG_ENABLED = ['1', 'true', 'yes', 'on'].includes(
   String(process.env.TYPELESS_SHORTCUT_DEBUG || '').toLowerCase(),
 );
 const IS_MACOS = process.platform === 'darwin';
+const START_HIDDEN = process.argv.includes('--hidden');
 
 if (app.isPackaged) {
   app.setName('SpeakMore');
@@ -178,7 +179,7 @@ const voiceBackendService = createVoiceBackendService({
 });
 
 const audioSessionService = createAudioSessionService({
-  isEnabled: () => localCompatState.localStores['app-settings'].enabledMuteBackgroundAudio !== false,
+  isEnabled: () => readLocalSettings().muteBackgroundAudioDuringRecording !== false,
   getTypelessProcessIds: () => {
     const processIds = new Set([process.pid]);
 
@@ -373,6 +374,13 @@ function emitMeetingNotesChanged(payload = {}) {
   });
 }
 
+function emitSettingsChanged(payload = readLocalSettings()) {
+  sendToMain('settings:changed', {
+    ...payload,
+    changedAt: new Date().toISOString(),
+  });
+}
+
 function sendToFloatingBar(channel, payload) {
   const target = getFloatingBar();
   if (target && !target.isDestroyed()) {
@@ -399,8 +407,8 @@ function handleRightAltEscapeKeydown() {
   return windowManager?.handleEscapeKeydown();
 }
 
-function createMainWindow() {
-  return windowManager?.createMainWindow() || null;
+function createMainWindow(options = {}) {
+  return windowManager?.createMainWindow(options) || null;
 }
 
 function createFloatingBar() {
@@ -468,6 +476,9 @@ windowManager = createWindowManager({
   sendToFloatingBar,
   sendToFloatingPanel,
   getAppIsQuitting: () => appIsQuitting,
+  isFloatingBarEnabled: () => readLocalSettings().showFloatingBar !== false,
+  shouldHideMainWindowOnClose: () => readLocalSettings().hideMainWindowOnClose !== false,
+  requestAppQuit: () => app.quit(),
   processPlatform: process.platform,
 });
 
@@ -486,6 +497,7 @@ const mainIpcRegistry = createMainIpcRegistry({
   dialog,
   emitDictionaryChanged,
   emitMeetingNotesChanged,
+  emitSettingsChanged,
   emitShortcutCommandsChanged,
   ensureVoiceBackendStarted,
   ensureVoiceServer,
@@ -599,7 +611,7 @@ app.whenReady().then(() => {
   registerIpcHandlers();
   if (app.isPackaged) void voiceBackendService.startAndPreloadCachedModel();
   createTray();
-  createMainWindow();
+  createMainWindow({ show: !START_HIDDEN });
   createFloatingBar();
   startRightAltListener();
   shortcutCommandRegistrar.registerAll();
