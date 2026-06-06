@@ -1048,6 +1048,8 @@ test('初始化页下载模型时显示真实百分比进度', async () => {
   assert.match(setupPage, /formatBytes\(modelStatus\?\.total_bytes\)/);
   assert.match(setupPage, /hasFileProgress/);
   assert.match(setupPage, /setup\.modelFilesProgress/);
+  assert.match(setupPage, /setup\.modelFilesProgressHint/);
+  assert.match(i18n, /setup\.modelFilesProgressHint/);
 });
 
 test('P1 设置页与设置 store 统一走主进程 JSON 数据源', async () => {
