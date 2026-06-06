@@ -9,9 +9,9 @@ export type ShortcutLabelSet = {
 export function getShortcutLabelSet(platform = ipcClient.platform()): ShortcutLabelSet {
   if (platform === 'darwin') {
     return {
-      dictation: ['Option'],
-      ask: ['Option', 'Space'],
-      translate: ['Option', 'Shift'],
+      dictation: ['Right Option'],
+      ask: ['Right Option', 'Right Command'],
+      translate: ['Right Option', 'Shift'],
     }
   }
 

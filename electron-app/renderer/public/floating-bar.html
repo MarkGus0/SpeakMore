@@ -84,7 +84,7 @@ body[data-tone="idle"] #hint-text {
 <script src="./lib/three.min.js"></script>
 <script>
 const IS_MACOS = window.ipcRenderer && window.ipcRenderer.platform === 'darwin';
-const IDLE_TEXT = IS_MACOS ? 'Option 录音' : 'Right Alt 录音';
+const IDLE_TEXT = IS_MACOS ? 'Right Option 录音' : 'Right Alt 录音';
 const LONG_PROCESSING_TEXT = '正在努力处理中...';
 const LONG_PROCESSING_DELAY_MS = 3000;
 const hintText = document.getElementById('hint-text');
