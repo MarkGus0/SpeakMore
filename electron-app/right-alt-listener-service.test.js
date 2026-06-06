@@ -70,6 +70,36 @@ test('handleListenerLine 忽略非右侧 Option 协议键', () => {
   assert.deepEqual(handled, [{ key: 'RightAlt', isKeydown: true }]);
 });
 
+test('handleListenerLine 将 RightCommand payload 转交给 relay', () => {
+  const handled = [];
+  const service = createRightAltListenerService({
+    emitKeyboardState: () => undefined,
+    createRelay: () => ({
+      handlePayload: (payload) => handled.push(payload),
+      dispose: () => undefined,
+    }),
+  });
+
+  service.handleListenerLine('{"key":"RightCommand","isKeydown":true}');
+
+  assert.deepEqual(handled, [{ key: 'RightCommand', isKeydown: true }]);
+});
+
+test('handleListenerLine 忽略左 Command 协议键', () => {
+  const handled = [];
+  const service = createRightAltListenerService({
+    emitKeyboardState: () => undefined,
+    createRelay: () => ({
+      handlePayload: (payload) => handled.push(payload),
+      dispose: () => undefined,
+    }),
+  });
+
+  service.handleListenerLine('{"key":"LeftCommand","isKeydown":true}');
+
+  assert.deepEqual(handled, []);
+});
+
 test('macOS Option 监听器只按右 Option keycode 映射 RightAlt', () => {
   const source = fs.readFileSync(path.join(__dirname, 'macos-option-listener.c'), 'utf8');
 
