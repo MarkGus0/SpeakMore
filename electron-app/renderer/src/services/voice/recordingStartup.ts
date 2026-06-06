@@ -25,6 +25,12 @@ export type PreparedRecordingStart = {
   socket: WebSocket
   stream: MediaStream
   transport: RecordingTransport
+  diagnosticTimings?: {
+    readyMs?: number
+    socketMs?: number
+    microphoneMs?: number
+    parametersMs?: number
+  }
 }
 
 type StartAudioParameterInputs = {
@@ -54,6 +60,23 @@ function summarizeSelectedText(text: string) {
   }
 }
 
+function nowMs() {
+  return typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now()
+}
+
+async function measurePromise<T>(
+  timings: Record<string, number>,
+  key: string,
+  promise: Promise<T>,
+): Promise<T> {
+  const startedAt = nowMs()
+  try {
+    return await promise
+  } finally {
+    timings[key] = Math.max(0, Math.round(nowMs() - startedAt))
+  }
+}
+
 function createMeetingModuleStartParameters(meetingOptions: VoiceTask['meetingOptions'] | undefined) {
   const module = meetingOptions?.module || 'new_note'
   return {
@@ -79,17 +102,21 @@ export async function prepareRecordingStart(
   // pendingStream 用来处理“麦克风已打开但其它准备失败”的中间态，防止资源泄漏。
   let pendingStream: MediaStream | null = null
   let shouldStopPendingStream = false
+  const diagnosticTimings: Record<string, number> = {}
+  const parametersStartedAt = nowMs()
 
   try {
     const llm = await getCurrentLlmConfig()
     assertLlmConfigReady(llm)
 
     // 启动前资源可以并行准备，但失败时必须把已经打开的麦克风和连接收掉。
-    const readyPromise = ensureVoiceServerReady()
+    const readyPromise = measurePromise(diagnosticTimings, 'readyMs', ensureVoiceServerReady())
     const transportPromise = Promise.resolve<RecordingTransport>('pcm16')
-    const socketPromise = socketControls.ensureOpenWebSocket()
-    const parameterInputsPromise = prepareStartAudioParameterInputs(task.mode, llm)
-    const streamPromise = (task.mode === 'MeetingNotes'
+    const socketPromise = measurePromise(diagnosticTimings, 'socketMs', socketControls.ensureOpenWebSocket())
+    const parameterInputsPromise = prepareStartAudioParameterInputs(task.mode, llm).finally(() => {
+      diagnosticTimings.parametersMs = Math.max(0, Math.round(nowMs() - parametersStartedAt))
+    })
+    const streamPromise = measurePromise(diagnosticTimings, 'microphoneMs', (task.mode === 'MeetingNotes'
       ? getMeetingAudioStream(task.meetingOptions?.audioSource || 'microphone')
       : getAudioStream()
     ).then((stream) => {
@@ -98,7 +125,7 @@ export async function prepareRecordingStart(
         stopStreamTracks(stream)
       }
       return stream
-    })
+    }))
 
     const [transport, socket, stream, , parameterInputs] = await Promise.all([
       transportPromise,
@@ -115,7 +142,7 @@ export async function prepareRecordingStart(
       ...summarizeSelectedText(task.selectedText),
     })
 
-    return { parameters, socket, stream, transport }
+    return { parameters, socket, stream, transport, diagnosticTimings }
   } catch (error) {
     shouldStopPendingStream = true
     stopStreamTracks(pendingStream)

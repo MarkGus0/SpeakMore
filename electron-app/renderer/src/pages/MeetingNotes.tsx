@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import {
   Box,
   Button,
+  Chip,
   Dialog,
   DialogContent,
   IconButton,
@@ -34,6 +35,7 @@ import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined'
 import StopCircleIcon from '@mui/icons-material/StopCircle'
 import { useI18n, type TranslationKey } from '../i18n'
 import { ipcClient } from '../services/ipc'
+import type { MeetingStructuredItem, MeetingTopicSegment, MeetingTranscriptSegment } from '../services/meetingStructuredResult'
 import {
   createDraftMeetingNote,
   deleteMeetingNote,
@@ -63,6 +65,7 @@ import {
 import {
   adaptivePageSx,
   bodyTextSx,
+  captionTextSx,
   helperTextSx,
   itemTitleSx,
   pageDescriptionSx,
@@ -178,6 +181,33 @@ function splitUsefulLines(text: string) {
     .split(/\r?\n/)
     .map((line) => line.replace(/^#{1,6}\s*/, '').replace(/^[-*]\s*/, '').trim())
     .filter(Boolean)
+}
+
+function structuredItemTexts(items: MeetingStructuredItem[] | undefined) {
+  return (Array.isArray(items) ? items : [])
+    .map((item) => String(item?.text || '').trim())
+    .filter(Boolean)
+}
+
+function structuredTopicTexts(topics: MeetingTopicSegment[] | undefined) {
+  return (Array.isArray(topics) ? topics : [])
+    .map((topic) => {
+      const title = String(topic?.title || '').trim()
+      const summary = String(topic?.summary || '').trim()
+      if (title && summary) return `${title}: ${summary}`
+      return title || summary
+    })
+    .filter(Boolean)
+}
+
+function getTranscriptSegments(segments: MeetingTranscriptSegment[] | undefined) {
+  return (Array.isArray(segments) ? segments : [])
+    .map((segment) => ({
+      index: Math.max(1, Number(segment?.index) || 1),
+      text: String(segment?.text || '').trim(),
+      contentLevel: String(segment?.contentLevel || '').trim(),
+    }))
+    .filter((segment) => segment.text)
 }
 
 function splitLiveText(text: string) {
@@ -503,8 +533,20 @@ export default function MeetingNotes({
   const activeTranscript = activeNote?.transcript || voiceSession.rawText || ''
   const activeTranslation = activeNote?.translationText || voiceSession.translationText || ''
   const liveSegments = voiceSession.mode === 'MeetingNotes' ? voiceSession.meetingLiveSegments || [] : []
+  const activeStructuredResult = activeNote?.structuredResult || null
   const summaryLines = splitUsefulLines(activeNote?.summary || '')
-  const actionLines = summaryLines.filter((line) => /行动|待办|action|todo|负责|deadline|截止/i.test(line))
+  const structuredSummaryLines = splitUsefulLines(activeStructuredResult?.summary || activeNote?.summary || '')
+  const structuredDecisionLines = structuredItemTexts(activeStructuredResult?.decisions)
+  const structuredActionLines = structuredItemTexts(activeStructuredResult?.actionItems)
+  const structuredScheduleLines = structuredItemTexts(activeStructuredResult?.scheduleItems)
+  const structuredRiskLines = structuredItemTexts(activeStructuredResult?.risks)
+  const structuredQuestionLines = structuredItemTexts(activeStructuredResult?.questions)
+  const structuredFollowUpLines = structuredItemTexts(activeStructuredResult?.followUps)
+  const structuredTopicLines = structuredTopicTexts(activeStructuredResult?.topics)
+  const transcriptSegments = getTranscriptSegments(activeStructuredResult?.transcriptSegments)
+  const actionLines = structuredActionLines.length
+    ? structuredActionLines
+    : summaryLines.filter((line) => /行动|待办|action|todo|负责|deadline|截止/i.test(line))
 
   const openLiveSetup = useCallback(() => {
     if (isMeetingVoiceActive) {
@@ -1212,6 +1254,104 @@ export default function MeetingNotes({
     </Box>
   )
 
+  const getAudioSourceLabel = (value: MeetingAudioSource | undefined) => {
+    if (value === 'system') return t('meeting.systemAudio')
+    if (value === 'microphone_system') return t('meeting.micAndSystem')
+    return t('meeting.microphone')
+  }
+
+  const getTargetLanguageLabel = (value: MeetingTranslationTarget | undefined) => {
+    if (!value || value === 'off') return t('meeting.off')
+    return [...MEETING_NOTE_TARGET_LANGUAGES, ...MEETING_LIVE_TARGET_LANGUAGES].find((language) => language.id === value)?.label || value
+  }
+
+  const renderMetaChip = (label: string, value: string | number | undefined) => {
+    const text = String(value || '').trim()
+    if (!text) return null
+    return (
+      <Chip
+        key={`${label}-${text}`}
+        label={`${label}: ${text}`}
+        sx={{ height: 28, borderRadius: '7px', bgcolor: '#f5f7fb', color: '#475569', fontSize: 12, fontWeight: 600 }}
+      />
+    )
+  }
+
+  const renderStructuredSection = (title: string, items: string[], options: { accent?: boolean } = {}) => {
+    const usefulItems = items.map((item) => item.trim()).filter(Boolean)
+    if (!usefulItems.length) return null
+    return (
+      <Box sx={{ border: `1px solid ${BORDER_COLOR}`, borderRadius: '12px', bgcolor: '#fff', p: 1.6, minWidth: 0 }}>
+        <Typography sx={{ ...itemTitleSx, color: options.accent ? BLUE_COLOR : TEXT_COLOR, mb: 1 }}>{title}</Typography>
+        <Box component="ul" sx={{ pl: 2.2, m: 0 }}>
+          {usefulItems.map((item, index) => (
+            <Typography key={`${title}-${index}-${item}`} component="li" sx={{ ...bodyTextSx, color: TEXT_COLOR, mb: index === usefulItems.length - 1 ? 0 : 0.75, wordBreak: 'break-word' }}>
+              {item}
+            </Typography>
+          ))}
+        </Box>
+      </Box>
+    )
+  }
+
+  const renderStructuredNoteTab = () => {
+    const summaryItems = structuredSummaryLines.length ? structuredSummaryLines : (activeTranscript ? [t('meeting.summaryFallback')] : [])
+    return (
+      <Box sx={{ maxWidth: 1180, display: 'flex', flexDirection: 'column', gap: 1.4 }}>
+        <Box>
+          <Typography sx={{ ...pageTitleSx, color: TEXT_COLOR, lineHeight: 1.25, mb: 1.2 }}>
+            {activeTitle}
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 0.8, flexWrap: 'wrap' }}>
+            {renderMetaChip(t('meeting.scenario'), activeStructuredResult?.scenario)}
+            {renderMetaChip(t('meeting.contentLevel'), activeStructuredResult?.contentLevel)}
+            {renderMetaChip(t('meeting.duration'), formatElapsed(activeNote?.durationMs || elapsedMs))}
+            {renderMetaChip(t('meeting.audioSource'), getAudioSourceLabel((activeNote?.audioSource || audioSource) as MeetingAudioSource))}
+            {renderMetaChip(t('meeting.targetLanguage'), getTargetLanguageLabel((activeNote?.targetLanguage || targetLanguage) as MeetingTranslationTarget))}
+          </Box>
+        </Box>
+        <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(360px, 100%), 1fr))', gap: 1.2 }}>
+          {renderStructuredSection(t('meeting.meetingSummary'), summaryItems, { accent: true })}
+          {renderStructuredSection(t('meeting.decisions'), structuredDecisionLines)}
+          {renderStructuredSection(t('meeting.actionItems'), actionLines)}
+          {renderStructuredSection(t('meeting.scheduleItems'), structuredScheduleLines)}
+          {renderStructuredSection(t('meeting.risks'), structuredRiskLines)}
+          {renderStructuredSection(t('meeting.questions'), structuredQuestionLines)}
+          {renderStructuredSection(t('meeting.followUps'), structuredFollowUpLines)}
+          {renderStructuredSection(t('meeting.topicSegments'), structuredTopicLines)}
+        </Box>
+        {!summaryItems.length && !actionLines.length ? (
+          <Typography sx={{ ...bodyTextSx, color: MUTED_COLOR }}>{t('meeting.noSummaryYet')}</Typography>
+        ) : null}
+      </Box>
+    )
+  }
+
+  const renderTranscriptTab = () => {
+    if (transcriptSegments.length) {
+      return (
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.9, maxWidth: 980 }}>
+          {transcriptSegments.map((segment) => (
+            <Box key={`${segment.index}-${segment.text}`} sx={{ bgcolor: PANEL_COLOR, borderRadius: '12px', p: 1.4, border: `1px solid ${BORDER_COLOR}` }}>
+              <Typography sx={{ ...captionTextSx, color: MUTED_COLOR, mb: 0.6 }}>
+                {t('meeting.segment')} {segment.index}{segment.contentLevel ? ` · ${segment.contentLevel}` : ''}
+              </Typography>
+              <Typography sx={{ ...bodyTextSx, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{segment.text}</Typography>
+            </Box>
+          ))}
+          {activeTranslation ? <Typography sx={{ ...bodyTextSx, color: BLUE_COLOR, mt: 1, whiteSpace: 'pre-wrap' }}>{activeTranslation}</Typography> : null}
+        </Box>
+      )
+    }
+
+    return (
+      <Box sx={{ bgcolor: PANEL_COLOR, borderRadius: '14px', p: 2, ...bodyTextSx, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+        {activeTranscript || t('meeting.noTranscriptYet')}
+        {activeTranslation ? <Typography sx={{ ...bodyTextSx, color: BLUE_COLOR, mt: 2, whiteSpace: 'pre-wrap' }}>{activeTranslation}</Typography> : null}
+      </Box>
+    )
+  }
+
   const renderDetailView = () => (
     <Box sx={{ ...pageFrameSx, height: '100%', overflow: 'auto' }}>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
@@ -1241,41 +1381,9 @@ export default function MeetingNotes({
       </Box>
 
       {detailTab === 'note' ? (
-        <Box sx={{ maxWidth: 1120 }}>
-          <Typography sx={{ fontSize: 28, fontWeight: 700, lineHeight: 1.25, color: TEXT_COLOR, mb: 3 }}>
-            {activeTitle}
-          </Typography>
-          <Typography sx={{ ...sectionTitleSx, mb: 1.4 }}>{t('meeting.meetingSummary')}</Typography>
-          {summaryLines.length ? (
-            <Box component="ul" sx={{ pl: 2.6, m: 0, mb: 3 }}>
-              {summaryLines.slice(0, 6).map((line) => (
-                <Typography key={line} component="li" sx={{ ...bodyTextSx, fontSize: 16, mb: 1 }}>{line}</Typography>
-              ))}
-            </Box>
-          ) : (
-            <Typography sx={{ ...bodyTextSx, color: MUTED_COLOR, mb: 3 }}>{t('meeting.noSummaryYet')}</Typography>
-          )}
-          <Typography sx={{ ...sectionTitleSx, mb: 1.4 }}>{t('meeting.keyMetrics')}</Typography>
-          <Box component="ul" sx={{ pl: 2.6, m: 0, mb: 3 }}>
-            <Typography component="li" sx={{ ...bodyTextSx, fontSize: 16, mb: 1 }}>{formatElapsed(activeNote?.durationMs || elapsedMs)}</Typography>
-            <Typography component="li" sx={{ ...bodyTextSx, fontSize: 16, mb: 1 }}>{activeNote?.audioSource || audioSource}</Typography>
-          </Box>
-          {actionLines.length ? (
-            <>
-              <Typography sx={{ ...sectionTitleSx, mb: 1.4 }}>{t('meeting.actionItems')}</Typography>
-              <Box component="ul" sx={{ pl: 2.6, m: 0 }}>
-                {actionLines.map((line) => (
-                  <Typography key={line} component="li" sx={{ ...bodyTextSx, fontSize: 16, mb: 1 }}>{line}</Typography>
-                ))}
-              </Box>
-            </>
-          ) : null}
-        </Box>
+        renderStructuredNoteTab()
       ) : (
-        <Box sx={{ bgcolor: PANEL_COLOR, borderRadius: '14px', p: 2, ...bodyTextSx, fontSize: 16, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-          {activeTranscript || t('meeting.noTranscriptYet')}
-          {activeTranslation ? <Typography sx={{ ...bodyTextSx, color: BLUE_COLOR, fontSize: 16, mt: 2, whiteSpace: 'pre-wrap' }}>{activeTranslation}</Typography> : null}
-        </Box>
+        renderTranscriptTab()
       )}
     </Box>
   )

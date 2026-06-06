@@ -46,6 +46,8 @@ const readMainProcessSurface = () => readProjectFiles([
   '../meeting-note-store.js',
   '../meeting-note-repository.js',
   '../meeting-note-ipc.js',
+  '../voice-diagnostics-repository.js',
+  '../voice-diagnostics-ipc.js',
   '../meeting-detector.js',
   '../settings-ipc.js',
   '../settings-store.js',
@@ -358,6 +360,9 @@ test('主进程注册真实 bundle 首屏所需的 IPC shim', async () => {
     'meeting-note:get',
     'meeting-note:upsert',
     'meeting-note:delete',
+    'voice-diagnostics:list',
+    'voice-diagnostics:save',
+    'voice-diagnostics:clear',
     'focused-context:get-last-focused-info',
     'focused-context:get-selected-text',
     'page:restart-typeless-bar',
@@ -713,7 +718,7 @@ test('WebSocket 录音入口会等待主进程确保语音后端 ready', async (
   assert.match(voiceServer, /VOICE_SERVER_HTTP_BASE_URL/);
   assert.match(voiceServer, /VOICE_SERVER_WS_URL/);
   assert.doesNotMatch(recorderSurface, /ws:\/\/localhost:8000\/ws\/rt_voice_flow/);
-  assert.match(recordingStartup, /const\s+readyPromise\s*=\s*ensureVoiceServerReady\(\)/);
+  assert.match(recordingStartup, /const\s+readyPromise\s*=\s*(?:measurePromise\([^)]*ensureVoiceServerReady\(\)\)|ensureVoiceServerReady\(\))/);
   assert.match(recordingStartup, /Promise\.all\(\[[\s\S]*readyPromise[\s\S]*\]\)/);
 });
 
@@ -1210,6 +1215,8 @@ test('P1 设置页与设置 store 统一走主进程 JSON 数据源', async () =
   const applicationBehaviorSection = await readProjectFile('src/pages/settings/ApplicationBehaviorSettingsSection.tsx');
   const asrRuntimeSection = await readProjectFile('src/pages/settings/AsrRuntimeSettingsSection.tsx');
   const voiceModelSection = await readProjectFile('src/pages/settings/VoiceModelSettingsSection.tsx');
+  const voiceDiagnosticsSection = await readProjectFile('src/pages/settings/VoiceDiagnosticsSettingsSection.tsx');
+  const voiceDiagnosticsStore = await readProjectFile('src/services/voiceDiagnosticsStore.ts');
   const languageSection = await readProjectFile('src/pages/settings/LanguageSettingsSection.tsx');
   const llmSection = await readProjectFile('src/pages/settings/LlmSettingsSection.tsx');
   const shortcutSection = await readProjectFile('src/pages/settings/ShortcutSettingsSection.tsx');
@@ -1220,6 +1227,7 @@ test('P1 设置页与设置 store 统一走主进程 JSON 数据源', async () =
     applicationBehaviorSection,
     asrRuntimeSection,
     voiceModelSection,
+    voiceDiagnosticsSection,
     languageSection,
     llmSection,
     shortcutSection,
@@ -1288,6 +1296,7 @@ test('P1 设置页与设置 store 统一走主进程 JSON 数据源', async () =
   assert.match(settingsPage, /AudioSettingsSection/);
   assert.match(settingsPage, /VoiceModelSettingsSection/);
   assert.match(settingsPage, /ApplicationBehaviorSettingsSection/);
+  assert.match(settingsPage, /VoiceDiagnosticsSettingsSection/);
   assert.match(settingsPage, /AsrRuntimeSettingsSection/);
   assert.match(settingsPage, /LanguageSettingsSection/);
   assert.match(settingsPage, /LlmSettingsSection/);
@@ -1313,6 +1322,14 @@ test('P1 设置页与设置 store 统一走主进程 JSON 数据源', async () =
   assert.match(applicationBehaviorSection, /meetingDetectionEnabled/);
   assert.match(applicationBehaviorSection, /showFloatingBar/);
   assert.match(applicationBehaviorSection, /hideMainWindowOnClose/);
+  assert.match(voiceDiagnosticsStore, /voice-diagnostics:list/);
+  assert.match(voiceDiagnosticsStore, /voice-diagnostics:save/);
+  assert.match(voiceDiagnosticsStore, /voice-diagnostics:clear/);
+  assert.match(voiceDiagnosticsStore, /voice-diagnostics:changed/);
+  assert.match(voiceDiagnosticsSection, /listVoiceDiagnostics/);
+  assert.match(voiceDiagnosticsSection, /clearVoiceDiagnostics/);
+  assert.match(voiceDiagnosticsSection, /settings\.voiceDiagnostics\.privacyHint/);
+  assert.match(settingsSurface, /settings\.voiceDiagnostics\.title/);
   assert.match(asrRuntimeSection, /ipcClient\.platform/);
   assert.match(asrRuntimeSection, /asrDeviceMode/);
   assert.match(asrRuntimeSection, /platform === 'win32'/);

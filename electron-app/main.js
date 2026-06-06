@@ -57,6 +57,7 @@ const { createDictionaryRepository } = require('./dictionary-repository');
 const { createShortcutCommandRepository } = require('./shortcut-command-repository');
 const { createShortcutCommandRegistrar } = require('./shortcut-command-registrar');
 const { createMeetingNoteRepository } = require('./meeting-note-repository');
+const { createVoiceDiagnosticsRepository } = require('./voice-diagnostics-repository');
 const { createTextObserverService } = require('./text-observer-service');
 const { createLocalCompatState } = require('./local-compat-state');
 const { createMainIpcRegistry } = require('./main-ipc-registry');
@@ -82,6 +83,7 @@ const DICTIONARY_FILE_NAME = 'dictionary.json';
 const DICTIONARY_CANDIDATES_FILE_NAME = 'dictionary-candidates.json';
 const SHORTCUT_COMMANDS_FILE_NAME = 'shortcut-commands.json';
 const MEETING_NOTES_FILE_NAME = 'meeting-notes.json';
+const VOICE_DIAGNOSTICS_FILE_NAME = 'voice-diagnostics.json';
 const SHORTCUT_DEBUG_ENABLED = ['1', 'true', 'yes', 'on'].includes(
   String(process.env.TYPELESS_SHORTCUT_DEBUG || '').toLowerCase(),
 );
@@ -243,6 +245,12 @@ const meetingNoteRepository = createMeetingNoteRepository({
   fileName: MEETING_NOTES_FILE_NAME,
 });
 
+const voiceDiagnosticsRepository = createVoiceDiagnosticsRepository({
+  readJsonFile,
+  writeJsonFile,
+  fileName: VOICE_DIAGNOSTICS_FILE_NAME,
+});
+
 function readHistoryItems() {
   return historyRepository.readHistoryItems();
 }
@@ -384,6 +392,13 @@ function emitShortcutCommandsChanged(payload = {}) {
 
 function emitMeetingNotesChanged(payload = {}) {
   sendToMain('meeting-note:changed', {
+    ...payload,
+    changedAt: new Date().toISOString(),
+  });
+}
+
+function emitVoiceDiagnosticsChanged(payload = {}) {
+  sendToMain('voice-diagnostics:changed', {
     ...payload,
     changedAt: new Date().toISOString(),
   });
@@ -591,6 +606,7 @@ const mainIpcRegistry = createMainIpcRegistry({
   emitMeetingNotesChanged,
   emitSettingsChanged,
   emitShortcutCommandsChanged,
+  emitVoiceDiagnosticsChanged,
   ensureVoiceBackendStarted,
   ensureVoiceServer,
   fs,
@@ -648,6 +664,7 @@ const mainIpcRegistry = createMainIpcRegistry({
   spawnProcess: spawn,
   startVoiceModelDownload,
   meetingNoteRepository,
+  voiceDiagnosticsRepository,
   textObservationManager,
   upsertHistoryItem,
   writeHistoryItems,

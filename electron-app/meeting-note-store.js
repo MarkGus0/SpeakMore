@@ -12,6 +12,8 @@ const MEETING_TRANSLATION_TARGETS = new Set([
 ]);
 const MAX_MEETING_TITLE_LENGTH = 120;
 const MAX_MEETING_TEXT_LENGTH = 2_000_000;
+const MAX_STRUCTURED_TEXT_LENGTH = 20000;
+const MAX_STRUCTURED_ITEMS = 200;
 
 function createMeetingNoteId() {
   return `meeting_${typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex')}`;
@@ -23,6 +25,87 @@ function normalizeText(value, maxLength = MAX_MEETING_TEXT_LENGTH) {
 
 function normalizeOptionalString(value, maxLength = 1000) {
   return typeof value === 'string' ? value.trim().slice(0, maxLength) : '';
+}
+
+function normalizeStructuredItem(value = {}) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const source = value;
+  const text = normalizeOptionalString(source.text, MAX_STRUCTURED_TEXT_LENGTH);
+  if (!text) return null;
+  const item = { text };
+  const id = normalizeOptionalString(source.id, 120);
+  const itemSource = normalizeOptionalString(source.source, 240);
+  if (id) item.id = id;
+  if (itemSource) item.source = itemSource;
+  return item;
+}
+
+function normalizeStructuredTopic(value = {}) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const source = value;
+  const title = normalizeOptionalString(source.title, 240);
+  const summary = normalizeOptionalString(source.summary, MAX_STRUCTURED_TEXT_LENGTH);
+  if (!title && !summary) return null;
+  return {
+    ...(normalizeOptionalString(source.id, 120) ? { id: normalizeOptionalString(source.id, 120) } : {}),
+    title,
+    summary,
+    segmentIndexes: Array.isArray(source.segmentIndexes)
+      ? source.segmentIndexes.map((item) => Math.max(0, Number(item) || 0)).filter((item) => item > 0).slice(0, MAX_STRUCTURED_ITEMS)
+      : [],
+  };
+}
+
+function normalizeTranscriptSegment(value = {}) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const source = value;
+  const text = normalizeOptionalString(source.text, MAX_STRUCTURED_TEXT_LENGTH);
+  if (!text) return null;
+  const segment = {
+    index: Math.max(1, Number(source.index) || 1),
+    text,
+  };
+  const contentLevel = normalizeOptionalString(source.contentLevel, 80);
+  if (contentLevel) segment.contentLevel = contentLevel;
+  return segment;
+}
+
+function normalizeStructuredItems(value) {
+  return (Array.isArray(value) ? value : [])
+    .map((item) => normalizeStructuredItem(item))
+    .filter(Boolean)
+    .slice(0, MAX_STRUCTURED_ITEMS);
+}
+
+function normalizeMeetingStructuredResult(value = {}) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const source = value;
+  return {
+    version: Math.max(1, Number(source.version) || 1),
+    scenario: normalizeOptionalString(source.scenario, 240) || 'general_meeting_or_voice_note',
+    scenarios: Array.isArray(source.scenarios)
+      ? source.scenarios.map((item) => normalizeOptionalString(item, 120)).filter(Boolean).slice(0, 20)
+      : [],
+    contentLevel: normalizeOptionalString(source.contentLevel, 80) || 'limited',
+    summary: normalizeOptionalString(source.summary, MAX_STRUCTURED_TEXT_LENGTH),
+    topics: (Array.isArray(source.topics) ? source.topics : [])
+      .map((item) => normalizeStructuredTopic(item))
+      .filter(Boolean)
+      .slice(0, MAX_STRUCTURED_ITEMS),
+    decisions: normalizeStructuredItems(source.decisions),
+    actionItems: normalizeStructuredItems(source.actionItems),
+    scheduleItems: normalizeStructuredItems(source.scheduleItems),
+    risks: normalizeStructuredItems(source.risks),
+    questions: normalizeStructuredItems(source.questions),
+    followUps: normalizeStructuredItems(source.followUps),
+    transcriptSegments: (Array.isArray(source.transcriptSegments) ? source.transcriptSegments : [])
+      .map((item) => normalizeTranscriptSegment(item))
+      .filter(Boolean)
+      .slice(0, MAX_STRUCTURED_ITEMS),
+    source: normalizeOptionalString(source.source, 80) || 'unknown',
+    partialSuccess: source.partialSuccess === true,
+    summaryError: normalizeOptionalString(source.summaryError, 1000),
+  };
 }
 
 function normalizeMeetingNote(value = {}, fallback = {}) {
@@ -40,6 +123,7 @@ function normalizeMeetingNote(value = {}, fallback = {}) {
   const importFile = source.importFile && typeof source.importFile === 'object' && !Array.isArray(source.importFile)
     ? source.importFile
     : base.importFile || null;
+  const structuredResult = normalizeMeetingStructuredResult(source.structuredResult ?? base.structuredResult);
 
   return {
     id: typeof source.id === 'string' && source.id.trim() ? source.id.trim() : base.id || createMeetingNoteId(),
@@ -49,6 +133,7 @@ function normalizeMeetingNote(value = {}, fallback = {}) {
     transcript,
     translationText,
     summary,
+    structuredResult,
     audioSource,
     targetLanguage,
     showOriginal: typeof source.showOriginal === 'boolean' ? source.showOriginal : base.showOriginal !== false,
@@ -98,6 +183,7 @@ module.exports = {
   MEETING_TRANSLATION_TARGETS,
   normalizeMeetingNote,
   normalizeMeetingNotes,
+  normalizeMeetingStructuredResult,
   upsertMeetingNote,
   deleteMeetingNote,
 };

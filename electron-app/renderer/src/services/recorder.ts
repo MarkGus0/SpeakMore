@@ -14,6 +14,7 @@ import type { ShortcutIntent } from './shortcutGuard'
 import { countTextLength, normalizeVoiceError } from './voice/voiceSessionUtils'
 import { createVoiceSocketManager } from './voice/voiceSocket'
 import { createRecordingTransportRuntime } from './voice/recordingTransportRuntime'
+import { createVoiceDiagnosticsRuntime } from './voice/voiceDiagnosticsRuntime'
 import { createVoiceSessionLifecycle } from './voice/voiceSessionLifecycle'
 import { createVoiceSessionStore, type VoiceSessionListener } from './voice/voiceSessionStore'
 import {
@@ -61,6 +62,7 @@ const sessionStore = createVoiceSessionStore({
   },
 })
 const transportRuntime = createRecordingTransportRuntime()
+const diagnosticsRuntime = createVoiceDiagnosticsRuntime()
 const lifecycle = createVoiceSessionLifecycle({
   timeoutMs: TRANSCRIBE_TIMEOUT_MS,
   setTimer: (callback, timeoutMs) => window.setTimeout(callback, timeoutMs),
@@ -247,6 +249,7 @@ async function startRecordingWithTask(initialMode: VoiceMode, resolveTask: () =>
   hideFloatingPanel()
   resetBackgroundAudioRestoreState()
   const audioId = crypto.randomUUID()
+  diagnosticsRuntime.start(audioId, initialMode)
   lifecycle.startSession(audioId)
   setSession({
     ...initialVoiceSession,
@@ -258,14 +261,23 @@ async function startRecordingWithTask(initialMode: VoiceMode, resolveTask: () =>
   try {
     // 快捷键只表达意图，真正的语音模式、选区上下文和结果交付方式在这里解析。
     const task = await resolveTask()
+    diagnosticsRuntime.recordEvent('task_resolved', { status: task.mode })
     if (!isSessionActive(audioId)) return
     activeTask = task
     const currentSession = getVoiceSession()
     if (currentSession.mode !== task.mode) {
       setSession({ ...currentSession, mode: task.mode })
+      diagnosticsRuntime.recordEvent('mode_updated', { status: task.mode })
     }
 
     const prepared = await prepareRecordingStart(task, voiceSocket)
+    diagnosticsRuntime.mergeMetrics({
+      startupMs: prepared.diagnosticTimings
+        ? Math.max(0, ...Object.values(prepared.diagnosticTimings).map((value) => Number(value) || 0))
+        : undefined,
+      ...(prepared.diagnosticTimings || {}),
+    })
+    diagnosticsRuntime.recordEvent('startup_prepared')
     if (!isSessionActive(audioId)) {
       cleanupPreparedStart(prepared, voiceSocket)
       return
@@ -284,9 +296,11 @@ async function startRecordingWithTask(initialMode: VoiceMode, resolveTask: () =>
       audio_context: {},
       parameters: prepared.parameters,
     }))
+    diagnosticsRuntime.recordEvent('start_audio_sent')
 
     transportRuntime.start()
     lifecycle.markRecordingStarted()
+    diagnosticsRuntime.recordEvent('recording_started')
     if (task.mode !== 'MeetingNotes') {
       lifecycle.startRecordingLimitTimers()
     }
@@ -316,6 +330,7 @@ export function stopRecording() {
     setSessionStatus('stopping')
     void playInteractionSound('stop')
     const audioQuality = transportRuntime.getAudioQuality()
+    diagnosticsRuntime.markEndAudio(audioQuality)
     cleanupRecording()
 
     const socket = voiceSocket.getSocket()
@@ -369,6 +384,7 @@ export function cancelRecording() {
     meetingLiveSegments: [],
     paused: false,
   })
+  diagnosticsRuntime.finalize('cancelled', { durationMs })
 }
 
 export function setRecordingPaused(paused: boolean) {
@@ -391,6 +407,7 @@ export function disposeRecorder() {
   transportRuntime.discardRetryAudio()
   void restoreBackgroundAudio()
   voiceSocket.closeWebSocketSilently()
+  diagnosticsRuntime.reset()
   sessionStore.clearListeners()
 }
 
@@ -418,6 +435,7 @@ function failSession(error: VoiceError) {
   setSession({ ...getVoiceSession(), status: 'error', durationMs, error, noticeText: '', retryAudioWavBase64, paused: false })
   transportRuntime.discardRetryAudio()
   lifecycle.resetRecordingStarted()
+  diagnosticsRuntime.finalize('error', { durationMs, error })
 }
 
 async function completeSession(refinedText: string, payload: Record<string, unknown> = {}) {
@@ -447,6 +465,7 @@ async function completeSession(refinedText: string, payload: Record<string, unkn
   setSession(completedSession)
   transportRuntime.discardRetryAudio()
   lifecycle.resetRecordingStarted()
+  diagnosticsRuntime.finalize('completed', { durationMs })
   await restoreBackgroundAudio()
   const task = activeTask
   activeTask = null
@@ -457,6 +476,7 @@ async function completeSession(refinedText: string, payload: Record<string, unkn
 
 function handleRawText(text: string) {
   // 流式转写会多次更新 rawText，最终结果仍以后端完成消息为准。
+  if (text.trim()) diagnosticsRuntime.markFirstMetric('firstTranscriptionMs', 'first_transcription')
   setSession({ ...getVoiceSession(), rawText: text, textLength: countTextLength(text) })
 }
 
@@ -553,6 +573,7 @@ function handleMeetingTranslationPending(payload?: Record<string, unknown>) {
 
   const sourceText = normalizeMeetingLiveSourceText(payload?.source_text)
   if (!sourceText) return
+  diagnosticsRuntime.markFirstMetric('firstTranslationPendingMs', 'first_translation_pending')
   const previousSegments = session.meetingLiveSegments || []
   const targetLanguage = readMeetingLiveTargetLanguage(payload)
   const chunkIndex = readMeetingLiveChunkIndex(payload, previousSegments.length + 1)
@@ -582,6 +603,7 @@ function handleMeetingTranslationPending(payload?: Record<string, unknown>) {
 function handleMeetingTranslation(text: string, payload?: Record<string, unknown>) {
   const value = normalizeMeetingLiveSourceText(text)
   if (!value) return
+  diagnosticsRuntime.markFirstMetric('firstTranslationMs', 'first_translation')
   const session = getVoiceSession()
   if (session.mode !== 'MeetingNotes' || !['connecting', 'recording', 'stopping', 'transcribing'].includes(session.status)) return
   const previousSegments = session.meetingLiveSegments || []
@@ -614,6 +636,7 @@ function handleMeetingTranslation(text: string, payload?: Record<string, unknown
 function handleMeetingTranslationError(detail: string) {
   const session = getVoiceSession()
   if (session.mode !== 'MeetingNotes' || !['connecting', 'recording'].includes(session.status)) return
+  diagnosticsRuntime.recordEvent('meeting_translation_error', { detailCode: detail ? 'translation_error' : 'translation_error_empty' })
   setSession({
     ...session,
     noticeText: detail ? `实时翻译暂时失败：${detail}` : '实时翻译暂时失败，已继续转写',
