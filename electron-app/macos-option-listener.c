@@ -4,13 +4,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-static const int64_t KEY_CODE_SPACE = 49;
 static const int64_t KEY_CODE_ESCAPE = 53;
+static const int64_t KEY_CODE_RIGHT_COMMAND = 54;
+static const int64_t KEY_CODE_LEFT_COMMAND = 55;
 static const int64_t KEY_CODE_RIGHT_OPTION = 61;
 
 static bool option_is_down = false;
 static bool shift_is_down = false;
-static bool space_is_down = false;
+static bool right_command_is_down = false;
 static bool escape_is_down = false;
 
 static void emit_key(const char *key, bool is_keydown) {
@@ -23,6 +24,7 @@ static void handle_flags_changed(CGEventRef event) {
   CGEventFlags flags = CGEventGetFlags(event);
   bool right_option_now = (flags & NX_DEVICERALTKEYMASK) != 0;
   bool shift_now = (flags & kCGEventFlagMaskShift) != 0;
+  bool right_command_now = (flags & NX_DEVICERCMDKEYMASK) != 0;
 
   if (key_code == KEY_CODE_RIGHT_OPTION && right_option_now != option_is_down) {
     option_is_down = right_option_now;
@@ -33,9 +35,9 @@ static void handle_flags_changed(CGEventRef event) {
         shift_is_down = false;
         emit_key("RightShift", false);
       }
-      if (space_is_down) {
-        space_is_down = false;
-        emit_key("Space", false);
+      if (right_command_is_down) {
+        right_command_is_down = false;
+        emit_key("RightCommand", false);
       }
     }
   }
@@ -45,10 +47,25 @@ static void handle_flags_changed(CGEventRef event) {
       shift_is_down = shift_now;
       emit_key("RightShift", shift_now);
     }
-  } else if (shift_is_down) {
-    shift_is_down = false;
-    emit_key("RightShift", false);
+    if (
+      (key_code == KEY_CODE_RIGHT_COMMAND || key_code == KEY_CODE_RIGHT_OPTION)
+      && right_command_now != right_command_is_down
+    ) {
+      right_command_is_down = right_command_now;
+      emit_key("RightCommand", right_command_is_down);
+    }
+  } else {
+    if (shift_is_down) {
+      shift_is_down = false;
+      emit_key("RightShift", false);
+    }
+    if (right_command_is_down) {
+      right_command_is_down = false;
+      emit_key("RightCommand", false);
+    }
   }
+
+  (void)KEY_CODE_LEFT_COMMAND;
 }
 
 static void handle_key_event(CGEventType type, CGEventRef event) {
@@ -64,21 +81,6 @@ static void handle_key_event(CGEventType type, CGEventRef event) {
       escape_is_down = false;
       emit_key("Escape", false);
     }
-    return;
-  }
-
-  if (key_code != KEY_CODE_SPACE || !option_is_down) {
-    return;
-  }
-
-  if (type == kCGEventKeyDown && !space_is_down && !is_repeat) {
-    space_is_down = true;
-    emit_key("Space", true);
-  }
-
-  if (type == kCGEventKeyUp && space_is_down) {
-    space_is_down = false;
-    emit_key("Space", false);
   }
 }
 

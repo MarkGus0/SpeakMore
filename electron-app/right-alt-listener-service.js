@@ -3,7 +3,7 @@ const os = require('os');
 const path = require('path');
 const { createRightAltRelay } = require('./right-alt-relay');
 
-const RELAY_KEYS = new Set(['RightAlt', 'RightShift', 'Space']);
+const RELAY_KEYS = new Set(['RightAlt', 'RightShift', 'Space', 'RightCommand']);
 
 function createRightAltListenerService({
   emitKeyboardState,

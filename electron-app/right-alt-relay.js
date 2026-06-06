@@ -34,6 +34,14 @@ function createKeyboardEventFactory(now) {
       isBlocked: false,
       timestamp: stamp(),
     }),
+    rightCommand: (isKeydown) => ({
+      keyCode: 54,
+      keyName: 'RightCommand',
+      enKeyName: 'RightCommand',
+      isKeydown,
+      isBlocked: false,
+      timestamp: stamp(),
+    }),
   };
 }
 
@@ -85,8 +93,14 @@ function createRightAltRelay({ emitKeyboardState, setTimer, clearTimer, now = Da
     restoreStateTimer = null;
   }
 
+  function eventForReleasedPayload(payload) {
+    if (payload.key === 'RightShift') return events.rightShift(false);
+    if (payload.key === 'Space') return events.space(false);
+    return events.rightCommand(false);
+  }
+
   function handlePayload(payload) {
-    if (!payload || (payload.key !== 'RightAlt' && payload.key !== 'RightShift' && payload.key !== 'Space')) return;
+    if (!payload || (payload.key !== 'RightAlt' && payload.key !== 'RightShift' && payload.key !== 'Space' && payload.key !== 'RightCommand')) return;
 
     if (payload.isKeydown) {
       if (payload.key !== 'RightAlt' && !keyboardStateByName.has('RightAlt')) return;
@@ -97,6 +111,7 @@ function createRightAltRelay({ emitKeyboardState, setTimer, clearTimer, now = Da
       if (payload.key === 'RightAlt') keyboardStateByName.set('RightAlt', events.rightAltDown());
       if (payload.key === 'RightShift') keyboardStateByName.set('RightShift', events.rightShift(true));
       if (payload.key === 'Space') keyboardStateByName.set('Space', events.space(true));
+      if (payload.key === 'RightCommand') keyboardStateByName.set('RightCommand', events.rightCommand(true));
 
       emit(Array.from(keyboardStateByName.values()));
       return;
@@ -106,7 +121,7 @@ function createRightAltRelay({ emitKeyboardState, setTimer, clearTimer, now = Da
       clearPendingEmptyEmission();
       clearPendingRestoreEmission();
       keyboardStateByName.clear();
-      emit([events.rightAltUp(), events.rightShift(false), events.space(false)]);
+      emit([events.rightAltUp(), events.rightShift(false), events.space(false), events.rightCommand(false)]);
       scheduleClearToEmpty();
       return;
     }
@@ -116,7 +131,7 @@ function createRightAltRelay({ emitKeyboardState, setTimer, clearTimer, now = Da
     clearPendingEmptyEmission();
     clearPendingRestoreEmission();
     keyboardStateByName.delete(payload.key);
-    emit([payload.key === 'RightShift' ? events.rightShift(false) : events.space(false)]);
+    emit([eventForReleasedPayload(payload)]);
     scheduleRestoreActiveState();
   }
 

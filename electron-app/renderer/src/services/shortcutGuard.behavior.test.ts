@@ -34,11 +34,21 @@ const rightAltAndRightShiftDown = [
   { keyName: 'RightAlt', isKeydown: true },
   { keyName: 'RightShift', isKeydown: true },
 ]
+const rightAltAndRightCommandDown = [
+  { keyName: 'RightAlt', isKeydown: true },
+  { keyName: 'RightCommand', isKeydown: true },
+]
 const rightShiftUp = [{ keyName: 'RightShift', isKeydown: false }]
 const spaceUp = [{ keyName: 'Space', isKeydown: false }]
+const rightCommandUp = [{ keyName: 'RightCommand', isKeydown: false }]
 const rightAltSpaceAndRightShiftDown = [
   { keyName: 'RightAlt', isKeydown: true },
   { keyName: 'Space', isKeydown: true },
+  { keyName: 'RightShift', isKeydown: true },
+]
+const rightAltRightCommandAndRightShiftDown = [
+  { keyName: 'RightAlt', isKeydown: true },
+  { keyName: 'RightCommand', isKeydown: true },
   { keyName: 'RightShift', isKeydown: true },
 ]
 
@@ -83,6 +93,14 @@ test('RightAlt + Space 在释放边沿触发自由提问意图', () => {
   assert.deepEqual(released.action, { type: 'toggle-recording', intent: 'AskShortcut' })
 })
 
+test('RightAlt + RightCommand 在释放边沿触发自由提问意图', () => {
+  installTimerWindow()
+  const pressed = reduceShortcutGuard(createInitialShortcutGuardState(), rightAltAndRightCommandDown, { voiceStatus: 'idle' }, () => {})
+  const released = reduceShortcutGuard(pressed.state, rightAltUp, { voiceStatus: 'idle' }, () => {})
+
+  assert.deepEqual(released.action, { type: 'toggle-recording', intent: 'AskShortcut' })
+})
+
 test('RightAlt + RightShift 在释放边沿触发翻译意图', () => {
   installTimerWindow()
   const pressed = reduceShortcutGuard(createInitialShortcutGuardState(), rightAltAndRightShiftDown, { voiceStatus: 'idle' }, () => {})
@@ -115,9 +133,29 @@ test('RightAlt + Space 先释放 Space 时，直到 RightAlt 释放才触发自�
   assert.deepEqual(rightAltReleased.action, { type: 'toggle-recording', intent: 'AskShortcut' })
 })
 
+test('RightAlt + RightCommand 先释放 RightCommand 时，直到 RightAlt 释放才触发自由提问意图', () => {
+  installTimerWindow()
+  const rightAltPressed = reduceShortcutGuard(createInitialShortcutGuardState(), rightAltDown, { voiceStatus: 'idle' }, () => {})
+  const comboPressed = reduceShortcutGuard(rightAltPressed.state, rightAltAndRightCommandDown, { voiceStatus: 'idle' }, () => {})
+  const commandReleased = reduceShortcutGuard(comboPressed.state, rightCommandUp, { voiceStatus: 'idle' }, () => {})
+  const rightAltRestored = reduceShortcutGuard(commandReleased.state, rightAltDown, { voiceStatus: 'idle' }, () => {})
+  const rightAltReleased = reduceShortcutGuard(rightAltRestored.state, rightAltUp, { voiceStatus: 'idle' }, () => {})
+
+  assert.deepEqual(commandReleased.action, { type: 'none' })
+  assert.deepEqual(rightAltReleased.action, { type: 'toggle-recording', intent: 'AskShortcut' })
+})
+
 test('Space 和 RightShift 同时存在时优先翻译意图，避免 Space 抢占', () => {
   installTimerWindow()
   const pressed = reduceShortcutGuard(createInitialShortcutGuardState(), rightAltSpaceAndRightShiftDown, { voiceStatus: 'idle' }, () => {})
+  const released = reduceShortcutGuard(pressed.state, rightAltUp, { voiceStatus: 'idle' }, () => {})
+
+  assert.deepEqual(released.action, { type: 'toggle-recording', intent: 'TranslateShortcut' })
+})
+
+test('RightCommand 和 RightShift 同时存在时优先翻译意图', () => {
+  installTimerWindow()
+  const pressed = reduceShortcutGuard(createInitialShortcutGuardState(), rightAltRightCommandAndRightShiftDown, { voiceStatus: 'idle' }, () => {})
   const released = reduceShortcutGuard(pressed.state, rightAltUp, { voiceStatus: 'idle' }, () => {})
 
   assert.deepEqual(released.action, { type: 'toggle-recording', intent: 'TranslateShortcut' })

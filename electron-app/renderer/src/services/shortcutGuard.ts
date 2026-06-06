@@ -56,7 +56,7 @@ function resetPressCycle(state: ShortcutGuardState): ShortcutGuardState {
 
 function resolveIntent(keys: KeyboardLike[]): ShortcutIntent {
   if (keys.some((key) => key.keyName === 'RightShift' && key.isKeydown)) return 'TranslateShortcut'
-  if (keys.some((key) => key.keyName === 'Space' && key.isKeydown)) return 'AskShortcut'
+  if (keys.some((key) => (key.keyName === 'Space' || key.keyName === 'RightCommand') && key.isKeydown)) return 'AskShortcut'
   return 'DictateShortcut'
 }
 

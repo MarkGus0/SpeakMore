@@ -10,14 +10,14 @@ test('getShortcutLabelSet 在 Windows 平台展示 Right Alt 系列快捷键', (
   })
 })
 
-test('getShortcutLabelSet 在 macOS 平台展示 Option 系列快捷键', () => {
+test('getShortcutLabelSet 在 macOS 平台展示右 Option 系列快捷键', () => {
   assert.deepEqual(getShortcutLabelSet('darwin'), {
-    dictation: ['Option'],
-    ask: ['Option', 'Space'],
-    translate: ['Option', 'Shift'],
+    dictation: ['Right Option'],
+    ask: ['Right Option', 'Right Command'],
+    translate: ['Right Option', 'Shift'],
   })
 })
 
 test('formatShortcut 使用统一加号格式', () => {
-  assert.equal(formatShortcut(['Option', 'Space']), 'Option + Space')
+  assert.equal(formatShortcut(['Right Option', 'Right Command']), 'Right Option + Right Command')
 })
