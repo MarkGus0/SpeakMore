@@ -23,13 +23,13 @@ import { selectRecentDashboardResults } from '../services/recentDashboardResults
 import { useI18n } from '../i18n'
 import HistoryResultsPanel from './dashboard/HistoryResultsPanel'
 import {
+  adaptivePageSx,
   captionTextSx,
   cardSx,
   helperTextSx,
   itemTitleSx,
   metricValueSx,
   pageDescriptionSx,
-  pageSx,
   pageTitleSx,
   subtlePanelSx,
 } from '../uiTokens'
@@ -125,7 +125,7 @@ export default function Dashboard() {
   }, [])
 
   return (
-    <Box sx={{ ...pageSx, maxWidth: 980, display: 'flex', flexDirection: 'column', gap: 3 }}>
+    <Box sx={{ ...adaptivePageSx, display: 'flex', flexDirection: 'column', gap: { xs: 2, lg: 2.5 } }}>
       <Box>
         <Typography sx={pageTitleSx}>{t('dashboard.title')}</Typography>
         <Typography component="div" sx={{ ...pageDescriptionSx, color: '#5d5d5d', mt: 0.5, display: 'flex', alignItems: 'center', flexWrap: 'wrap', rowGap: 0.75 }}>
@@ -151,7 +151,16 @@ export default function Dashboard() {
         </Typography>
       </Box>
 
-      <Box sx={{ ...subtlePanelSx, p: 2, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
+      <Box
+        sx={{
+          ...subtlePanelSx,
+          p: { xs: 1.5, md: 2 },
+          display: 'grid',
+          gridTemplateColumns: { xs: '1fr', lg: 'minmax(280px, 0.9fr) minmax(0, 1.35fr)' },
+          gap: { xs: 1.5, md: 2 },
+          alignItems: 'stretch',
+        }}
+      >
         <Box sx={{ ...cardSx, p: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Box sx={{ minWidth: 0, flex: 1, pr: 2 }}>
             <Typography sx={{ ...helperTextSx, color: 'text.secondary' }}>{t('dashboard.personalization.label')}</Typography>
@@ -174,7 +183,7 @@ export default function Dashboard() {
             </Box>
           </Box>
         </Box>
-        <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(132px, 1fr))', gap: { xs: 1, md: 1.5 } }}>
           {[
             { label: t('dashboard.stats.totalDuration'), value: formatDurationMinutes(stats.totalDurationMs) },
             { label: t('dashboard.stats.totalTextLength'), value: String(stats.totalTextLength) },

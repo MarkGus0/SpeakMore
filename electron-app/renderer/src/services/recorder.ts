@@ -5,6 +5,7 @@
  */
 import { ipcClient } from './ipc'
 import { playInteractionSound } from './interactionSounds'
+import { normalizeMeetingStructuredResult } from './meetingStructuredResult'
 import { loadSettings } from './settingsStore'
 import { muteBackgroundAudio, resetBackgroundAudioRestoreState, restoreBackgroundAudio } from './voice/backgroundAudio'
 import { cleanupPreparedStart, prepareRecordingStart } from './voice/recordingStartup'
@@ -153,6 +154,25 @@ export type MeetingRecordingOptions = {
   targetLanguage: MeetingTranslationTarget
   showOriginal: boolean
   showTranslation: boolean
+  module?: 'new_note' | 'live_translation'
+}
+
+function createMeetingModuleParameters(options: MeetingRecordingOptions) {
+  const module = options.module || 'new_note'
+  return {
+    meeting_audio_source: options.audioSource,
+    meeting_translation_target_language: options.targetLanguage,
+    show_original: options.showOriginal !== false,
+    show_translation: options.showTranslation !== false,
+    meeting_module: module,
+    meeting_realtime_commit_policy: 'sentence_or_phrase_group',
+    meeting_realtime_profile: module === 'live_translation' ? 'frontier_simulst' : 'frontier_live_note',
+    meeting_notes_quality_profile: 'frontier_minutes',
+    meeting_notes_pipeline: 'extractive_then_synthesize',
+    meeting_capture_profile: module === 'live_translation' ? 'live_translation' : 'live_note',
+    meeting_scenario_coverage: 'meeting,class,interview,customer_call,project_sync,training,retrospective,brainstorm,task_plan,field_notes',
+    meeting_output_depth: module === 'live_translation' ? 'bilingual_realtime_plus_final_minutes' : 'comprehensive_minutes',
+  }
 }
 
 export async function toggleMeetingNotesRecording(options?: MeetingRecordingOptions) {
@@ -186,12 +206,7 @@ export function updateMeetingNotesRecordingOptions(options: MeetingRecordingOpti
   socket.send(JSON.stringify({
     type: 'set_mode_config',
     mode: 'meeting_notes',
-    parameters: {
-      meeting_audio_source: options.audioSource,
-      meeting_translation_target_language: options.targetLanguage,
-      show_original: options.showOriginal !== false,
-      show_translation: options.showTranslation !== false,
-    },
+    parameters: createMeetingModuleParameters(options),
   }))
   return true
 }
@@ -413,12 +428,14 @@ async function completeSession(refinedText: string, payload: Record<string, unkn
   const durationMs = lifecycle.getDurationMs()
   const resultText = refinedText || currentSession.rawText
   const translationText = typeof payload.translation_text === 'string' ? payload.translation_text : currentSession.translationText
+  const meetingStructuredResult = normalizeMeetingStructuredResult(payload.meeting_structured) || currentSession.meetingStructuredResult
   const textLength = countTextLength(resultText)
   const completedSession = {
     ...currentSession,
     status: 'completed' as const,
     refinedText: resultText,
     translationText,
+    meetingStructuredResult,
     meetingLiveSegments: [],
     durationMs,
     textLength,

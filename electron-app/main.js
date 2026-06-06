@@ -64,6 +64,7 @@ const { createMacosPlatformCapabilities } = require('./macos-platform-capabiliti
 const { createAutoLearningDebugLogger } = require('./auto-learning-debug-logger');
 const { createVoiceBackendService } = require('./voice-backend-service');
 const { createMeetingDetectorService } = require('./meeting-detector');
+const meetingDetectionNotificationI18n = require('../shared/meeting-detection-notification-i18n.json');
 
 let quitAfterBackgroundAudioRestore = false;
 let appIsQuitting = false;
@@ -495,8 +496,19 @@ function handleVoiceStateFromRenderer(payload = {}) {
 }
 
 function handleMeetingDetected(payload = {}) {
+  const settings = readLocalSettings();
+  const language = typeof settings.preferredLanguage === 'string' ? settings.preferredLanguage : DEFAULT_LANGUAGE;
+  const labels = meetingDetectionNotificationI18n[language]
+    || meetingDetectionNotificationI18n[DEFAULT_LANGUAGE]
+    || meetingDetectionNotificationI18n['en-US']
+    || {};
+  const notificationPayload = {
+    ...payload,
+    language,
+    labels,
+  };
   sendToMain('meeting-detector:detected', payload);
-  windowManager.showMeetingDetectionNotification(payload);
+  windowManager.showMeetingDetectionNotification(notificationPayload);
 }
 
 function handleMeetingDetectorStartRecording(payload = {}) {

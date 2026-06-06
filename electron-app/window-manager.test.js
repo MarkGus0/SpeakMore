@@ -2,7 +2,11 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const EventEmitter = require('node:events');
 const path = require('node:path');
-const { createWindowManager, FLOATING_BAR_COMPLETED_HIDE_DELAY_MS } = require('./window-manager');
+const {
+  createWindowManager,
+  FLOATING_BAR_COMPLETED_HIDE_DELAY_MS,
+  resolveMeetingDetectionSize,
+} = require('./window-manager');
 const {
   isActiveVoiceState,
   isErrorVoiceState,
@@ -183,8 +187,8 @@ test('createWindowManager 创建主窗口并在关闭时隐藏', () => {
     path,
     baseDir: 'C:\\repo\\SpeakMore\\electron-app',
     preloadPath: () => 'C:\\repo\\SpeakMore\\electron-app\\preload.js',
-    iconPath: () => 'C:\\repo\\SpeakMore\\release-artifacts\\assets\\tray-placeholder.png',
-    trayIconPath: () => 'C:\\repo\\SpeakMore\\release-artifacts\\assets\\tray-placeholder.png',
+    iconPath: () => 'C:\\repo\\SpeakMore\\electron-app\\assets\\tray-placeholder.png',
+    trayIconPath: () => 'C:\\repo\\SpeakMore\\electron-app\\assets\\tray-placeholder.png',
     resolveBottomCenterBounds: () => ({ x: 100, y: 200, width: 220, height: 224 }),
     isActiveVoiceState,
     isErrorVoiceState,
@@ -294,8 +298,8 @@ test('createWindowManager 创建悬浮条、悬浮面板和托盘', () => {
     path,
     baseDir: 'C:\\repo\\SpeakMore\\electron-app',
     preloadPath: () => 'C:\\repo\\SpeakMore\\electron-app\\preload.js',
-    iconPath: () => 'C:\\repo\\SpeakMore\\release-artifacts\\assets\\tray-placeholder.png',
-    trayIconPath: () => 'C:\\repo\\SpeakMore\\release-artifacts\\assets\\tray-placeholder.png',
+    iconPath: () => 'C:\\repo\\SpeakMore\\electron-app\\assets\\tray-placeholder.png',
+    trayIconPath: () => 'C:\\repo\\SpeakMore\\electron-app\\assets\\tray-placeholder.png',
     resolveBottomCenterBounds: (_, windowSize) => ({ x: 11, y: 22, width: windowSize.width, height: windowSize.height }),
     isActiveVoiceState,
     isErrorVoiceState,
@@ -327,12 +331,64 @@ test('createWindowManager 创建悬浮条、悬浮面板和托盘', () => {
   assert.deepEqual(floatingBar.visibleOnAllWorkspacesArgs[1], { visibleOnFullScreen: true, skipTransformProcessType: true });
   assert.deepEqual(floatingBar.fullScreenable, false);
   assert.equal(tray.tooltip, 'SpeakMore');
-  assert.deepEqual(nativeImageCalls, ['C:\\repo\\SpeakMore\\release-artifacts\\assets\\tray-placeholder.png']);
+  assert.deepEqual(nativeImageCalls, ['C:\\repo\\SpeakMore\\electron-app\\assets\\tray-placeholder.png']);
   assert.deepEqual(tray.menu[0].label, '打开主窗口');
   assert.deepEqual(tray.menu[1].label, '退出');
 
   tray.emit('click');
   assert.equal(manager.getMainWindow().shown, true);
+});
+
+test('createWindowManager 托盘首选图标为空时使用主图标兜底', () => {
+  const BrowserWindow = createFakeBrowserWindowClass();
+  const Tray = createFakeTrayClass();
+  const nativeImageCalls = [];
+  const manager = createWindowManager({
+    app: { quit: () => undefined },
+    BrowserWindow,
+    Tray,
+    Menu: { buildFromTemplate: (template) => template },
+    nativeImage: {
+      createFromPath: (filePath) => {
+        nativeImageCalls.push(filePath);
+        const empty = filePath.includes('missing');
+        return {
+          filePath,
+          isEmpty: () => empty,
+          resize: ({ width, height }) => ({ filePath, width, height, empty }),
+        };
+      },
+    },
+    session: { fromPartition: (partition) => ({ partition }) },
+    screen: {
+      getCursorScreenPoint: () => ({ x: 0, y: 0 }),
+      getDisplayNearestPoint: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }),
+      getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }),
+    },
+    path,
+    baseDir: 'C:\\repo\\SpeakMore\\electron-app',
+    preloadPath: () => 'C:\\repo\\SpeakMore\\electron-app\\preload.js',
+    iconPath: () => 'C:\\repo\\SpeakMore\\electron-app\\assets\\tray-placeholder.png',
+    trayIconPath: () => 'C:\\repo\\SpeakMore\\missing\\tray-placeholder.png',
+    resolveBottomCenterBounds: (_, windowSize) => ({ x: 11, y: 22, width: windowSize.width, height: windowSize.height }),
+    isActiveVoiceState,
+    isErrorVoiceState,
+    isTerminalVoiceState,
+    shouldShowShortcutHint,
+    sendToMain: () => undefined,
+    sendToFloatingBar: () => undefined,
+    sendToFloatingPanel: () => undefined,
+    getAppIsQuitting: () => false,
+  });
+
+  const tray = manager.createTray();
+
+  assert.deepEqual(nativeImageCalls, [
+    'C:\\repo\\SpeakMore\\missing\\tray-placeholder.png',
+    'C:\\repo\\SpeakMore\\electron-app\\assets\\tray-placeholder.png',
+  ]);
+  assert.equal(tray.image.filePath, 'C:\\repo\\SpeakMore\\electron-app\\assets\\tray-placeholder.png');
+  assert.equal(tray.image.empty, false);
 });
 
 test('createWindowManager shows meeting detection notification and hides after timeout', () => {
@@ -365,6 +421,10 @@ test('createWindowManager shows meeting detection notification and hides after t
   const notification = manager.getMeetingDetectionWindow();
 
   assert.equal(notification.loadFilePath, path.join('C:\\repo\\SpeakMore\\electron-app', 'renderer', 'dist', 'meeting-detection.html'));
+  assert.equal(notification.options.width, 461);
+  assert.equal(notification.options.height, 99);
+  assert.equal(notification.options.x, 1449);
+  assert.equal(notification.options.y, 10);
   assert.equal(notification.showInactiveCallCount, 1);
   assert.equal(notification.focused, false);
   assert.deepEqual(notification.ignoreMouseEvents, { flag: false, options: undefined });
@@ -381,6 +441,13 @@ test('createWindowManager shows meeting detection notification and hides after t
     channel: 'meeting-detector:detected',
     payload: { visible: false },
   });
+});
+
+test('meeting detection notification size adapts to common PC work areas', () => {
+  assert.deepEqual(resolveMeetingDetectionSize({ width: 1366 }), { width: 360, height: 82 });
+  assert.deepEqual(resolveMeetingDetectionSize({ width: 1600 }), { width: 384, height: 86 });
+  assert.deepEqual(resolveMeetingDetectionSize({ width: 1920 }), { width: 461, height: 99 });
+  assert.deepEqual(resolveMeetingDetectionSize({ width: 2560 }), { width: 480, height: 102 });
 });
 
 test('显示悬浮窗口时使用非激活显示，避免抢占外部输入焦点', () => {

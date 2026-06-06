@@ -192,6 +192,11 @@ class RefinerPromptTest(unittest.TestCase):
                     "output_language": "en",
                     "realtime_sentence_translation": True,
                     "realtime_context_sentences": ["上一句只作为上下文。"],
+                    "realtime_context_pairs": [{"source": "上一句", "translation": "Previous sentence"}],
+                    "realtime_max_tokens": 144,
+                    "meeting_module": "live_translation",
+                    "meeting_realtime_profile": "frontier_simulst",
+                    "meeting_scenario_coverage": "meeting,class,interview,customer_call,training",
                 },
             ))
 
@@ -199,13 +204,18 @@ class RefinerPromptTest(unittest.TestCase):
         call = fake_client.chat.completions.calls[0]
         system_prompt = call["messages"][0]["content"]
         user_message = call["messages"][1]["content"]
-        self.assertIn("fast live meeting interpreter", system_prompt)
-        self.assertIn("Do not repeat previous sentences", system_prompt)
+        self.assertIn("low-latency simultaneous meeting interpreter", system_prompt)
+        self.assertIn("Never re-translate or repeat historical sentences", system_prompt)
         self.assertIn("Previous sentences for context only", user_message)
-        self.assertIn("Current sentence to translate", user_message)
+        self.assertIn("Realtime profile: frontier_simulst", user_message)
+        self.assertIn("Module: live_translation", user_message)
+        self.assertIn("Scenario coverage: meeting,class,interview,customer_call,training", user_message)
+        self.assertIn("Previous source/translation pairs for context only", user_message)
+        self.assertIn("Previous sentence", user_message)
+        self.assertIn("Current committed sentence or phrase group to translate", user_message)
         self.assertIn("今天先讨论预算。", user_message)
         self.assertEqual(call["temperature"], 0.0)
-        self.assertEqual(call["max_tokens"], 128)
+        self.assertEqual(call["max_tokens"], 144)
 
     def test_translation_target_language_accepts_prompt_name_alias(self):
         message = refiner.build_refiner_user_message(
@@ -349,8 +359,101 @@ class RefinerPromptTest(unittest.TestCase):
             mode="meeting_notes",
         )
 
-        self.assertIn("meeting notes assistant", SYSTEM_PROMPTS["meeting_notes"])
-        self.assertEqual(message, "Meeting transcript:\nAlice will send the report tomorrow.")
+        self.assertIn("frontier meeting intelligence assistant", SYSTEM_PROMPTS["meeting_notes"])
+        self.assertIn("Extract facts first", SYSTEM_PROMPTS["meeting_notes"])
+        self.assertIn("Supported scenarios", SYSTEM_PROMPTS["meeting_notes"])
+        self.assertIn("Customer calls", SYSTEM_PROMPTS["meeting_notes"])
+        self.assertIn("limited-content note instead of refusing", message)
+        self.assertIn("Meeting transcript:\nAlice will send the report tomorrow.", message)
+
+    def test_frontier_meeting_notes_user_message_injects_profiles_and_signals(self):
+        fake_client = FakeClient()
+
+        with patch("refiner._get_client", return_value=fake_client):
+            result = asyncio.run(refiner.refine_text(
+                raw_text="明天下午三点见王总，Alice 负责发送预算更新，如果排期延期需要提前确认风险。",
+                mode="meeting_notes",
+                context={"import_source": "meeting_media"},
+                parameters={
+                    "meeting_notes_quality_profile": "frontier_minutes",
+                    "meeting_notes_pipeline": "extractive_then_synthesize",
+                    "meeting_module": "import_file",
+                    "meeting_capture_profile": "imported_media",
+                    "import_processing_profile": "frontier_import",
+                    "meeting_scenario_coverage": "meeting,class,customer_call,project_sync,task_plan",
+                    "meeting_output_depth": "comprehensive_minutes_with_transcript_fallback",
+                },
+            ))
+
+        self.assertEqual(result, "translated text")
+        call = fake_client.chat.completions.calls[0]
+        user_message = call["messages"][1]["content"]
+        self.assertIn("Module: import_file", user_message)
+        self.assertIn("Quality profile: frontier_minutes", user_message)
+        self.assertIn("Pipeline: extractive_then_synthesize", user_message)
+        self.assertIn("Capture profile: imported_media", user_message)
+        self.assertIn("Scenario coverage: meeting,class,customer_call,project_sync,task_plan", user_message)
+        self.assertIn("Output depth: comprehensive_minutes_with_transcript_fallback", user_message)
+        self.assertIn("Import processing: frontier imported media analysis", user_message)
+        self.assertIn("Detected signals:", user_message)
+        self.assertIn("action_items", user_message)
+        self.assertIn("schedule_or_arrangements", user_message)
+        self.assertIn("risks_or_blockers", user_message)
+        self.assertIn("Detected scenarios:", user_message)
+        self.assertIn("customer_call", user_message)
+        self.assertIn("task_plan", user_message)
+        self.assertIn("Meeting transcript:\n明天下午三点见王总", user_message)
+        self.assertEqual(call["temperature"], 0.2)
+        self.assertEqual(call["max_tokens"], 4096)
+
+    def test_meeting_chunk_summary_prompt_has_chunk_boundary(self):
+        fake_client = FakeClient()
+
+        with patch("refiner._get_client", return_value=fake_client):
+            result = asyncio.run(refiner.refine_text(
+                raw_text="Chunk transcript with Alice action item.",
+                mode="meeting_notes",
+                parameters={
+                    "meeting_notes_quality_profile": "frontier_minutes",
+                    "meeting_chunk_summary": True,
+                    "meeting_chunk_index": 2,
+                    "meeting_chunk_count": 5,
+                },
+            ))
+
+        self.assertEqual(result, "translated text")
+        call = fake_client.chat.completions.calls[0]
+        user_message = call["messages"][1]["content"]
+        self.assertIn("Chunk task: summarize imported media chunk 2 of 5.", user_message)
+        self.assertIn("Do not pretend this chunk is the whole meeting.", user_message)
+        self.assertIn("Imported media chunk transcript:\nChunk transcript with Alice action item.", user_message)
+        self.assertEqual(call["temperature"], 0.1)
+        self.assertEqual(call["max_tokens"], 2048)
+
+    def test_meeting_chunk_merge_prompt_has_merge_boundary(self):
+        fake_client = FakeClient()
+
+        with patch("refiner._get_client", return_value=fake_client):
+            result = asyncio.run(refiner.refine_text(
+                raw_text="Chunk 1:\nAlice sends report.\n\nChunk 2:\nBudget risk.",
+                mode="meeting_notes",
+                parameters={
+                    "meeting_notes_quality_profile": "frontier_minutes",
+                    "meeting_chunk_merge": True,
+                    "meeting_chunk_count": 2,
+                    "meeting_original_transcript_excerpt": "original transcript excerpt",
+                },
+            ))
+
+        self.assertEqual(result, "translated text")
+        call = fake_client.chat.completions.calls[0]
+        user_message = call["messages"][1]["content"]
+        self.assertIn("Chunk merge task: combine 2 chunk summaries into one final meeting note.", user_message)
+        self.assertIn("Remove duplicate points across chunks", user_message)
+        self.assertIn("Original transcript excerpt for style and terminology only:\noriginal transcript excerpt", user_message)
+        self.assertIn("Chunk summaries to merge:\nChunk 1:", user_message)
+        self.assertEqual(call["temperature"], 0.15)
+        self.assertEqual(call["max_tokens"], 4096)
 
 
 if __name__ == "__main__":

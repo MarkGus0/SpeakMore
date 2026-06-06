@@ -13,6 +13,25 @@ export const pageSx = {
   p: 3,
 }
 
+export const adaptivePageSx = {
+  ...pageSx,
+  p: { xs: 2, md: 2.5, xl: 3 },
+  width: '100%',
+  maxWidth: 'none',
+  minHeight: '100%',
+  boxSizing: 'border-box',
+}
+
+export const adaptiveTwoColumnGridSx = {
+  display: 'grid',
+  gridTemplateColumns: { xs: '1fr', lg: 'repeat(2, minmax(0, 1fr))' },
+}
+
+export const adaptiveAutoGridSx = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(min(420px, 100%), 1fr))',
+}
+
 export const pageTitleSx = {
   fontSize: 24,
   fontWeight: 500,

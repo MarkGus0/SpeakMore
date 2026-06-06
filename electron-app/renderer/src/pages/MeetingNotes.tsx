@@ -61,11 +61,11 @@ import {
   type TranslationTargetLanguageConfig,
 } from '../services/settingsStore'
 import {
+  adaptivePageSx,
   bodyTextSx,
   helperTextSx,
   itemTitleSx,
   pageDescriptionSx,
-  pageSx,
   pageTitleSx,
   sectionTitleSx,
 } from '../uiTokens'
@@ -107,7 +107,7 @@ const DANGER_COLOR = '#e2524d'
 const WAVEFORM_BAR_SHAPE = [0.34, 0.58, 0.82, 0.64, 1, 0.7, 0.9, 0.56, 0.38]
 
 const pageFrameSx = {
-  ...pageSx,
+  ...adaptivePageSx,
   p: { xs: 2, md: 2.25 },
   width: '100%',
   maxWidth: 'none',
@@ -577,6 +577,7 @@ export default function MeetingNotes({
           transcript: session.rawText,
           translationText: session.translationText,
           summary: session.refinedText,
+          structuredResult: session.meetingStructuredResult || note.structuredResult || null,
           durationMs: session.durationMs || elapsedMs,
         }
         activeNoteRef.current = nextNote
@@ -604,6 +605,7 @@ export default function MeetingNotes({
           transcript: session.rawText,
           translationText: session.translationText,
           summary: session.refinedText,
+          structuredResult: session.meetingStructuredResult || note.structuredResult || null,
           error: session.error?.message || session.error?.detail || '',
           durationMs: session.durationMs || elapsedMs,
         }
@@ -657,6 +659,7 @@ export default function MeetingNotes({
         targetLanguage: nextTarget,
         showOriginal,
         showTranslation,
+        module: kind === 'live' ? 'live_translation' : 'new_note',
       })
     } catch (error) {
       activeNoteRef.current = null
@@ -708,6 +711,7 @@ export default function MeetingNotes({
       targetLanguage: value,
       showOriginal,
       showTranslation,
+      module: recordingKind === 'live' ? 'live_translation' : 'new_note',
     })
   }
 
@@ -721,6 +725,7 @@ export default function MeetingNotes({
       targetLanguage: value,
       showOriginal,
       showTranslation,
+      module: 'live_translation',
     })
   }
 
@@ -732,6 +737,7 @@ export default function MeetingNotes({
       targetLanguage,
       showOriginal: value,
       showTranslation,
+      module: recordingKind === 'live' ? 'live_translation' : 'new_note',
     })
   }
 
@@ -743,6 +749,7 @@ export default function MeetingNotes({
       targetLanguage,
       showOriginal,
       showTranslation: value,
+      module: recordingKind === 'live' ? 'live_translation' : 'new_note',
     })
   }
 
@@ -848,21 +855,24 @@ export default function MeetingNotes({
 
       setImportItem({ name: file.name, size: file.size, status: 'processing' })
       const result = await importMeetingMediaFile(file)
-      const errorText = result.success ? '' : importErrorText(result.detail, t)
+      const hasUsableTranscript = Boolean(result.transcript.trim())
+      const isUsableResult = result.success || hasUsableTranscript
+      const errorText = result.partialSuccess ? t('meeting.importSummaryFailed') : (result.success ? '' : importErrorText(result.detail, t))
       const nextNote = {
         ...(saved || activeNote || createDraftMeetingNote()),
         title: saved?.title || file.name,
         source: 'import' as const,
-        status: result.success ? 'completed' as const : 'error' as const,
+        status: isUsableResult ? 'completed' as const : 'error' as const,
         transcript: result.transcript,
         translationText: result.translationText,
         summary: result.summary,
+        structuredResult: result.structuredResult,
         error: errorText,
         importFile: { name: file.name, size: file.size, type: file.type },
       }
       const finalNote = await saveMeetingNote(nextNote)
       if (finalNote) setActiveNote(finalNote)
-      setImportItem({ name: file.name, size: file.size, status: result.success ? 'completed' : 'error', error: errorText })
+      setImportItem({ name: file.name, size: file.size, status: isUsableResult ? 'completed' : 'error', error: errorText })
       setMessage(errorText)
       refreshNotes()
     } catch (error) {

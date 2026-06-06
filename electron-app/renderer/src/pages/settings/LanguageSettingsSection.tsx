@@ -20,9 +20,10 @@ type LanguageSettingsSectionProps = {
 }
 
 const rowSx = {
-  display: 'flex',
+  display: 'grid',
   alignItems: 'center',
-  justifyContent: 'space-between',
+  gridTemplateColumns: { xs: '1fr', sm: 'minmax(0, 1fr) auto' },
+  gap: 1.5,
   padding: '12px 0',
   borderBottom: '1px solid rgba(119,119,119,0.08)',
 }
@@ -82,7 +83,7 @@ export default function LanguageSettingsSection({ settings, updateSettings }: La
             setLanguage(preferredLanguage)
             void updateSettings({ ...settings, preferredLanguage })
           }}
-          sx={{ minWidth: 240 }}
+          sx={{ minWidth: { xs: '100%', sm: 240 }, width: { xs: '100%', sm: 'auto' } }}
           MenuProps={interfaceLanguageMenuProps}
         >
           {INTERFACE_LANGUAGES.map((language) => (
@@ -103,7 +104,7 @@ export default function LanguageSettingsSection({ settings, updateSettings }: La
           })}
           renderValue={(value) => getTargetLanguageLabel(String(value))}
           MenuProps={targetLanguageMenuProps}
-          sx={{ minWidth: 240 }}
+          sx={{ minWidth: { xs: '100%', sm: 240 }, width: { xs: '100%', sm: 'auto' } }}
         >
           <ListSubheader
             disableSticky

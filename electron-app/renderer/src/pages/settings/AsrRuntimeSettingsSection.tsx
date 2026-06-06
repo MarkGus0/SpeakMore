@@ -13,9 +13,9 @@ type AsrRuntimeSettingsSectionProps = {
 }
 
 const rowSx = {
-  display: 'flex',
+  display: 'grid',
   alignItems: 'center',
-  justifyContent: 'space-between',
+  gridTemplateColumns: { xs: '1fr', sm: 'minmax(0, 1fr) auto' },
   gap: 2,
   padding: '12px 0',
   borderBottom: '1px solid rgba(119,119,119,0.08)',
@@ -104,6 +104,7 @@ export default function AsrRuntimeSettingsSection({
             if (!mode || mode === settings.asrDeviceMode) return
             void updateSettings({ ...settings, asrDeviceMode: mode })
           }}
+          sx={{ justifySelf: { xs: 'start', sm: 'end' }, flexWrap: 'wrap' }}
         >
           {deviceOptions.map((option) => (
             <ToggleButton key={option.value} value={option.value}>{t(option.labelKey)}</ToggleButton>
@@ -119,7 +120,7 @@ export default function AsrRuntimeSettingsSection({
             </Typography>
           ) : null}
         </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, justifySelf: { xs: 'start', sm: 'end' }, flexWrap: 'wrap' }}>
           <Chip
             size="small"
             label={deviceStatus || t('settings.asrRuntime.unavailable')}

@@ -325,16 +325,24 @@ function createMeetingDetectorService({
     if (isVoiceActive()) return null;
 
     try {
-      const [focusedInfo, visibleWindows, audioResult] = await Promise.all([
+      const [focusedInfoResult, visibleWindowsResult, audioResult] = await Promise.allSettled([
         readFocusedInfo(),
         readVisibleWindows(),
         listActiveAudioSessions(),
       ]);
-      const audioSessions = Array.isArray(audioResult)
-        ? audioResult
-        : Array.isArray(audioResult?.activeSessions)
-          ? audioResult.activeSessions
+      const focusedInfo = focusedInfoResult.status === 'fulfilled' ? focusedInfoResult.value : null;
+      const visibleWindows = visibleWindowsResult.status === 'fulfilled' && Array.isArray(visibleWindowsResult.value)
+        ? visibleWindowsResult.value
+        : [];
+      const rawAudioResult = audioResult.status === 'fulfilled' ? audioResult.value : [];
+      const audioSessions = Array.isArray(rawAudioResult)
+        ? rawAudioResult
+        : Array.isArray(rawAudioResult?.activeSessions)
+          ? rawAudioResult.activeSessions
           : [];
+      for (const result of [focusedInfoResult, visibleWindowsResult, audioResult]) {
+        if (result.status === 'rejected') logger.warn?.('[meeting-detector] signal read failed', result.reason);
+      }
       const detected = detectMeetingCandidate({ focusedInfo, visibleWindows, audioSessions });
       if (!detected || isCoolingDown(detected)) return null;
 

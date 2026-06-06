@@ -34,6 +34,7 @@ export type VoiceTask = {
     targetLanguage: MeetingTranslationTarget
     showOriginal: boolean
     showTranslation: boolean
+    module?: 'new_note' | 'live_translation'
   }
 }
 

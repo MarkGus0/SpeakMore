@@ -1391,6 +1391,8 @@ test('会议检测提醒会打开会议笔记并默认使用麦克风加系统�
   const appShell = await readProjectFile('src/components/AppShell.tsx');
   const meetingNotes = await readProjectFile('src/pages/MeetingNotes.tsx');
   const notification = await readProjectFile('public/meeting-detection.html');
+  const notificationI18n = JSON.parse(await readProjectFile('../../shared/meeting-detection-notification-i18n.json'));
+  const interfaceLanguages = JSON.parse(await readProjectFile('../../shared/interface-languages.json'));
 
   assert.match(main, /createMeetingDetectorService/);
   assert.match(main, /meetingDetectorService\?\.start\(\)/);
@@ -1411,8 +1413,24 @@ test('会议检测提醒会打开会议笔记并默认使用麦克风加系统�
   assert.match(meetingNotes, /targetLanguage:\s*autoStartRequest\?\.targetLanguage\s*\|\|\s*['"]off['"]/);
   assert.match(meetingNotes, /deleteMeetingNote\(saved\.id\)/);
 
-  assert.match(notification, /Meeting Detected/);
-  assert.match(notification, /Start Recording/);
+  assert.deepEqual(Object.keys(notificationI18n), interfaceLanguages.map((language) => language.id));
+  assert.match(main, /meeting-detection-notification-i18n\.json/);
+  assert.match(main, /preferredLanguage/);
+  assert.match(main, /labels/);
+  assert.match(notification, /readLabels/);
+  assert.match(notification, /labels\.title/);
+  assert.match(notification, /labels\.start/);
+  assert.match(notification, /labels\.open/);
+  assert.match(notification, /labels\.close/);
+  assert.match(notification, /clamp\(/);
+  assert.match(notification, /display:\s*flex/);
+  assert.match(notification, /flex:\s*0 0 clamp\(4px, 1vw, 5px\)/);
+  assert.match(notification, /0 12px 28px rgba\(0, 0, 0, 0\.22\)/);
+  assert.doesNotMatch(notification, /minmax\(112px,\s*32%,\s*150px\)/);
+  assert.doesNotMatch(notification, /\.accent\s*\{[\s\S]*?width:\s*100%/);
+  assert.doesNotMatch(notification, /Meeting Detected/);
+  assert.doesNotMatch(notification, /Start Recording/);
+  assert.doesNotMatch(notification, /&amp; open SpeakMore/);
   assert.match(notification, /meeting-detector:start-recording/);
   assert.match(notification, /meeting-detector:dismiss/);
 });
@@ -1631,6 +1649,10 @@ test('主页面一级标题复用设置页的左上基准和字号', async () =>
   assert.match(uiTokens, /export\s+const\s+pageSx\s*=\s*\{/);
   assert.match(uiTokens, /p:\s*3/);
   assert.doesNotMatch(uiTokens, /mx:\s*['"]auto['"]/);
+  assert.match(uiTokens, /export\s+const\s+adaptivePageSx\s*=\s*\{/);
+  assert.match(uiTokens, /maxWidth:\s*['"]none['"]/);
+  assert.match(uiTokens, /export\s+const\s+adaptiveAutoGridSx\s*=\s*\{/);
+  assert.match(uiTokens, /repeat\(auto-fit,\s*minmax\(min\(420px,\s*100%\),\s*1fr\)\)/);
   assert.match(uiTokens, /export\s+const\s+pageTitleSx\s*=\s*\{/);
   assert.match(uiTokens, /fontSize:\s*24/);
   assert.match(uiTokens, /fontWeight:\s*500/);
@@ -1647,10 +1669,29 @@ test('主页面一级标题复用设置页的左上基准和字号', async () =>
 
   for (const pageFile of pageFiles) {
     const page = await readProjectFile(pageFile);
-    assert.match(page, /pageSx/);
+    assert.match(page, /adaptivePageSx/);
     assert.match(page, /pageTitleSx/);
     assert.doesNotMatch(page, /mx:\s*['"]auto['"]/);
   }
+
+  const adaptiveMainPages = [
+    'src/pages/Dashboard.tsx',
+    'src/pages/Dictionary.tsx',
+    'src/pages/Shortcuts.tsx',
+    'src/pages/Settings.tsx',
+  ];
+  for (const pageFile of adaptiveMainPages) {
+    const page = await readProjectFile(pageFile);
+    assert.doesNotMatch(page, /maxWidth:\s*(680|920|980)/);
+  }
+
+  const dashboard = await readProjectFile('src/pages/Dashboard.tsx');
+  const settings = await readProjectFile('src/pages/Settings.tsx');
+  assert.doesNotMatch(dashboard, /gridTemplateColumns:\s*['"]1fr 1fr['"]/);
+  assert.doesNotMatch(settings, /adaptiveAutoGridSx/);
+  assert.match(settings, /const\s+settingsContentSx\s*=\s*\{/);
+  assert.match(settings, /maxWidth:\s*1080/);
+  assert.match(settings, /flexDirection:\s*['"]column['"]/);
 
   const meetingNotes = await readProjectFile('src/pages/MeetingNotes.tsx');
   assert.doesNotMatch(meetingNotes, /fontSize:\s*(30|38|42|58)/);

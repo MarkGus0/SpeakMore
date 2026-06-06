@@ -73,6 +73,29 @@ test('createMeetingDetectorService 在关闭设置或已有录音时不提醒', 
   assert.deepEqual(detectedPayloads, []);
 });
 
+test('createMeetingDetectorService 单个信号源失败时仍用可用信号提醒', async () => {
+  const detectedPayloads = [];
+  const warnings = [];
+  const service = createMeetingDetectorService({
+    readLocalSettings: () => ({ meetingDetectionEnabled: true }),
+    readFocusedInfo: async () => focusedWindow({ processName: 'Zoom', title: 'Zoom Meeting', processId: 41 }),
+    readVisibleWindows: async () => {
+      throw new Error('visible windows timeout');
+    },
+    listActiveAudioSessions: async () => ({ activeSessions: [{ processId: 41, processName: 'Zoom' }] }),
+    onDetected: (payload) => detectedPayloads.push(payload),
+    logger: { warn: (...args) => warnings.push(args) },
+  });
+
+  const detected = await service.pollOnce();
+
+  assert.ok(detected);
+  assert.equal(detected.appName, 'Zoom');
+  assert.equal(detectedPayloads.length, 1);
+  assert.equal(warnings.length, 1);
+  assert.match(String(warnings[0][0]), /signal read failed/);
+});
+
 test('createMeetingDetectorService 命中后会对同一窗口冷却', async () => {
   let currentNow = 1000;
   const detectedPayloads = [];

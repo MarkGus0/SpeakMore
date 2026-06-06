@@ -518,6 +518,84 @@ class WsProtocolContractTest(unittest.TestCase):
         self.assertEqual(translations[0]["V"]["source_text"], "你好你叫什么名字")
         self.assertEqual(translations[0]["V"]["chunk_index"], 1)
 
+    def test_meeting_notes_stable_unpunctuated_clause_commits_with_local_agreement(self):
+        class FakeStreamingSession:
+            def __init__(self):
+                self.outputs = ["we need confirm budget plan", "we need confirm budget plan"]
+
+            def append_pcm16(self, _chunk):
+                return [type("StreamingResult", (), {"text": self.outputs.pop(0)})()]
+
+        websocket = FakeWebSocket([
+            {
+                "type": "websocket.receive",
+                "text": json.dumps({
+                    "type": "start_audio",
+                    "audio_id": "audio-1",
+                    "mode": "meeting_notes",
+                    "audio_context": {},
+                    "parameters": {
+                        "audio_format": {"type": "pcm_s16le", "sample_rate": 16000, "channels": 1},
+                        "meeting_translation_target_language": "en",
+                        "meeting_realtime_profile": "frontier_simulst",
+                    },
+                }),
+            },
+            {"type": "websocket.receive", "bytes": b"\x01\x00"},
+            {"type": "websocket.receive", "bytes": b"\x02\x00"},
+        ])
+
+        with patch("main.MEETING_REALTIME_STABLE_FAST_COMMIT_SECONDS", 0), patch(
+            "main.create_streaming_asr_session",
+            return_value=FakeStreamingSession(),
+        ), patch("main.refine_text", new_callable=AsyncMock) as refine:
+            refine.return_value = "We need to confirm the budget plan."
+            asyncio.run(ws_voice_flow(websocket))
+
+        translations = [message for message in websocket.sent_messages if message["K"] == "meeting_translation"]
+        self.assertEqual(len(translations), 1)
+        self.assertEqual(translations[0]["V"]["source_text"], "we need confirm budget plan")
+        self.assertEqual(translations[0]["V"]["chunk_index"], 1)
+        self.assertEqual(translations[0]["V"]["realtime_profile"], "frontier_simulst")
+        refine.assert_called_once()
+
+    def test_meeting_notes_unfinished_connector_tail_does_not_fragment_translate(self):
+        class FakeStreamingSession:
+            def __init__(self):
+                self.outputs = ["we need to", "we need to"]
+
+            def append_pcm16(self, _chunk):
+                return [type("StreamingResult", (), {"text": self.outputs.pop(0)})()]
+
+        websocket = FakeWebSocket([
+            {
+                "type": "websocket.receive",
+                "text": json.dumps({
+                    "type": "start_audio",
+                    "audio_id": "audio-1",
+                    "mode": "meeting_notes",
+                    "audio_context": {},
+                    "parameters": {
+                        "audio_format": {"type": "pcm_s16le", "sample_rate": 16000, "channels": 1},
+                        "meeting_translation_target_language": "en",
+                    },
+                }),
+            },
+            {"type": "websocket.receive", "bytes": b"\x01\x00"},
+            {"type": "websocket.receive", "bytes": b"\x02\x00"},
+        ])
+
+        with patch("main.MEETING_REALTIME_STABLE_FAST_COMMIT_SECONDS", 0), patch(
+            "main.create_streaming_asr_session",
+            return_value=FakeStreamingSession(),
+        ), patch("main.refine_text", new_callable=AsyncMock) as refine:
+            asyncio.run(ws_voice_flow(websocket))
+
+        message_types = [message["K"] for message in websocket.sent_messages]
+        self.assertNotIn("meeting_translation_pending", message_types)
+        self.assertNotIn("meeting_translation", message_types)
+        refine.assert_not_called()
+
     def test_meeting_notes_short_punctuated_fragments_are_merged_before_translation(self):
         class FakeStreamingSession:
             def __init__(self):
@@ -672,6 +750,9 @@ class WsProtocolContractTest(unittest.TestCase):
         self.assertEqual(completed["V"]["refined_text"], "final notes: 最终干净转写")
         self.assertEqual(completed["V"]["translation_text"], "final translation: 最终干净转写")
 
+        self.assertEqual(completed["V"]["meeting_structured"]["version"], 1)
+        self.assertGreaterEqual(len(completed["V"]["meeting_structured"]["transcriptSegments"]), 1)
+
     def test_streaming_model_end_audio_refines_accumulated_text_without_whole_file_asr(self):
         class FakeStreamingSession:
             def append_pcm16(self, _chunk):
@@ -764,6 +845,42 @@ class WsProtocolContractTest(unittest.TestCase):
                 "audio_quality": audio_quality,
             },
         )
+
+    def test_meeting_notes_streaming_refine_failure_returns_partial_success(self):
+        class FakeStreamingSession:
+            def append_pcm16(self, _chunk):
+                return []
+
+            def finalize(self):
+                return type("StreamingResult", (), {"text": "Alice will send the report tomorrow."})()
+
+        websocket = FakeWebSocket([
+            {
+                "type": "websocket.receive",
+                "text": json.dumps({
+                    "type": "start_audio",
+                    "audio_id": "audio-1",
+                    "mode": "meeting_notes",
+                    "audio_context": {},
+                    "parameters": {"audio_format": {"type": "pcm_s16le", "sample_rate": 16000, "channels": 1}},
+                }),
+            },
+            {"type": "websocket.receive", "bytes": b"\x01\x00\x02\x00"},
+            {"type": "websocket.receive", "text": json.dumps({"type": "end_audio", "audio_id": "audio-1"})},
+        ])
+
+        with patch("main.create_streaming_asr_session", return_value=FakeStreamingSession()), patch(
+            "main.refine_text",
+            side_effect=RuntimeError("llm boom"),
+        ):
+            asyncio.run(ws_voice_flow(websocket))
+
+        completion = next(message for message in websocket.sent_messages if message["K"] == "refine_completed")
+        self.assertEqual(completion["V"]["user_prompt"], "Alice will send the report tomorrow.")
+        self.assertEqual(completion["V"]["partial_success"], True)
+        self.assertEqual(completion["V"]["summary_error"], "llm boom")
+        self.assertNotIn("translation_text", completion["V"])
+        self.assertIn("逐字稿", completion["V"]["refined_text"])
 
     def test_refine_failure_emits_audio_processing_error(self):
         websocket = FakeWebSocket([

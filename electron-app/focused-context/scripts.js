@@ -382,51 +382,29 @@ $callback = [Win32WindowTree+EnumWindowsProc]{
 `;
 
 const VISIBLE_WINDOWS_SCRIPT = `
-Add-Type @"
-using System;
-using System.Text;
-using System.Collections.Generic;
-using System.Runtime.InteropServices;
+$windows = Get-Process |
+  Where-Object {
+    $_.MainWindowHandle -ne 0 -and
+    -not [string]::IsNullOrWhiteSpace($_.MainWindowTitle)
+  } |
+  Select-Object -First 80 @{
+    Name = "hwnd"
+    Expression = { $_.MainWindowHandle.ToInt64().ToString() }
+  }, @{
+    Name = "process_id"
+    Expression = { [int]$_.Id }
+  }, @{
+    Name = "process_name"
+    Expression = { $_.ProcessName }
+  }, @{
+    Name = "window_title"
+    Expression = { $_.MainWindowTitle }
+  }, @{
+    Name = "class_name"
+    Expression = { "" }
+  }
 
-public class Win32VisibleWindows {
-  public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
-  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
-  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
-  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
-  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
-  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, StringBuilder className, int count);
-}
-"@
-
-$windows = New-Object System.Collections.Generic.List[object]
-$callback = [Win32VisibleWindows+EnumWindowsProc]{
-  param($hwnd, $lparam)
-  if (-not [Win32VisibleWindows]::IsWindowVisible($hwnd)) { return $true }
-
-  $titleBuilder = New-Object System.Text.StringBuilder 512
-  [void][Win32VisibleWindows]::GetWindowText($hwnd, $titleBuilder, $titleBuilder.Capacity)
-  $title = $titleBuilder.ToString()
-  if ([string]::IsNullOrWhiteSpace($title)) { return $true }
-
-  $processId = 0
-  [void][Win32VisibleWindows]::GetWindowThreadProcessId($hwnd, [ref]$processId)
-  $process = $null
-  try { $process = Get-Process -Id $processId -ErrorAction Stop } catch {}
-
-  $classBuilder = New-Object System.Text.StringBuilder 256
-  [void][Win32VisibleWindows]::GetClassName($hwnd, $classBuilder, $classBuilder.Capacity)
-
-  [void]$windows.Add([PSCustomObject]@{
-    hwnd = $hwnd.ToInt64().ToString()
-    process_id = [int]$processId
-    process_name = if ($process) { $process.ProcessName } else { "" }
-    window_title = $title
-    class_name = $classBuilder.ToString()
-  })
-  return $true
-}
-[void][Win32VisibleWindows]::EnumWindows($callback, [IntPtr]::Zero)
-@($windows) | Select-Object -First 80 | ConvertTo-Json -Depth 4 -Compress
+@($windows) | ConvertTo-Json -Depth 4 -Compress
 `;
 
 module.exports = {

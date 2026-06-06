@@ -24,9 +24,10 @@ type LlmSettingsSectionProps = {
 }
 
 const rowSx = {
-  display: 'flex',
+  display: 'grid',
   alignItems: 'center',
-  justifyContent: 'space-between',
+  gridTemplateColumns: { xs: '1fr', sm: 'minmax(0, 1fr) minmax(240px, 420px)' },
+  gap: 1.5,
   padding: '12px 0',
   borderBottom: '1px solid rgba(119,119,119,0.08)',
 }
@@ -55,10 +56,10 @@ export default function LlmSettingsSection({
 
   return (
     <>
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 3, mb: 1 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 3, mb: 1, gap: 1, flexWrap: 'wrap' }}>
         <Typography sx={sectionTitle}>{t('settings.llm')}</Typography>
         {isLlmEditing ? (
-          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
             <Button variant="outlined" size="small" onClick={cancelLlmEdit} disabled={isSavingLlm}>{t('settings.cancel')}</Button>
             <Button variant="contained" size="small" onClick={() => void saveLlmSettings()} disabled={isSavingLlm}>{t('settings.save')}</Button>
           </Box>
@@ -78,7 +79,7 @@ export default function LlmSettingsSection({
           value={llmView.providerId}
           onChange={(event) => updateProvider(String(event.target.value))}
           disabled={!isLlmEditing || isSavingLlm}
-          sx={{ minWidth: 240 }}
+          sx={{ width: '100%' }}
         >
           {llmView.providers.map((provider) => (
             <MenuItem key={provider.id} value={provider.id}>{provider.label}</MenuItem>
@@ -96,7 +97,7 @@ export default function LlmSettingsSection({
             value={currentProvider.baseUrl}
             onChange={(event) => updateCurrentProvider((provider) => ({ ...provider, baseUrl: event.target.value }))}
             disabled={!isLlmEditing || isSavingLlm}
-            sx={{ maxWidth: 420 }}
+            sx={{ maxWidth: 420, justifySelf: 'stretch' }}
           />
         </Box>
       ) : null}
@@ -111,7 +112,7 @@ export default function LlmSettingsSection({
           value={currentProvider ? llmView.apiKeys[currentProvider.id] ?? '' : ''}
           onChange={(event) => updateCurrentApiKey(event.target.value)}
           disabled={!isLlmEditing || isSavingLlm}
-          sx={{ maxWidth: 420 }}
+          sx={{ maxWidth: 420, justifySelf: 'stretch' }}
         />
       </Box>
       <Box sx={rowSx}>
@@ -124,7 +125,7 @@ export default function LlmSettingsSection({
           value={currentProvider ? llmView.models[currentProvider.id] ?? currentProvider.defaultModel : ''}
           onChange={(event) => updateCurrentModel(event.target.value)}
           disabled={!isLlmEditing || isSavingLlm}
-          sx={{ maxWidth: 420 }}
+          sx={{ maxWidth: 420, justifySelf: 'stretch' }}
         />
       </Box>
     </>

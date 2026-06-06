@@ -54,6 +54,24 @@ function summarizeSelectedText(text: string) {
   }
 }
 
+function createMeetingModuleStartParameters(meetingOptions: VoiceTask['meetingOptions'] | undefined) {
+  const module = meetingOptions?.module || 'new_note'
+  return {
+    meeting_audio_source: meetingOptions?.audioSource || 'microphone',
+    meeting_translation_target_language: meetingOptions?.targetLanguage || 'off',
+    show_original: meetingOptions?.showOriginal !== false,
+    show_translation: meetingOptions?.showTranslation !== false,
+    meeting_module: module,
+    meeting_realtime_commit_policy: 'sentence_or_phrase_group',
+    meeting_realtime_profile: module === 'live_translation' ? 'frontier_simulst' : 'frontier_live_note',
+    meeting_notes_quality_profile: 'frontier_minutes',
+    meeting_notes_pipeline: 'extractive_then_synthesize',
+    meeting_capture_profile: module === 'live_translation' ? 'live_translation' : 'live_note',
+    meeting_scenario_coverage: 'meeting,class,interview,customer_call,project_sync,training,retrospective,brainstorm,task_plan,field_notes',
+    meeting_output_depth: module === 'live_translation' ? 'bilingual_realtime_plus_final_minutes' : 'comprehensive_minutes',
+  }
+}
+
 export async function prepareRecordingStart(
   task: VoiceTask,
   socketControls: RecordingStartSocketControls,
@@ -174,10 +192,7 @@ export function getStartAudioParameters(
   if (mode === 'MeetingNotes') {
     return {
       ...baseParameters,
-      meeting_audio_source: meetingOptions?.audioSource || 'microphone',
-      meeting_translation_target_language: meetingOptions?.targetLanguage || 'off',
-      show_original: meetingOptions?.showOriginal !== false,
-      show_translation: meetingOptions?.showTranslation !== false,
+      ...createMeetingModuleStartParameters(meetingOptions),
     }
   }
 

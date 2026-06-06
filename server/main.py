@@ -32,7 +32,12 @@ from model_manager import (
     find_cached_model_snapshot,
     get_managed_model_cache_root,
 )
-from refiner import refine_text, reload_refiner_runtime_config, resolve_translation_target_language_id
+from refiner import (
+    detect_meeting_note_scenarios,
+    refine_text,
+    reload_refiner_runtime_config,
+    resolve_translation_target_language_id,
+)
 from runtime_config import (
     get_cors_allowed_origins,
     get_server_host,
@@ -482,6 +487,22 @@ def create_flow_error_payload(detail: str, code: str, raw_text: str = "") -> dic
     }
 
 
+def create_meeting_notes_fallback_summary(raw_text: str, detail: str = "") -> str:
+    if not str(raw_text or "").strip():
+        return ""
+    reason = "会议总结生成失败，可先查看逐字稿。"
+    if detail:
+        reason = f"{reason}\n\n失败原因：{detail}"
+    return (
+        "AI 智能总结\n\n"
+        "当前无法生成完整会议纪要，但已保留原始逐字稿。\n\n"
+        "可用内容\n"
+        "- 请在“转录”中查看完整逐字稿。\n"
+        "- 如果转录内容较少、主题过于碎片化或噪声较大，建议重新录制或导入更完整的会议音频。\n\n"
+        f"{reason}"
+    )
+
+
 def get_meeting_translation_target(parameters: dict | None) -> str:
     if not isinstance(parameters, dict):
         return ""
@@ -498,16 +519,34 @@ def get_meeting_translation_target(parameters: dict | None) -> str:
 
 
 MEETING_REALTIME_TRANSLATION_MIN_CJK_CHARS = 10
-MEETING_REALTIME_TRANSLATION_MIN_OTHER_CHARS = 18
-MEETING_REALTIME_TRANSLATION_SHORT_CJK_CHARS = 4
-MEETING_REALTIME_TRANSLATION_SHORT_OTHER_CHARS = 8
-MEETING_REALTIME_TRANSLATION_IMMEDIATE_CJK_CHARS = 8
-MEETING_REALTIME_TRANSLATION_IMMEDIATE_OTHER_CHARS = 14
-MEETING_REALTIME_TRANSLATION_MAX_WAIT_SECONDS = 1.15
-MEETING_REALTIME_TRANSLATION_SHORT_WAIT_SECONDS = 1.8
+MEETING_REALTIME_TRANSLATION_MIN_OTHER_CHARS = 22
+MEETING_REALTIME_TRANSLATION_SHORT_CJK_CHARS = 5
+MEETING_REALTIME_TRANSLATION_SHORT_OTHER_CHARS = 12
+MEETING_REALTIME_TRANSLATION_IMMEDIATE_CJK_CHARS = 6
+MEETING_REALTIME_TRANSLATION_IMMEDIATE_OTHER_CHARS = 16
+MEETING_REALTIME_TRANSLATION_MAX_WAIT_SECONDS = 0.9
+MEETING_REALTIME_TRANSLATION_SHORT_WAIT_SECONDS = 0.65
 MEETING_REALTIME_TRANSLATION_MAX_CONCURRENCY = 2
+MEETING_REALTIME_TRANSLATION_COMPLETE_CJK_CHARS = 6
+MEETING_REALTIME_TRANSLATION_COMPLETE_OTHER_WORDS = 3
+MEETING_REALTIME_TRANSLATION_FAST_CJK_CHARS = 14
+MEETING_REALTIME_TRANSLATION_FAST_OTHER_WORDS = 8
+MEETING_REALTIME_STABLE_COMMIT_OBSERVATIONS = 2
+MEETING_REALTIME_STABLE_FAST_COMMIT_SECONDS = 0.05
 MEETING_REALTIME_TRANSLATION_ENDINGS = tuple(".!?\n\u3002\uff01\uff1f")
 MEETING_REALTIME_LEADING_SEPARATOR_RE = re.compile(r"^[\s,，、。.!?！？;；:：]+")
+MEETING_REALTIME_CONNECTOR_PREFIX_RE = re.compile(
+    r"^\s*(但|但是|然后|接下来|所以|另外|还有|同时|并且|以及|不过|其次|第二点|第三点|第四点|最后|再一个|还有一个|then\b|and\b|but\b|so\b|also\b|next\b|second\b|third\b|finally\b)",
+    re.IGNORECASE,
+)
+MEETING_REALTIME_UNFINISHED_SUFFIX_RE = re.compile(
+    r"(然后|但是|因为|所以|接下来|另外|还有|以及|并且|如果|假如|关于|针对|先|再|要|需要|会|将|把|让|这个|那个|就是|the|and|but|because|so|if|to|of)$",
+    re.IGNORECASE,
+)
+MEETING_REALTIME_COMPLETE_SIGNAL_RE = re.compile(
+    r"(开始|讨论|确认|决定|安排|需要|可以|完成|发送|更新|负责|处理|推进|预算|排期|会议|项目|客户|同意|认为|计划|待办|总结|明天|今天|接下来|什么|谁|哪里|哪|怎么|是否|吗|名字|时间|地点|start|discuss|confirm|decide|arrange|need|should|will|can|send|update|finish|plan|budget|schedule|meeting|project|client|what|who|where|when|how|whether)",
+    re.IGNORECASE,
+)
 MEETING_REALTIME_FILLER_ONLY = {
     "\u55ef",
     "\u5443",
@@ -557,6 +596,7 @@ def normalize_meeting_realtime_source(value: str) -> str:
     text = re.sub(r"[\u200b\u200c\u200d\ufeff]", "", text)
     text = re.sub(r"([.!?\u3002\uff01\uff1f,，、]){2,}", r"\1", text)
     text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"\s+([.!?\u3002\uff01\uff1f,，、;；:：])", r"\1", text)
     text = re.sub(r"(?<=[\u4e00-\u9fff])\s+(?=[\u4e00-\u9fff])", "", text)
     return text
 
@@ -609,6 +649,14 @@ def split_meeting_realtime_sentences(value: str) -> tuple[list[str], str]:
     return completed, tail
 
 
+def starts_with_meeting_realtime_connector(value: str) -> bool:
+    return bool(MEETING_REALTIME_CONNECTOR_PREFIX_RE.match(normalize_meeting_realtime_source(value)))
+
+
+def ends_with_meeting_realtime_unfinished_suffix(value: str) -> bool:
+    return bool(MEETING_REALTIME_UNFINISHED_SUFFIX_RE.search(normalize_meeting_realtime_source(value)))
+
+
 def join_meeting_realtime_parts(parts: list[str]) -> str:
     return normalize_meeting_realtime_source("".join(parts))
 
@@ -638,26 +686,70 @@ def is_natural_meeting_realtime_sentence(value: str) -> bool:
     )
 
 
+def is_likely_complete_meeting_realtime_clause(value: str) -> bool:
+    text = normalize_meeting_realtime_source(value)
+    if not text or has_meeting_realtime_sentence_ending(text):
+        return False
+    if starts_with_meeting_realtime_connector(text) or ends_with_meeting_realtime_unfinished_suffix(text):
+        return False
+    cjk_count, compare_length = get_meeting_realtime_lengths(text)
+    if cjk_count > 0:
+        return cjk_count >= MEETING_REALTIME_TRANSLATION_COMPLETE_CJK_CHARS and bool(MEETING_REALTIME_COMPLETE_SIGNAL_RE.search(text))
+    words = re.findall(r"[A-Za-z0-9']+", text)
+    return len(words) >= MEETING_REALTIME_TRANSLATION_COMPLETE_OTHER_WORDS and compare_length >= MEETING_REALTIME_TRANSLATION_SHORT_OTHER_CHARS
+
+
 def has_meeting_realtime_pause_commit_length(value: str) -> bool:
     text = normalize_meeting_realtime_source(value)
     if not text:
         return False
     if is_tiny_meeting_realtime_fragment(text):
         return False
+    if ends_with_meeting_realtime_unfinished_suffix(text):
+        return False
     cjk_count, compare_length = get_meeting_realtime_lengths(text)
     if has_meeting_realtime_sentence_ending(text):
         if cjk_count >= MEETING_REALTIME_TRANSLATION_SHORT_CJK_CHARS:
             return True
         return cjk_count == 0 and compare_length >= MEETING_REALTIME_TRANSLATION_SHORT_OTHER_CHARS
+    if is_likely_complete_meeting_realtime_clause(text):
+        return True
     if cjk_count >= MEETING_REALTIME_TRANSLATION_MIN_CJK_CHARS:
         return True
     return cjk_count == 0 and compare_length >= MEETING_REALTIME_TRANSLATION_MIN_OTHER_CHARS
+
+
+def is_force_committable_meeting_realtime_tail(value: str) -> bool:
+    text = normalize_meeting_realtime_source(value)
+    if not text:
+        return False
+    if is_tiny_meeting_realtime_fragment(text) or is_meaningless_meeting_realtime_segment(text):
+        return False
+    if ends_with_meeting_realtime_unfinished_suffix(text):
+        return False
+    if has_meeting_realtime_pause_commit_length(text):
+        return True
+    cjk_count, compare_length = get_meeting_realtime_lengths(text)
+    if has_meeting_realtime_sentence_ending(text):
+        if cjk_count > 0:
+            return cjk_count >= 2
+        return compare_length >= 3
+    if cjk_count > 0:
+        return cjk_count >= 4
+    words = re.findall(r"[A-Za-z0-9']+", text)
+    return len(words) >= 2 and compare_length >= MEETING_REALTIME_TRANSLATION_SHORT_OTHER_CHARS
 
 
 def get_meeting_realtime_pause_wait_seconds(value: str) -> float:
     text = normalize_meeting_realtime_source(value)
     if not has_meeting_realtime_pause_commit_length(text):
         return 0.0
+    cjk_count, _compare_length = get_meeting_realtime_lengths(text)
+    word_count = len(re.findall(r"[A-Za-z0-9']+", text))
+    if cjk_count >= MEETING_REALTIME_TRANSLATION_FAST_CJK_CHARS or word_count >= MEETING_REALTIME_TRANSLATION_FAST_OTHER_WORDS:
+        return 0.45
+    if is_likely_complete_meeting_realtime_clause(text):
+        return 0.55
     if is_natural_meeting_realtime_sentence(text):
         return MEETING_REALTIME_TRANSLATION_MAX_WAIT_SECONDS
     if has_meeting_realtime_sentence_ending(text):
@@ -695,6 +787,321 @@ def find_meeting_realtime_boundary_after_committed(text: str, committed_compare_
 
 def normalize_meeting_realtime_translation_output(value: str) -> str:
     return normalize_meeting_realtime_source(value)
+
+
+def normalize_meeting_transcription_text(value: str, mode: str) -> str:
+    if mode != "meeting_notes":
+        return str(value or "").strip()
+    return normalize_meeting_realtime_source(value)
+
+
+MEETING_STRUCTURED_SCHEMA_VERSION = 1
+MEETING_STRUCTURED_MAX_ITEMS = 12
+MEETING_TRANSCRIPT_SEGMENT_TARGET_CHARS = 220
+MEETING_TOPIC_SEGMENT_TARGET_CHARS = 700
+MEETING_IMPORT_CHUNK_TRIGGER_CHARS = 9000
+MEETING_IMPORT_CHUNK_TARGET_CHARS = 4200
+MEETING_SIGNAL_ACTION_RE = re.compile(
+    r"(待办|行动项|跟进|负责|负责人|处理|推进|完成|发送|更新|确认|不要忘|安排|落实|截止|deadline|action|todo|follow[- ]?up|owner|responsible|send|update|finish|confirm)",
+    re.IGNORECASE,
+)
+MEETING_SIGNAL_DECISION_RE = re.compile(
+    r"(决定|确认|同意|结论|定下来|拍板|通过|不通过|选择|采用|decision|decide|agreed|confirmed|conclusion|approved)",
+    re.IGNORECASE,
+)
+MEETING_SIGNAL_SCHEDULE_RE = re.compile(
+    r"(今天|明天|后天|下周|周一|周二|周三|周四|周五|上午|下午|晚上|\d{1,2}\s*点|日程|行程|会议|见面|拜访|安排|排期|deadline|schedule|tomorrow|today|next week|meeting)",
+    re.IGNORECASE,
+)
+MEETING_SIGNAL_RISK_RE = re.compile(
+    r"(风险|问题|阻塞|卡住|延期|依赖|缺少|担心|不确定|报错|失败|risk|issue|blocker|blocked|delay|dependency|concern|failed)",
+    re.IGNORECASE,
+)
+MEETING_SIGNAL_QUESTION_RE = re.compile(
+    r"(问题|疑问|待确认|是否|为什么|怎么|谁|哪里|什么时候|能不能|可不可以|\?|？|question|open question|whether|why|how|who|where|when)",
+    re.IGNORECASE,
+)
+MEETING_SIGNAL_FOLLOW_UP_RE = re.compile(
+    r"(后续|下一步|接下来|跟进|同步|复盘|回访|再确认|再沟通|follow[- ]?up|next step|sync|review|check back)",
+    re.IGNORECASE,
+)
+
+
+def get_meeting_text_weight(value: str) -> int:
+    text = normalize_meeting_realtime_source(value)
+    return count_cjk_chars(text) + len(re.findall(r"[A-Za-z0-9']+", text))
+
+
+def get_meeting_content_level(value: str) -> str:
+    weight = get_meeting_text_weight(value)
+    if weight < 20:
+        return "limited"
+    if weight < 120:
+        return "short"
+    if weight < 700:
+        return "medium"
+    return "long"
+
+
+def split_meeting_text_units(value: str) -> list[str]:
+    text = normalize_meeting_realtime_source(value)
+    if not text:
+        return []
+
+    units: list[str] = []
+    current: list[str] = []
+    for char in text:
+        current.append(char)
+        if char in MEETING_REALTIME_TRANSLATION_ENDINGS or char in "；;":
+            sentence = normalize_meeting_realtime_source("".join(current))
+            if sentence:
+                units.append(sentence)
+            current = []
+    tail = normalize_meeting_realtime_source("".join(current))
+    if tail:
+        units.append(tail)
+
+    normalized_units: list[str] = []
+    for unit in units:
+        if len(unit) <= MEETING_TRANSCRIPT_SEGMENT_TARGET_CHARS * 2:
+            normalized_units.append(unit)
+            continue
+        for start in range(0, len(unit), MEETING_TRANSCRIPT_SEGMENT_TARGET_CHARS):
+            part = normalize_meeting_realtime_source(unit[start : start + MEETING_TRANSCRIPT_SEGMENT_TARGET_CHARS])
+            if part:
+                normalized_units.append(part)
+    return normalized_units
+
+
+def group_meeting_text_segments(units: list[str], target_chars: int) -> list[str]:
+    segments: list[str] = []
+    current: list[str] = []
+    current_length = 0
+    for unit in units:
+        unit_length = len(unit)
+        if current and current_length + unit_length > target_chars:
+            segment = normalize_meeting_realtime_source(" ".join(current))
+            if segment:
+                segments.append(segment)
+            current = []
+            current_length = 0
+        current.append(unit)
+        current_length += unit_length
+
+    if current:
+        segment = normalize_meeting_realtime_source(" ".join(current))
+        if segment:
+            segments.append(segment)
+    return segments
+
+
+def build_meeting_transcript_segments(raw_text: str) -> list[dict]:
+    segments = split_meeting_text_units(raw_text)
+    return [
+        {
+            "index": index + 1,
+            "text": text,
+            "contentLevel": get_meeting_content_level(text),
+        }
+        for index, text in enumerate(segments)
+    ]
+
+
+def build_meeting_topic_segments(raw_text: str) -> list[dict]:
+    units = split_meeting_text_units(raw_text)
+    topic_texts = group_meeting_text_segments(units, MEETING_TOPIC_SEGMENT_TARGET_CHARS)
+    topics = []
+    for index, text in enumerate(topic_texts):
+        title = text[:36].strip()
+        if len(text) > 36:
+            title = f"{title}..."
+        topics.append({
+            "id": f"topic-{index + 1}",
+            "title": title or f"Topic {index + 1}",
+            "summary": text,
+            "segmentIndexes": [index + 1],
+        })
+    return topics
+
+
+def normalize_meeting_item_compare(value: str) -> str:
+    return re.sub(r"\W+", "", normalize_meeting_realtime_source(value).lower(), flags=re.UNICODE)
+
+
+def extract_meeting_signal_items(units: list[str], pattern: re.Pattern, source: str) -> list[dict]:
+    items: list[dict] = []
+    seen: set[str] = set()
+    for unit in units:
+        text = normalize_meeting_realtime_source(unit)
+        if not text or not pattern.search(text):
+            continue
+        key = normalize_meeting_item_compare(text)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        items.append({
+            "id": f"{source}-{len(items) + 1}",
+            "text": text,
+            "source": source,
+        })
+        if len(items) >= MEETING_STRUCTURED_MAX_ITEMS:
+            break
+    return items
+
+
+def infer_meeting_structured_source(parameters: dict | None, context: dict | None) -> str:
+    values = []
+    if isinstance(parameters, dict):
+        values.extend([
+            parameters.get("import_source"),
+            parameters.get("meeting_module"),
+            parameters.get("meeting_capture_profile"),
+        ])
+    if isinstance(context, dict):
+        values.extend([
+            context.get("import_source"),
+            context.get("meeting_module"),
+            context.get("meeting_capture_profile"),
+        ])
+    joined = " ".join(str(value or "") for value in values).lower()
+    if "import" in joined or "imported_media" in joined:
+        return "import"
+    if "meeting" in joined or "new_note" in joined or "live_translation" in joined:
+        return "recording"
+    return "unknown"
+
+
+def build_meeting_structured_result(
+    raw_text: str,
+    summary: str = "",
+    parameters: dict | None = None,
+    context: dict | None = None,
+    partial_success: bool = False,
+    summary_error: str = "",
+) -> dict:
+    transcript = normalize_meeting_transcription_text(raw_text, "meeting_notes")
+    summary_text = str(summary or "").strip()
+    transcript_units = split_meeting_text_units(transcript)
+    summary_units = [
+        normalize_meeting_realtime_source(line)
+        for line in str(summary_text or "").splitlines()
+        if normalize_meeting_realtime_source(line)
+    ]
+    extraction_units = [*summary_units, *transcript_units]
+    scenarios = detect_meeting_note_scenarios(transcript) or ["general_meeting_or_voice_note"]
+    return {
+        "version": MEETING_STRUCTURED_SCHEMA_VERSION,
+        "scenario": scenarios[0],
+        "scenarios": scenarios,
+        "contentLevel": get_meeting_content_level(transcript),
+        "summary": summary_text,
+        "topics": build_meeting_topic_segments(transcript),
+        "decisions": extract_meeting_signal_items(extraction_units, MEETING_SIGNAL_DECISION_RE, "decision"),
+        "actionItems": extract_meeting_signal_items(extraction_units, MEETING_SIGNAL_ACTION_RE, "action"),
+        "scheduleItems": extract_meeting_signal_items(extraction_units, MEETING_SIGNAL_SCHEDULE_RE, "schedule"),
+        "risks": extract_meeting_signal_items(extraction_units, MEETING_SIGNAL_RISK_RE, "risk"),
+        "questions": extract_meeting_signal_items(extraction_units, MEETING_SIGNAL_QUESTION_RE, "question"),
+        "followUps": extract_meeting_signal_items(extraction_units, MEETING_SIGNAL_FOLLOW_UP_RE, "follow_up"),
+        "transcriptSegments": build_meeting_transcript_segments(transcript),
+        "source": infer_meeting_structured_source(parameters, context),
+        "partialSuccess": bool(partial_success),
+        "summaryError": str(summary_error or ""),
+    }
+
+
+def should_chunk_meeting_import(raw_text: str, parameters: dict | None, context: dict | None) -> bool:
+    normalized_text = normalize_meeting_transcription_text(raw_text, "meeting_notes")
+    if len(normalized_text) < MEETING_IMPORT_CHUNK_TRIGGER_CHARS:
+        return False
+
+    import_markers = []
+    if isinstance(parameters, dict):
+        import_markers.extend([
+            parameters.get("import_source"),
+            parameters.get("import_processing_profile"),
+            parameters.get("meeting_capture_profile"),
+            parameters.get("meeting_module"),
+        ])
+    if isinstance(context, dict):
+        import_markers.extend([
+            context.get("import_source"),
+            context.get("meeting_capture_profile"),
+            context.get("meeting_module"),
+        ])
+    marker_text = " ".join(str(item or "") for item in import_markers).lower()
+    return (
+        "frontier_import" in marker_text
+        or "meeting_media" in marker_text
+        or "imported_media" in marker_text
+        or "import_file" in marker_text
+    )
+
+
+def split_meeting_import_chunks(raw_text: str, target_chars: int = MEETING_IMPORT_CHUNK_TARGET_CHARS) -> list[str]:
+    units = split_meeting_text_units(raw_text)
+    chunks = group_meeting_text_segments(units, target_chars)
+    if chunks:
+        return chunks
+    text = normalize_meeting_transcription_text(raw_text, "meeting_notes")
+    return [text[index : index + target_chars] for index in range(0, len(text), target_chars) if text[index : index + target_chars]]
+
+
+async def refine_meeting_notes_summary(
+    raw_text: str,
+    context: dict | None,
+    parameters: dict | None,
+) -> tuple[str, dict]:
+    params = parameters if isinstance(parameters, dict) else {}
+    if not should_chunk_meeting_import(raw_text, params, context):
+        summary = await refine_text(raw_text=raw_text, mode="meeting_notes", context=context, parameters=params)
+        return summary, {}
+
+    chunks = split_meeting_import_chunks(raw_text)
+    if len(chunks) <= 1:
+        summary = await refine_text(raw_text=raw_text, mode="meeting_notes", context=context, parameters=params)
+        return summary, {}
+
+    chunk_summaries: list[str] = []
+    for index, chunk in enumerate(chunks, start=1):
+        chunk_parameters = {
+            **params,
+            "meeting_chunk_summary": True,
+            "meeting_chunk_index": index,
+            "meeting_chunk_count": len(chunks),
+        }
+        chunk_summary = await refine_text(
+            raw_text=chunk,
+            mode="meeting_notes",
+            context=context,
+            parameters=chunk_parameters,
+        )
+        if str(chunk_summary or "").strip():
+            chunk_summaries.append(f"Chunk {index}:\n{chunk_summary}")
+
+    merged_input = "\n\n".join(chunk_summaries).strip()
+    if not merged_input:
+        raise RuntimeError("meeting import chunk summaries are empty")
+
+    merge_parameters = {
+        **params,
+        "meeting_chunk_merge": True,
+        "meeting_chunk_count": len(chunks),
+        "meeting_original_transcript_excerpt": normalize_meeting_transcription_text(raw_text, "meeting_notes")[:3000],
+    }
+    merge_context = {
+        **(context if isinstance(context, dict) else {}),
+        "chunked_import": True,
+    }
+    summary = await refine_text(
+        raw_text=merged_input,
+        mode="meeting_notes",
+        context=merge_context,
+        parameters=merge_parameters,
+    )
+    return summary, {
+        "meeting_import_chunked": True,
+        "meeting_import_chunk_count": len(chunks),
+    }
 
 
 def is_meaningless_meeting_realtime_segment(value: str) -> bool:
@@ -740,18 +1147,32 @@ def should_flush_meeting_translation_segment(segment: str, last_flush_at: float,
     return now_value - last_flush_at >= MEETING_REALTIME_TRANSLATION_MAX_WAIT_SECONDS
 
 
+def get_realtime_translation_token_budget(value: str) -> int:
+    text = normalize_meeting_realtime_source(value)
+    cjk_count, compare_length = get_meeting_realtime_lengths(text)
+    estimated_units = max(cjk_count, compare_length // 4)
+    if estimated_units <= 12:
+        return 96
+    if estimated_units <= 28:
+        return 144
+    return 220
+
+
 async def translate_realtime_sentence(
     raw_text: str,
     target_language: str,
     context: dict,
     parameters: dict,
     previous_sentences: list[str],
+    previous_context_pairs: list[dict] | None = None,
 ) -> str:
     translation_parameters = {
         **parameters,
         "output_language": target_language,
         "realtime_sentence_translation": True,
         "realtime_context_sentences": previous_sentences[-2:],
+        "realtime_context_pairs": previous_context_pairs[-2:] if isinstance(previous_context_pairs, list) else [],
+        "realtime_max_tokens": get_realtime_translation_token_budget(raw_text),
     }
     translated = await refine_text(
         raw_text=raw_text,
@@ -776,8 +1197,11 @@ class MeetingRealtimeTranslator:
         self.pending_tail_compare_key = ""
         self.pending_tail_observed_at = 0.0
         self.pending_tail_wait_seconds = 0.0
+        self.pending_tail_stable_count = 0
         self.next_sentence_index = 1
         self.translation_queue: list[dict] = []
+        self.translation_cache: dict[tuple[str, str], str] = {}
+        self.translated_context_pairs: list[dict] = []
         self.active_tasks: set[asyncio.Task] = set()
         self.flush_timer_task: asyncio.Task | None = None
         self.closed = False
@@ -795,8 +1219,11 @@ class MeetingRealtimeTranslator:
         self.pending_tail_compare_key = ""
         self.pending_tail_observed_at = 0.0
         self.pending_tail_wait_seconds = 0.0
+        self.pending_tail_stable_count = 0
         self.next_sentence_index = 1
         self.translation_queue = []
+        self.translation_cache = {}
+        self.translated_context_pairs = []
         self.active_tasks = set()
         self.flush_timer_task = None
         self.closed = False
@@ -815,6 +1242,7 @@ class MeetingRealtimeTranslator:
         self.pending_tail_text = ""
         self.pending_tail_compare_key = ""
         self.pending_tail_wait_seconds = 0.0
+        self.pending_tail_stable_count = 0
         self.translation_queue = []
         if cancel_active:
             for task in list(self.active_tasks):
@@ -863,8 +1291,11 @@ class MeetingRealtimeTranslator:
 
         completed_sentences, tail = split_meeting_realtime_sentences(suffix)
         buffered_parts: list[str] = []
-        for sentence in completed_sentences:
+        for index, sentence in enumerate(completed_sentences):
             buffered_parts.append(sentence)
+            next_sentence = completed_sentences[index + 1] if index + 1 < len(completed_sentences) else tail
+            if starts_with_meeting_realtime_connector(next_sentence):
+                continue
             candidate = join_meeting_realtime_parts(buffered_parts)
             if is_natural_meeting_realtime_sentence(candidate):
                 await self._commit_sentence(candidate)
@@ -915,6 +1346,7 @@ class MeetingRealtimeTranslator:
             self.pending_tail_text = ""
             self.pending_tail_compare_key = ""
             self.pending_tail_wait_seconds = 0.0
+            self.pending_tail_stable_count = 0
             self._cancel_flush_timer()
             return
 
@@ -924,16 +1356,28 @@ class MeetingRealtimeTranslator:
             self.pending_tail_text = ""
             self.pending_tail_compare_key = ""
             self.pending_tail_wait_seconds = 0.0
+            self.pending_tail_stable_count = 0
             self._cancel_flush_timer()
             return
 
         if tail_key == self.pending_tail_compare_key:
+            self.pending_tail_stable_count += 1
+            if (
+                self.pending_tail_stable_count >= MEETING_REALTIME_STABLE_COMMIT_OBSERVATIONS
+                and self.pending_tail_wait_seconds > 0
+                and is_likely_complete_meeting_realtime_clause(normalized_tail)
+            ):
+                self._cancel_flush_timer()
+                self.flush_timer_task = asyncio.create_task(
+                    self._flush_pending_after_delay(MEETING_REALTIME_STABLE_FAST_COMMIT_SECONDS)
+                )
             return
 
         self.pending_tail_text = normalized_tail
         self.pending_tail_compare_key = tail_key
         self.pending_tail_observed_at = time.monotonic()
         self.pending_tail_wait_seconds = get_meeting_realtime_pause_wait_seconds(normalized_tail)
+        self.pending_tail_stable_count = 1
         self._cancel_flush_timer()
         if self.pending_tail_wait_seconds > 0:
             self.flush_timer_task = asyncio.create_task(self._flush_pending_after_delay())
@@ -943,13 +1387,13 @@ class MeetingRealtimeTranslator:
             self.flush_timer_task.cancel()
         self.flush_timer_task = None
 
-    async def _flush_pending_after_delay(self) -> None:
+    async def _flush_pending_after_delay(self, wait_override: float | None = None) -> None:
         try:
-            wait_seconds = self.pending_tail_wait_seconds or MEETING_REALTIME_TRANSLATION_MAX_WAIT_SECONDS
+            wait_seconds = wait_override if wait_override is not None else (self.pending_tail_wait_seconds or MEETING_REALTIME_TRANSLATION_MAX_WAIT_SECONDS)
             await asyncio.sleep(wait_seconds)
             if self.closed:
                 return
-            if time.monotonic() - self.pending_tail_observed_at >= wait_seconds:
+            if wait_override is not None or time.monotonic() - self.pending_tail_observed_at >= wait_seconds:
                 await self._commit_pending_tail(force=False)
         except asyncio.CancelledError:
             raise
@@ -961,11 +1405,15 @@ class MeetingRealtimeTranslator:
         tail = self.pending_tail_text
         if not tail:
             return
-        if not force and not has_meeting_realtime_pause_commit_length(tail):
+        if force:
+            if not is_force_committable_meeting_realtime_tail(tail):
+                return
+        elif not has_meeting_realtime_pause_commit_length(tail):
             return
         self.pending_tail_text = ""
         self.pending_tail_compare_key = ""
         self.pending_tail_wait_seconds = 0.0
+        self.pending_tail_stable_count = 0
         self._cancel_flush_timer()
         await self._commit_sentence(tail)
 
@@ -990,6 +1438,7 @@ class MeetingRealtimeTranslator:
         sentence_index = self.next_sentence_index
         self.next_sentence_index += 1
         previous_sentences = self.committed_sentences[-2:]
+        previous_context_pairs = self.translated_context_pairs[-2:]
         self.committed_sentences.append(normalized)
         self.committed_sentence_keys.append(compare_key)
         self.committed_compare_key += compare_key
@@ -1002,6 +1451,7 @@ class MeetingRealtimeTranslator:
             "context": dict(self.context),
             "sentence_index": sentence_index,
             "previous_sentences": previous_sentences,
+            "previous_context_pairs": previous_context_pairs,
         })
         self._start_next_translations()
 
@@ -1016,6 +1466,8 @@ class MeetingRealtimeTranslator:
                 "sentence_index": sentence_index,
                 "stable": False,
                 "committed": True,
+                "commit_policy": "sentence_or_phrase_group",
+                "realtime_profile": self.parameters.get("meeting_realtime_profile") or "frontier_simulst",
             },
         )
 
@@ -1035,17 +1487,30 @@ class MeetingRealtimeTranslator:
         context: dict,
         sentence_index: int,
         previous_sentences: list[str],
+        previous_context_pairs: list[dict],
     ) -> None:
         try:
-            translation_text = await translate_realtime_sentence(
-                raw_text=segment,
-                target_language=target_language,
-                context=context,
-                parameters=parameters,
-                previous_sentences=previous_sentences,
-            )
+            cache_key = (normalize_meeting_realtime_compare(segment), target_language)
+            translation_text = self.translation_cache.get(cache_key, "")
+            if not translation_text:
+                translation_text = await translate_realtime_sentence(
+                    raw_text=segment,
+                    target_language=target_language,
+                    context=context,
+                    parameters=parameters,
+                    previous_sentences=previous_sentences,
+                    previous_context_pairs=previous_context_pairs,
+                )
+                if translation_text:
+                    self.translation_cache[cache_key] = translation_text
             if self.closed or not translation_text:
                 return
+            self.translated_context_pairs.append({
+                "source": segment,
+                "translation": translation_text,
+                "target_language": target_language,
+            })
+            self.translated_context_pairs = self.translated_context_pairs[-6:]
             await send_ws_message(
                 self.websocket,
                 "meeting_translation",
@@ -1059,6 +1524,8 @@ class MeetingRealtimeTranslator:
                     "partial": True,
                     "stable": True,
                     "committed": True,
+                    "commit_policy": "sentence_or_phrase_group",
+                    "realtime_profile": parameters.get("meeting_realtime_profile") or "frontier_simulst",
                 },
             )
         except asyncio.CancelledError:
@@ -1086,18 +1553,33 @@ async def refine_voice_flow_text(
     context: dict | None,
     parameters: dict | None,
 ) -> tuple[str, dict]:
-    refined = await refine_text(
+    if mode != "meeting_notes":
+        refined = await refine_text(
+            raw_text=raw_text,
+            mode=mode,
+            context=context,
+            parameters=parameters,
+        )
+        return refined, {}
+
+    refined, meeting_extra = await refine_meeting_notes_summary(
         raw_text=raw_text,
-        mode=mode,
         context=context,
         parameters=parameters,
     )
-    if mode != "meeting_notes":
-        return refined, {}
-
+    structured_result = build_meeting_structured_result(
+        raw_text=raw_text,
+        summary=refined,
+        parameters=parameters,
+        context=context,
+    )
     target_language = get_meeting_translation_target(parameters)
     if not target_language:
-        return refined, {"translation_text": ""}
+        return refined, {
+            **meeting_extra,
+            "translation_text": "",
+            "meeting_structured": structured_result,
+        }
 
     translation_parameters = {
         **(parameters if isinstance(parameters, dict) else {}),
@@ -1109,7 +1591,11 @@ async def refine_voice_flow_text(
         context=context,
         parameters=translation_parameters,
     )
-    return refined, {"translation_text": translation_text}
+    return refined, {
+        **meeting_extra,
+        "translation_text": translation_text,
+        "meeting_structured": structured_result,
+    }
 
 
 async def handle_voice_flow_request(
@@ -1124,17 +1610,42 @@ async def handle_voice_flow_request(
     try:
         context = normalize_json_object_field(audio_context)
         params = normalize_json_object_field(parameters)
-        raw_text = await transcribe_audio_with_wav_conversion(tmp_path, suffix)
+        raw_text = normalize_meeting_transcription_text(
+            await transcribe_audio_with_wav_conversion(tmp_path, suffix),
+            mode,
+        )
 
         if not raw_text or not raw_text.strip():
             return create_flow_success_payload(refined_text="", raw_text="")
 
-        refined, extra_data = await refine_voice_flow_text(
-            raw_text=raw_text,
-            mode=mode,
-            context=context,
-            parameters=params,
-        )
+        try:
+            refined, extra_data = await refine_voice_flow_text(
+                raw_text=raw_text,
+                mode=mode,
+                context=context,
+                parameters=params,
+            )
+        except Exception as error:
+            if mode == "meeting_notes":
+                fallback_summary = create_meeting_notes_fallback_summary(raw_text, str(error))
+                return create_flow_success_payload(
+                    refined_text=fallback_summary,
+                    raw_text=raw_text,
+                    extra_data={
+                        "partial_success": True,
+                        "summary_error": str(error),
+                        "translation_text": "",
+                        "meeting_structured": build_meeting_structured_result(
+                            raw_text=raw_text,
+                            summary=fallback_summary,
+                            parameters=params,
+                            context=context,
+                            partial_success=True,
+                            summary_error=str(error),
+                        ),
+                    },
+                )
+            raise
 
         return create_flow_success_payload(refined_text=refined, raw_text=raw_text, extra_data=extra_data)
     except HTTPException:
@@ -1204,17 +1715,18 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
 
                     for result in results:
                         streaming_chunk_index += 1
-                        if result.text:
+                        result_text = normalize_meeting_transcription_text(result.text, mode)
+                        if result_text:
                             await send_ws_message(
                                 websocket,
                                 "transcription",
                                 {
-                                    "text": result.text,
+                                    "text": result_text,
                                     "audio_id": audio_id,
                                     "chunk_index": streaming_chunk_index,
                                 },
                             )
-                            await realtime_translator.observe_transcription(result.text, streaming_chunk_index)
+                            await realtime_translator.observe_transcription(result_text, streaming_chunk_index)
                 else:
                     audio_chunks.append(message["bytes"])
                     await websocket.send_json({
@@ -1276,7 +1788,7 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
                     streaming_session = None
                     try:
                         final_result = await asyncio.to_thread(current_streaming_session.finalize)
-                        raw_text = final_result.text
+                        raw_text = normalize_meeting_transcription_text(final_result.text, mode)
                     except Exception as error:
                         await send_ws_error_message(
                             websocket,
@@ -1302,6 +1814,32 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
                                 parameters=parameters,
                             )
                         except Exception as error:
+                            if mode == "meeting_notes":
+                                fallback_summary = create_meeting_notes_fallback_summary(raw_text, str(error))
+                                await send_ws_message(
+                                    websocket,
+                                    get_ws_completion_message_type(mode, parameters),
+                                    {
+                                        "audio_id": audio_id,
+                                        "refined_text": fallback_summary,
+                                        "refine_text": fallback_summary,
+                                        "delivery": "inline",
+                                        "user_prompt": raw_text,
+                                        "web_metadata": None,
+                                        "external_action": None,
+                                        "partial_success": True,
+                                        "summary_error": str(error),
+                                        "meeting_structured": build_meeting_structured_result(
+                                            raw_text=raw_text,
+                                            summary=fallback_summary,
+                                            parameters=parameters,
+                                            context=context,
+                                            partial_success=True,
+                                            summary_error=str(error),
+                                        ),
+                                    },
+                                )
+                                continue
                             await send_ws_error_message(
                                 websocket,
                                 get_ws_refine_error_message_type(mode, parameters),
@@ -1351,7 +1889,10 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
 
                 try:
                     try:
-                        raw_text = await transcribe_audio_with_wav_conversion(tmp_path, suffix)
+                        raw_text = normalize_meeting_transcription_text(
+                            await transcribe_audio_with_wav_conversion(tmp_path, suffix),
+                            mode,
+                        )
                     except Exception as error:
                         await send_ws_error_message(
                             websocket,
@@ -1376,6 +1917,32 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
                                 parameters=parameters,
                             )
                         except Exception as error:
+                            if mode == "meeting_notes":
+                                fallback_summary = create_meeting_notes_fallback_summary(raw_text, str(error))
+                                await send_ws_message(
+                                    websocket,
+                                    get_ws_completion_message_type(mode, parameters),
+                                    {
+                                        "audio_id": audio_id,
+                                        "refined_text": fallback_summary,
+                                        "refine_text": fallback_summary,
+                                        "delivery": "inline",
+                                        "user_prompt": raw_text,
+                                        "web_metadata": None,
+                                        "external_action": None,
+                                        "partial_success": True,
+                                        "summary_error": str(error),
+                                        "meeting_structured": build_meeting_structured_result(
+                                            raw_text=raw_text,
+                                            summary=fallback_summary,
+                                            parameters=parameters,
+                                            context=context,
+                                            partial_success=True,
+                                            summary_error=str(error),
+                                        ),
+                                    },
+                                )
+                                continue
                             await send_ws_error_message(
                                 websocket,
                                 get_ws_refine_error_message_type(mode, parameters),

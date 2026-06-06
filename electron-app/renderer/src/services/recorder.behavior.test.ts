@@ -746,6 +746,110 @@ test('meeting_translation 会保存原文和译文成对实时段落', async () 
   }
 })
 
+test('meeting_notes start and config messages include realtime commit and minutes profile', async () => {
+  const env = createTestEnvironment({
+    audioContextSampleRate: 16000,
+  })
+  let recorder: Awaited<ReturnType<typeof loadRecorderModule>> | null = null
+
+  try {
+    recorder = await loadRecorderModule('meeting-notes-internal-params')
+    await recorder.toggleMeetingNotesRecording({
+      audioSource: 'microphone',
+      targetLanguage: 'en',
+      showOriginal: true,
+      showTranslation: false,
+    })
+
+    const messages = env.sentPayloads
+      .filter((payload): payload is string => typeof payload === 'string')
+      .map((payload) => JSON.parse(payload))
+    const startAudioMessage = messages.find((message) => message.type === 'start_audio')
+
+    assert.deepEqual(startAudioMessage.parameters, withPcm16AudioFormat({
+      llm: testLlmConfig,
+      meeting_audio_source: 'microphone',
+      meeting_translation_target_language: 'en',
+      show_original: true,
+      show_translation: false,
+      meeting_module: 'new_note',
+      meeting_realtime_commit_policy: 'sentence_or_phrase_group',
+      meeting_realtime_profile: 'frontier_live_note',
+      meeting_notes_quality_profile: 'frontier_minutes',
+      meeting_notes_pipeline: 'extractive_then_synthesize',
+      meeting_capture_profile: 'live_note',
+      meeting_scenario_coverage: 'meeting,class,interview,customer_call,project_sync,training,retrospective,brainstorm,task_plan,field_notes',
+      meeting_output_depth: 'comprehensive_minutes',
+    }))
+
+    recorder.updateMeetingNotesRecordingOptions({
+      audioSource: 'microphone',
+      targetLanguage: 'ja',
+      showOriginal: false,
+      showTranslation: true,
+      module: 'new_note',
+    })
+
+    const configMessage = env.sentPayloads
+      .filter((payload): payload is string => typeof payload === 'string')
+      .map((payload) => JSON.parse(payload))
+      .findLast((message) => message.type === 'set_mode_config')
+
+    assert.deepEqual(configMessage, {
+      type: 'set_mode_config',
+      mode: 'meeting_notes',
+      parameters: {
+        meeting_audio_source: 'microphone',
+        meeting_translation_target_language: 'ja',
+        show_original: false,
+        show_translation: true,
+        meeting_module: 'new_note',
+        meeting_realtime_commit_policy: 'sentence_or_phrase_group',
+        meeting_realtime_profile: 'frontier_live_note',
+        meeting_notes_quality_profile: 'frontier_minutes',
+        meeting_notes_pipeline: 'extractive_then_synthesize',
+        meeting_capture_profile: 'live_note',
+        meeting_scenario_coverage: 'meeting,class,interview,customer_call,project_sync,training,retrospective,brainstorm,task_plan,field_notes',
+        meeting_output_depth: 'comprehensive_minutes',
+      },
+    })
+  } finally {
+    recorder?.disposeRecorder()
+    env.restore()
+  }
+})
+
+test('meeting_notes live translation messages use live translation profile', async () => {
+  const env = createTestEnvironment({
+    audioContextSampleRate: 16000,
+  })
+  let recorder: Awaited<ReturnType<typeof loadRecorderModule>> | null = null
+
+  try {
+    recorder = await loadRecorderModule('meeting-notes-live-module-params')
+    await recorder.toggleMeetingNotesRecording({
+      audioSource: 'microphone',
+      targetLanguage: 'en',
+      showOriginal: true,
+      showTranslation: true,
+      module: 'live_translation',
+    })
+
+    const startAudioMessage = env.sentPayloads
+      .filter((payload): payload is string => typeof payload === 'string')
+      .map((payload) => JSON.parse(payload))
+      .find((message) => message.type === 'start_audio')
+
+    assert.equal(startAudioMessage.parameters.meeting_module, 'live_translation')
+    assert.equal(startAudioMessage.parameters.meeting_realtime_profile, 'frontier_simulst')
+    assert.equal(startAudioMessage.parameters.meeting_capture_profile, 'live_translation')
+    assert.equal(startAudioMessage.parameters.meeting_output_depth, 'bilingual_realtime_plus_final_minutes')
+  } finally {
+    recorder?.disposeRecorder()
+    env.restore()
+  }
+})
+
 test('stopRecording 会把音频质量摘要随 end_audio 发送给后端', async () => {
   const env = createTestEnvironment({
     audioContextSampleRate: 16000,
@@ -2098,6 +2202,22 @@ test('meeting_notes 完成后使用最终 payload 翻译并清空实时片段', 
         refine_text: 'final meeting notes',
         user_prompt: 'final transcript',
         translation_text: 'clean final translation',
+        meeting_structured: {
+          version: 1,
+          scenario: 'project_sync',
+          scenarios: ['project_sync'],
+          contentLevel: 'short',
+          summary: 'final meeting notes',
+          topics: [],
+          decisions: [],
+          actionItems: [{ id: 'action-1', text: 'Alice sends report', source: 'action' }],
+          scheduleItems: [],
+          risks: [],
+          questions: [],
+          followUps: [],
+          transcriptSegments: [{ index: 1, text: 'final transcript' }],
+          source: 'recording',
+        },
       },
     })
     await Promise.resolve()
@@ -2108,6 +2228,8 @@ test('meeting_notes 完成后使用最终 payload 翻译并清空实时片段', 
     assert.equal(session.status, 'completed')
     assert.equal(session.refinedText, 'final meeting notes')
     assert.equal(session.translationText, 'clean final translation')
+    assert.equal(session.meetingStructuredResult?.scenario, 'project_sync')
+    assert.equal(session.meetingStructuredResult?.actionItems[0]?.text, 'Alice sends report')
     assert.equal(session.meetingLiveSegments?.length, 0)
   } finally {
     recorder?.disposeRecorder()

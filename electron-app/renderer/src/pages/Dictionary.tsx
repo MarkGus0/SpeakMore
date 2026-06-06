@@ -31,7 +31,7 @@ import {
   type DictionaryEntry,
 } from '../services/dictionaryStore'
 import { useI18n, type TranslationKey } from '../i18n'
-import { bodyTextSx, captionTextSx, itemTitleSx, pageSx, pageTitleSx } from '../uiTokens'
+import { adaptivePageSx, bodyTextSx, captionTextSx, itemTitleSx, pageTitleSx } from '../uiTokens'
 
 const filters = [
   { labelKey: 'dictionary.filterAll', value: 'all' },
@@ -302,14 +302,14 @@ export default function Dictionary() {
   }
 
   return (
-    <Box sx={{ ...pageSx, maxWidth: 920, display: 'flex', flexDirection: 'column', minHeight: '100%', gap: 3 }}>
+    <Box sx={{ ...adaptivePageSx, display: 'flex', flexDirection: 'column', gap: { xs: 2, lg: 2.5 } }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
         <Typography sx={pageTitleSx}>{t('dictionary.title')}</Typography>
         <CloudDoneIcon sx={{ fontSize: 17, color: 'text.secondary', mt: 0.2 }} />
       </Box>
 
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.6, flex: 1, minWidth: 0 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, flexWrap: 'wrap' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.6, flex: '1 1 360px', minWidth: 0, flexWrap: 'wrap' }}>
           {filters.map((item) => (
             <FilterButton
               key={item.value}
@@ -332,6 +332,7 @@ export default function Dictionary() {
               bgcolor: '#111',
               color: '#fff',
               fontWeight: 800,
+              whiteSpace: 'nowrap',
               boxShadow: '0 8px 18px rgba(0,0,0,0.18)',
               '&:hover': { bgcolor: '#111' },
             }}
@@ -393,7 +394,7 @@ export default function Dictionary() {
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
         {visibleCandidates.map((candidate) => (
           <Box key={candidate.id} sx={itemSx}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, justifyContent: 'space-between' }}>
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'minmax(0, 1fr)', sm: 'minmax(0, 1fr) auto' }, alignItems: 'center', gap: 1 }}>
               <Box sx={{ minWidth: 0 }}>
                 <Typography sx={itemTitleSx}>
                   {candidate.wrong} -&gt; {candidate.correct}
@@ -402,7 +403,7 @@ export default function Dictionary() {
                   {t('dictionary.candidate')} · {t('dictionary.seenCount')} {candidate.count} {t('dictionary.times')} · {t('dictionary.lastLearned')} {new Date(candidate.lastSeenAt).toLocaleString(language)}
                 </Typography>
               </Box>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0, justifySelf: { xs: 'start', sm: 'end' } }}>
                 <IconButton size="small" aria-label={t('dictionary.confirmCandidate')} onClick={() => void handlePromoteCandidate(candidate.id)}>
                   <CheckIcon sx={{ fontSize: 18 }} />
                 </IconButton>
@@ -416,7 +417,7 @@ export default function Dictionary() {
 
         {visibleEntries.map((entry) => (
           <Box key={entry.id} sx={itemSx}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, justifyContent: 'space-between' }}>
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'minmax(0, 1fr)', sm: 'minmax(0, 1fr) auto' }, alignItems: 'center', gap: 1 }}>
               <Box sx={{ minWidth: 0 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
                   <Typography sx={itemTitleSx}>{entry.phrase}</Typography>
@@ -430,7 +431,7 @@ export default function Dictionary() {
                   {t('dictionary.hit')} {entry.hitCount} {t('dictionary.times')} · {t('dictionary.updated')} {new Date(entry.updatedAt).toLocaleString(language)}
                 </Typography>
               </Box>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0, justifySelf: { xs: 'start', sm: 'end' } }}>
                 <Typography sx={{ ...captionTextSx, color: 'text.secondary' }}>{t('dictionary.enabled')}</Typography>
                 <Switch
                   size="small"

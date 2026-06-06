@@ -3,6 +3,8 @@
  *
  * 需要理解 VoiceSession、错误码、模式映射或悬浮胶囊状态时看这里。
  */
+import type { MeetingStructuredResult } from '../meetingStructuredResult'
+
 export const voiceModes = ['Dictate', 'Ask', 'Translate', 'CustomCommand', 'MeetingNotes'] as const
 
 export type VoiceMode = typeof voiceModes[number]
@@ -63,6 +65,7 @@ export type VoiceSession = {
   rawText: string
   refinedText: string
   translationText: string
+  meetingStructuredResult: MeetingStructuredResult | null
   meetingLiveSegments?: MeetingLiveSegment[]
   durationMs: number
   textLength: number
@@ -89,6 +92,7 @@ export const initialVoiceSession: VoiceSession = {
   rawText: '',
   refinedText: '',
   translationText: '',
+  meetingStructuredResult: null,
   meetingLiveSegments: [],
   durationMs: 0,
   textLength: 0,

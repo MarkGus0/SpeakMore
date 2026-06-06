@@ -1,4 +1,5 @@
 import { ipcClient } from './ipc'
+import { normalizeMeetingStructuredResult, type MeetingStructuredResult } from './meetingStructuredResult'
 import { getCurrentLlmConfig, type MeetingLiveTargetLanguage } from './settingsStore'
 
 export type MeetingNoteStatus = 'draft' | 'recording' | 'processing' | 'completed' | 'error'
@@ -14,6 +15,7 @@ export type MeetingNote = {
   transcript: string
   translationText: string
   summary: string
+  structuredResult: MeetingStructuredResult | null
   audioSource: MeetingAudioSource
   targetLanguage: MeetingTranslationTarget
   showOriginal: boolean
@@ -37,7 +39,10 @@ export type MeetingImportResult = {
   transcript: string
   translationText: string
   summary: string
+  structuredResult: MeetingStructuredResult | null
   detail: string
+  partialSuccess?: boolean
+  summaryError?: string
 }
 
 export const MEETING_MEDIA_EXTENSIONS = ['m4a', 'mp3', 'mp4', 'wav', 'ogg', 'flac', 'mov', 'avi', 'mkv', 'webm', 'opus']
@@ -57,6 +62,7 @@ export function createDraftMeetingNote(): Partial<MeetingNote> {
     transcript: '',
     translationText: '',
     summary: '',
+    structuredResult: null,
     audioSource: 'microphone',
     targetLanguage: 'off',
     showOriginal: true,
@@ -117,10 +123,10 @@ export function isSupportedMeetingMediaFile(file: File) {
 
 export async function importMeetingMediaFile(file: File): Promise<MeetingImportResult> {
   if (!isSupportedMeetingMediaFile(file)) {
-    return { success: false, transcript: '', translationText: '', summary: '', detail: 'unsupported_media_type' }
+    return { success: false, transcript: '', translationText: '', summary: '', structuredResult: null, detail: 'unsupported_media_type' }
   }
   if (file.size > MAX_MEETING_MEDIA_BYTES) {
-    return { success: false, transcript: '', translationText: '', summary: '', detail: 'media_file_too_large' }
+    return { success: false, transcript: '', translationText: '', summary: '', structuredResult: null, detail: 'media_file_too_large' }
   }
 
   try {
@@ -131,16 +137,30 @@ export async function importMeetingMediaFile(file: File): Promise<MeetingImportR
 
   const llm = await getCurrentLlmConfig()
   if (!llm.api_key.trim()) {
-    return { success: false, transcript: '', translationText: '', summary: '', detail: 'llm_api_key_missing' }
+    return { success: false, transcript: '', translationText: '', summary: '', structuredResult: null, detail: 'llm_api_key_missing' }
   }
 
   const formData = new FormData()
   formData.append('audio_file', file, file.name)
   formData.append('audio_id', `meeting-import-${Date.now()}`)
   formData.append('mode', 'meeting_notes')
-  formData.append('audio_context', JSON.stringify({}))
+  formData.append('audio_context', JSON.stringify({
+    import_source: 'meeting_media',
+    meeting_module: 'import_file',
+    meeting_capture_profile: 'imported_media',
+  }))
   formData.append('audio_metadata', JSON.stringify({ source: 'meeting_import', file_name: file.name, file_size: file.size }))
-  formData.append('parameters', JSON.stringify({ llm }))
+  formData.append('parameters', JSON.stringify({
+    llm,
+    import_source: 'meeting_media',
+    meeting_notes_quality_profile: 'frontier_minutes',
+    meeting_notes_pipeline: 'extractive_then_synthesize',
+    meeting_module: 'import_file',
+    meeting_capture_profile: 'imported_media',
+    import_processing_profile: 'frontier_import',
+    meeting_scenario_coverage: 'meeting,class,interview,customer_call,project_sync,training,retrospective,brainstorm,task_plan,voice_memo,field_notes',
+    meeting_output_depth: 'comprehensive_minutes_with_transcript_fallback',
+  }))
   formData.append('is_retry', 'false')
   formData.append('device_name', '')
   formData.append('user_over_time', '')
@@ -156,6 +176,7 @@ export async function importMeetingMediaFile(file: File): Promise<MeetingImportR
         transcript: String(data.user_prompt || ''),
         translationText: String(data.translation_text || ''),
         summary: '',
+        structuredResult: normalizeMeetingStructuredResult(data.meeting_structured),
         detail: String(data.detail || data.refine_text || response.statusText || 'voice_flow_failed'),
       }
     }
@@ -164,7 +185,10 @@ export async function importMeetingMediaFile(file: File): Promise<MeetingImportR
       transcript: String(data.user_prompt || ''),
       translationText: String(data.translation_text || ''),
       summary: String(data.refine_text || ''),
-      detail: '',
+      structuredResult: normalizeMeetingStructuredResult(data.meeting_structured),
+      detail: String(data.summary_error || ''),
+      partialSuccess: data.partial_success === true,
+      summaryError: String(data.summary_error || ''),
     }
   } catch (error) {
     return {
@@ -172,6 +196,7 @@ export async function importMeetingMediaFile(file: File): Promise<MeetingImportR
       transcript: '',
       translationText: '',
       summary: '',
+      structuredResult: null,
       detail: error instanceof Error ? error.message : String(error),
     }
   }

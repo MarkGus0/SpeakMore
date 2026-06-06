@@ -25,7 +25,7 @@ import TagIcon from '@mui/icons-material/Tag'
 import TerminalIcon from '@mui/icons-material/Terminal'
 import TranslateIcon from '@mui/icons-material/Translate'
 import { useI18n, type TranslationKey } from '../i18n'
-import { captionTextSx, helperTextSx, itemTitleSx, pageDescriptionSx, pageSx, pageTitleSx, sectionTitleSx } from '../uiTokens'
+import { adaptivePageSx, captionTextSx, helperTextSx, itemTitleSx, pageDescriptionSx, pageTitleSx, sectionTitleSx } from '../uiTokens'
 import { ShortcutBindingDialog } from '../components/ShortcutBindingDialog'
 import {
   deleteShortcutCommand,
@@ -207,7 +207,7 @@ function CommandRow({
     <Box
       sx={{
         display: 'grid',
-        gridTemplateColumns: 'minmax(0, 1fr) auto auto',
+        gridTemplateColumns: { xs: 'minmax(0, 1fr)', md: 'minmax(0, 1fr) auto auto' },
         alignItems: 'center',
         gap: 1.5,
         border: '1px solid rgba(119,119,119,0.10)',
@@ -223,12 +223,12 @@ function CommandRow({
         </Box>
         <Box sx={{ minWidth: 0 }}>
           <Typography sx={itemTitleSx}>{name}</Typography>
-          <Typography sx={{ ...captionTextSx, color: 'text.secondary', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <Typography sx={{ ...captionTextSx, color: 'text.secondary', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: { xs: 'normal', md: 'nowrap' } }}>
             {description}
           </Typography>
         </Box>
       </Box>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, justifyContent: 'flex-end' }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, justifyContent: { xs: 'flex-start', md: 'flex-end' }, flexWrap: 'wrap' }}>
         <Button
           disabled={!canRecordShortcut || unavailable}
           onClick={() => onRecordShortcut(command)}
@@ -255,7 +255,7 @@ function CommandRow({
         </Button>
         <Chip size="small" label={statusLabel(status, t)} />
       </Box>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, justifyContent: { xs: 'flex-start', md: 'flex-end' } }}>
         <Switch checked={command.enabled && !unavailable} disabled={unavailable} onChange={() => onToggle(command)} size="small" />
         {canEditCommand ? (
           <IconButton aria-label={`${t('shortcuts.edit')} ${name}`} onClick={() => onEdit(command)} size="small">
@@ -349,13 +349,13 @@ export default function Shortcuts() {
   )
 
   return (
-    <Box sx={{ ...pageSx, maxWidth: 980, display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-      <Box sx={{ display: 'flex', alignItems: 'start', justifyContent: 'space-between', gap: 2 }}>
-        <Box>
+    <Box sx={{ ...adaptivePageSx, display: 'flex', flexDirection: 'column', gap: { xs: 2, lg: 2.5 } }}>
+      <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap' }}>
+        <Box sx={{ minWidth: 0 }}>
           <Typography sx={pageTitleSx}>{t('shortcuts.title')}</Typography>
           <Typography sx={{ ...pageDescriptionSx, color: 'text.secondary', mt: 0.5 }}>{t('shortcuts.subtitle')}</Typography>
         </Box>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={() => setEditingCommand(createEmptyCustomCommand())}>
+        <Button variant="contained" startIcon={<AddIcon />} onClick={() => setEditingCommand(createEmptyCustomCommand())} sx={{ flexShrink: 0 }}>
           {t('shortcuts.addCommand')}
         </Button>
       </Box>

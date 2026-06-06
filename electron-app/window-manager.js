@@ -12,10 +12,27 @@ const {
 const FLOATING_BAR_SIZE = { width: 220, height: 224 };
 const FLOATING_PANEL_SIZE = { width: 440, height: 220 };
 const MEETING_SUBTITLES_SIZE = { width: 1160, height: 360 };
-const MEETING_DETECTION_SIZE = { width: 620, height: 132 };
+const MEETING_DETECTION_MIN_SIZE = { width: 360, height: 82 };
+const MEETING_DETECTION_MAX_SIZE = { width: 480, height: 102 };
 const FLOATING_WINDOW_BOTTOM_GAP = 32;
-const MEETING_DETECTION_TOP_GAP = 16;
-const MEETING_DETECTION_RIGHT_GAP = 18;
+const MEETING_DETECTION_TOP_GAP = 10;
+const MEETING_DETECTION_RIGHT_GAP = 10;
+
+function clampNumber(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function resolveMeetingDetectionSize(workArea = {}) {
+  const workAreaWidth = Number(workArea.width) || 1440;
+  const width = Math.round(clampNumber(workAreaWidth * 0.24, MEETING_DETECTION_MIN_SIZE.width, MEETING_DETECTION_MAX_SIZE.width));
+  const heightRatio = (width - MEETING_DETECTION_MIN_SIZE.width)
+    / (MEETING_DETECTION_MAX_SIZE.width - MEETING_DETECTION_MIN_SIZE.width);
+  const height = Math.round(
+    MEETING_DETECTION_MIN_SIZE.height
+    + clampNumber(heightRatio, 0, 1) * (MEETING_DETECTION_MAX_SIZE.height - MEETING_DETECTION_MIN_SIZE.height),
+  );
+  return { width, height };
+}
 
 function createWindowManager({
   app,
@@ -106,10 +123,11 @@ function createWindowManager({
 
   function resolveMeetingDetectionBounds() {
     const workArea = getCurrentFloatingWorkArea();
+    const size = resolveMeetingDetectionSize(workArea);
     return {
-      x: Math.round(workArea.x + workArea.width - MEETING_DETECTION_SIZE.width - MEETING_DETECTION_RIGHT_GAP),
+      x: Math.round(workArea.x + workArea.width - size.width - MEETING_DETECTION_RIGHT_GAP),
       y: Math.round(workArea.y + MEETING_DETECTION_TOP_GAP),
-      ...MEETING_DETECTION_SIZE,
+      ...size,
     };
   }
 
@@ -405,7 +423,19 @@ function createWindowManager({
     if (tray && typeof tray.isDestroyed === 'function' && !tray.isDestroyed()) return tray;
     if (tray && typeof tray.isDestroyed !== 'function') return tray;
 
-    const image = nativeImage.createFromPath(trayIconPath()).resize({ width: 16, height: 16 });
+    const preferredPath = trayIconPath();
+    const fallbackPath = iconPath();
+    let image = nativeImage.createFromPath(preferredPath);
+    if (
+      image
+      && typeof image.isEmpty === 'function'
+      && image.isEmpty()
+      && fallbackPath
+      && fallbackPath !== preferredPath
+    ) {
+      image = nativeImage.createFromPath(fallbackPath);
+    }
+    image = image.resize({ width: 16, height: 16 });
     tray = new Tray(image);
     tray.setToolTip('SpeakMore');
     tray.on('click', createMainWindow);
@@ -506,7 +536,9 @@ module.exports = {
   FLOATING_BAR_SIZE,
   FLOATING_PANEL_SIZE,
   MEETING_SUBTITLES_SIZE,
-  MEETING_DETECTION_SIZE,
+  MEETING_DETECTION_MIN_SIZE,
+  MEETING_DETECTION_MAX_SIZE,
   FLOATING_WINDOW_BOTTOM_GAP,
+  resolveMeetingDetectionSize,
   createWindowManager,
 };

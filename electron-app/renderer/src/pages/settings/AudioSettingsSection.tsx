@@ -128,7 +128,7 @@ export default function AudioSettingsSection({
             {selectedDeviceText}
           </Typography>
         </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, justifySelf: { xs: 'start', sm: 'end' } }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, justifySelf: { xs: 'stretch', sm: 'end' }, flexWrap: 'wrap' }}>
           <IconButton
             aria-label={t('settings.audio.refreshDevices')}
             onClick={() => void refreshDevices()}
@@ -141,7 +141,7 @@ export default function AudioSettingsSection({
             size="small"
             value={settings.selectedAudioDeviceId}
             onChange={(event) => void updateSettings({ ...settings, selectedAudioDeviceId: String(event.target.value) })}
-            sx={{ minWidth: { xs: 220, sm: 260 } }}
+            sx={{ minWidth: { xs: 0, sm: 260 }, flex: { xs: '1 1 220px', sm: '0 1 320px' }, maxWidth: '100%' }}
           >
             <MenuItem value="default">{t('settings.audio.autoDetect')}</MenuItem>
             {devices.map((device) => (
