@@ -180,10 +180,10 @@ function applyShortcutLabels() {
   const isMacOS = window.ipcRenderer && window.ipcRenderer.platform === 'darwin';
   if (!isMacOS) return;
 
-  document.getElementById('shortcut-hint-text').textContent = '长按 Option 不会开始语音输入。请短按 Option，或使用 Option + Space / Option + Shift。';
-  document.getElementById('shortcut-dictation-chip').textContent = 'Option';
-  document.getElementById('shortcut-ask-chip').textContent = 'Option + Space';
-  document.getElementById('shortcut-translate-chip').textContent = 'Option + Shift';
+  document.getElementById('shortcut-hint-text').textContent = '长按 Right Option 不会开始语音输入。请短按 Right Option，或使用 Right Option + Right Command / Right Option + Shift。';
+  document.getElementById('shortcut-dictation-chip').textContent = 'Right Option';
+  document.getElementById('shortcut-ask-chip').textContent = 'Right Option + Right Command';
+  document.getElementById('shortcut-translate-chip').textContent = 'Right Option + Shift';
 }
 
 function closeFloatingPanel() {

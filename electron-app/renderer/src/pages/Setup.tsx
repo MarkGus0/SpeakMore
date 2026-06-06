@@ -125,6 +125,7 @@ export default function Setup({ onOpenSettings }: SetupProps) {
   const hasFileProgress = modelStatus?.status === 'downloading'
     && typeof fileProgressPercent === 'number'
     && (modelStatus?.total_files ?? 0) > 0
+  const shouldExplainFileProgressPause = hasFileProgress && (modelStatus?.downloaded_files ?? 0) === 0
   const statusText = t(getStatusKey(modelStatus))
   const modelActionText = isReady
     ? t('setup.modelReady')
@@ -174,7 +175,7 @@ export default function Setup({ onOpenSettings }: SetupProps) {
               </Typography>
             ) : hasFileProgress ? (
               <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.75 }}>
-                {`${t('setup.modelFilesProgress')} ${modelStatus?.downloaded_files} / ${modelStatus?.total_files}`}
+                {`${t('setup.modelFilesProgress')} ${modelStatus?.downloaded_files} / ${modelStatus?.total_files}${shouldExplainFileProgressPause ? ` · ${t('setup.modelFilesProgressHint')}` : ''}`}
               </Typography>
             ) : null}
           </Box>
