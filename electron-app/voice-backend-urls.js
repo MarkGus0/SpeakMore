@@ -7,6 +7,7 @@ function createVoiceBackendUrls(voiceServerUrl = DEFAULT_VOICE_SERVER_URL) {
     modelStatusUrl: `${voiceServerUrl}/model/status`,
     modelDownloadUrl: `${voiceServerUrl}/model/download`,
     voiceFlowUrl: `${voiceServerUrl}/ai/voice_flow`,
+    textRefineUrl: `${voiceServerUrl}/ai/text_refine`,
     configReloadUrl: `${voiceServerUrl}/config/reload`,
   };
 }

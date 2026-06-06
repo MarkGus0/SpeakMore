@@ -23,6 +23,7 @@ import {
   createInitialShortcutGuardState,
   disposeShortcutGuard,
   reduceShortcutGuard,
+  type KeyboardLike,
   type ShortcutGuardState,
 } from '../services/shortcutGuard'
 
@@ -58,17 +59,37 @@ export function useGlobalShortcutBridge() {
     return command ? command.enabled : true
   }, [])
 
+  const isVoiceInputHandledByRightAlt = useCallback(() => {
+    const command = shortcutCommandsRef.current.get('voice_input')
+    if (!command) return true
+    const display = String(command.shortcut?.display || '').replace(/\s+/g, '').toLowerCase()
+    const keys = command.shortcut?.keys || []
+    return display === 'rightalt' || (keys.length === 1 && String(keys[0]).replace(/\s+/g, '').toLowerCase() === 'rightalt')
+  }, [])
+
+  const isSmartAssistantAvailable = useCallback(() => (
+    isCommandEnabled('voice_input') && isCommandEnabled('smart_assistant')
+  ), [isCommandEnabled])
+
   const triggerShortcutIntent = useCallback((intent: 'DictateShortcut' | 'AskShortcut' | 'TranslateShortcut') => {
-    if (intent !== 'DictateShortcut') {
+    if (intent === 'AskShortcut') {
       clearPendingDictate()
-      void toggleRecordingByShortcut(intent)
+      if (isSmartAssistantAvailable()) {
+        void toggleRecordingByShortcut('AskShortcut')
+      }
+      return
+    }
+
+    if (intent === 'TranslateShortcut') {
+      clearPendingDictate()
+      void toggleRecordingByShortcut('TranslateShortcut')
       return
     }
 
     const pressedAt = Date.now()
     if (pendingDictateTimerRef.current !== null && pressedAt - pendingDictateTapAtRef.current <= RIGHT_ALT_DOUBLE_TAP_MS) {
       clearPendingDictate()
-      if (isCommandEnabled('smart_assistant')) {
+      if (isSmartAssistantAvailable()) {
         void toggleRecordingByShortcut('AskShortcut')
       }
       return
@@ -81,7 +102,7 @@ export function useGlobalShortcutBridge() {
         void toggleRecordingByShortcut('DictateShortcut')
       }
     }, RIGHT_ALT_DOUBLE_TAP_MS)
-  }, [clearPendingDictate, isCommandEnabled])
+  }, [clearPendingDictate, isCommandEnabled, isSmartAssistantAvailable])
 
   useEffect(() => {
     shortcutGuardRef.current = shortcutGuard
@@ -118,16 +139,32 @@ export function useGlobalShortcutBridge() {
 
   useEffect(() => {
     return subscribeShortcutCommandTriggers((command) => {
+      if (command.id === 'voice_input') {
+        triggerShortcutIntent('DictateShortcut')
+        return
+      }
+      if (command.id === 'smart_assistant') {
+        triggerShortcutIntent('AskShortcut')
+        return
+      }
+
       clearPendingDictate()
       void toggleRecordingByShortcutCommand(command)
     })
-  }, [clearPendingDictate])
+  }, [clearPendingDictate, triggerShortcutIntent])
 
   useEffect(() => {
     return ipcClient.on('global-keyboard', (_event, keys) => {
+      const keyboardKeys = (Array.isArray(keys) ? keys : []) as KeyboardLike[]
+      const hasRightAlt = keyboardKeys.some((key) => key?.keyName === 'RightAlt')
+      const hasRightShift = keyboardKeys.some((key) => key?.keyName === 'RightShift' && key?.isKeydown)
+      if (hasRightAlt && !hasRightShift && (!isVoiceInputHandledByRightAlt() || !isCommandEnabled('voice_input'))) {
+        return
+      }
+
       const next = reduceShortcutGuard(
         shortcutGuardRef.current,
-        keys,
+        keyboardKeys,
         {
           voiceStatus: getVoiceSession().status,
           debugLog: (event, payload) => {
@@ -142,10 +179,13 @@ export function useGlobalShortcutBridge() {
       applyShortcutGuard(next.state)
 
       if (next.action.type === 'toggle-recording') {
+        if ((next.action.intent === 'DictateShortcut' || next.action.intent === 'AskShortcut') && !isVoiceInputHandledByRightAlt()) {
+          return
+        }
         triggerShortcutIntent(next.action.intent)
       }
     })
-  }, [applyShortcutGuard, handleLongPress, triggerShortcutIntent])
+  }, [applyShortcutGuard, handleLongPress, isCommandEnabled, isVoiceInputHandledByRightAlt, triggerShortcutIntent])
 
   useEffect(() => {
     return ipcClient.on('voice-cancel-requested', () => {

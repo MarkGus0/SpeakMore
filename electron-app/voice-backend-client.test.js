@@ -24,6 +24,7 @@ test('createVoiceBackendUrls 统一生成后端接口 URL', () => {
   assert.equal(urls.modelStatusUrl, 'http://localhost:9000/model/status');
   assert.equal(urls.modelDownloadUrl, 'http://localhost:9000/model/download');
   assert.equal(urls.voiceFlowUrl, 'http://localhost:9000/ai/voice_flow');
+  assert.equal(urls.textRefineUrl, 'http://localhost:9000/ai/text_refine');
   assert.equal(urls.configReloadUrl, 'http://localhost:9000/config/reload');
   assert.equal('modelsUrl' in urls, false);
 });
@@ -193,4 +194,50 @@ test('createVoiceBackendClient 的语音接口在后端未就绪时返回 backen
 
   assert.equal(result.success, false);
   assert.equal(result.code, 'backend_not_ready');
+});
+
+test('createVoiceBackendClient 文本重试接口会发送已有文本和当前 LLM 参数', async () => {
+  const calls = [];
+  const client = createVoiceBackendClient({
+    voiceServerUrl: 'http://localhost:9000',
+    fetchImpl: async (url, init) => {
+      calls.push({ url, init });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          status: 'OK',
+          data: {
+            refine_text: 'hello refined',
+            user_prompt: 'hello raw',
+            web_metadata: null,
+            external_action: null,
+          },
+        }),
+      };
+    },
+    buildCurrentLlmRequestConfig: () => ({ provider_id: 'deepseek', model: 'deepseek-chat' }),
+    normalizeLlmRequestConfig: (value) => value,
+  });
+
+  const result = await client.callTextRefineBackend({
+    text: 'hello raw',
+    mode: 'Dictate',
+    audioContext: { source: 'history_retry' },
+    parameters: { extra: 'value' },
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.refine_text, 'hello refined');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'http://localhost:9000/ai/text_refine');
+  assert.equal(calls[0].init.method, 'POST');
+  assert.equal(calls[0].init.headers['content-type'], 'application/json');
+
+  const body = JSON.parse(calls[0].init.body);
+  assert.equal(body.text, 'hello raw');
+  assert.equal(body.mode, 'transcript');
+  assert.deepEqual(body.audio_context, { source: 'history_retry' });
+  assert.equal(body.parameters.extra, 'value');
+  assert.deepEqual(body.parameters.llm, { provider_id: 'deepseek', model: 'deepseek-chat' });
 });

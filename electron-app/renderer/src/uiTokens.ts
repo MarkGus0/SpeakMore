@@ -18,6 +18,52 @@ export const pageTitleSx = {
   fontWeight: 500,
 }
 
+export const pageDescriptionSx = {
+  fontSize: 14,
+  fontWeight: 400,
+  lineHeight: 1.5,
+}
+
+export const sectionTitleSx = {
+  fontSize: 16,
+  fontWeight: 500,
+}
+
+export const itemTitleSx = {
+  fontSize: 15,
+  fontWeight: 600,
+}
+
+export const metricValueSx = {
+  ...itemTitleSx,
+  fontSize: 18,
+}
+
+export const bodyTextSx = {
+  fontSize: 14,
+  fontWeight: 400,
+  lineHeight: 1.45,
+}
+
+export const helperTextSx = {
+  fontSize: 13,
+  fontWeight: 400,
+  lineHeight: 1.45,
+}
+
+export const captionTextSx = {
+  fontSize: 12,
+  fontWeight: 400,
+  lineHeight: 1.35,
+}
+
+export const navTextSx = {
+  fontSize: 14.5,
+  fontWeight: 700,
+  letterSpacing: 0,
+  lineHeight: 1,
+}
+
 export const overlayCardSx = {
   bgcolor: '#fff',
   borderRadius: '12px',

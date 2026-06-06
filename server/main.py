@@ -4,10 +4,13 @@ import asyncio
 import inspect
 import json
 import os
+import re
 import tempfile
 import time
+import unicodedata
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
+from difflib import SequenceMatcher
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
@@ -29,7 +32,7 @@ from model_manager import (
     find_cached_model_snapshot,
     get_managed_model_cache_root,
 )
-from refiner import refine_text, reload_refiner_runtime_config
+from refiner import refine_text, reload_refiner_runtime_config, resolve_translation_target_language_id
 from runtime_config import (
     get_cors_allowed_origins,
     get_server_host,
@@ -176,6 +179,13 @@ def normalize_selected_text(payload: dict) -> str:
 
 def normalize_ws_object(value) -> dict:
     return value if isinstance(value, dict) else {}
+
+
+def merge_ws_end_audio_parameters(current_parameters: dict, payload: dict) -> dict:
+    next_parameters = normalize_ws_object(payload.get("parameters", {}))
+    if not next_parameters:
+        return current_parameters
+    return {**current_parameters, **next_parameters}
 
 
 def get_pcm_streaming_sample_rate(parameters: dict) -> int:
@@ -442,16 +452,19 @@ def start_voice_model_task(app: FastAPI, preload_model, exit_scheduler, exit_on_
     )
 
 
-def create_flow_success_payload(refined_text: str, raw_text: str = "") -> dict:
+def create_flow_success_payload(refined_text: str, raw_text: str = "", extra_data: dict | None = None) -> dict:
+    data = {
+        "refine_text": refined_text,
+        "delivery": "inline",
+        "user_prompt": raw_text,
+        "web_metadata": None,
+        "external_action": None,
+    }
+    if isinstance(extra_data, dict):
+        data.update(extra_data)
     return {
         "status": "OK",
-        "data": {
-            "refine_text": refined_text,
-            "delivery": "inline",
-            "user_prompt": raw_text,
-            "web_metadata": None,
-            "external_action": None,
-        },
+        "data": data,
     }
 
 
@@ -467,6 +480,636 @@ def create_flow_error_payload(detail: str, code: str, raw_text: str = "") -> dic
             "important_notification": None,
         },
     }
+
+
+def get_meeting_translation_target(parameters: dict | None) -> str:
+    if not isinstance(parameters, dict):
+        return ""
+    candidate = (
+        parameters.get("meeting_translation_target_language")
+        or parameters.get("target_language")
+        or parameters.get("output_language")
+        or ""
+    )
+    normalized = str(candidate or "").strip().lower()
+    if normalized in ("", "off", "none", "null", "false", "关闭"):
+        return ""
+    return resolve_translation_target_language_id(candidate)
+
+
+MEETING_REALTIME_TRANSLATION_MIN_CJK_CHARS = 10
+MEETING_REALTIME_TRANSLATION_MIN_OTHER_CHARS = 18
+MEETING_REALTIME_TRANSLATION_SHORT_CJK_CHARS = 4
+MEETING_REALTIME_TRANSLATION_SHORT_OTHER_CHARS = 8
+MEETING_REALTIME_TRANSLATION_IMMEDIATE_CJK_CHARS = 8
+MEETING_REALTIME_TRANSLATION_IMMEDIATE_OTHER_CHARS = 14
+MEETING_REALTIME_TRANSLATION_MAX_WAIT_SECONDS = 1.15
+MEETING_REALTIME_TRANSLATION_SHORT_WAIT_SECONDS = 1.8
+MEETING_REALTIME_TRANSLATION_MAX_CONCURRENCY = 2
+MEETING_REALTIME_TRANSLATION_ENDINGS = tuple(".!?\n\u3002\uff01\uff1f")
+MEETING_REALTIME_LEADING_SEPARATOR_RE = re.compile(r"^[\s,，、。.!?！？;；:：]+")
+MEETING_REALTIME_FILLER_ONLY = {
+    "\u55ef",
+    "\u5443",
+    "\u554a",
+    "\u54e6",
+    "\u989d",
+    "\u5450",
+    "um",
+    "uh",
+    "er",
+    "ah",
+    "oh",
+    "hmm",
+}
+
+
+def is_meeting_realtime_emoji_char(char: str) -> bool:
+    code = ord(char)
+    if 0xFE00 <= code <= 0xFE0F:
+        return True
+    if 0x1F000 <= code <= 0x1FAFF:
+        return True
+    if 0x2600 <= code <= 0x27BF:
+        return True
+    if 0x2300 <= code <= 0x23FF:
+        return True
+    if 0x2B00 <= code <= 0x2BFF:
+        return True
+    return False
+
+
+def count_cjk_chars(value: str) -> int:
+    return sum(1 for char in value if "\u4e00" <= char <= "\u9fff")
+
+
+def normalize_meeting_realtime_source(value: str) -> str:
+    text = unicodedata.normalize("NFKC", str(value or ""))
+    chars = []
+    for char in text:
+        category = unicodedata.category(char)
+        if category in {"Cc", "Cf", "Cs"}:
+            continue
+        if category == "So" or is_meeting_realtime_emoji_char(char):
+            continue
+        chars.append(char)
+    text = "".join(chars)
+    text = re.sub(r"[\u200b\u200c\u200d\ufeff]", "", text)
+    text = re.sub(r"([.!?\u3002\uff01\uff1f,，、]){2,}", r"\1", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"(?<=[\u4e00-\u9fff])\s+(?=[\u4e00-\u9fff])", "", text)
+    return text
+
+
+def normalize_meeting_realtime_compare(value: str) -> str:
+    text = normalize_meeting_realtime_source(value).lower()
+    return "".join(char for char in text if char.isalnum())
+
+
+def meeting_realtime_similarity(left: str, right: str) -> float:
+    left_key = normalize_meeting_realtime_compare(left)
+    right_key = normalize_meeting_realtime_compare(right)
+    if not left_key or not right_key:
+        return 0.0
+    if left_key == right_key:
+        return 1.0
+    return SequenceMatcher(None, left_key, right_key).ratio()
+
+
+def build_meeting_realtime_compare_map(value: str) -> tuple[str, list[int]]:
+    compare_chars = []
+    positions = []
+    for index, char in enumerate(normalize_meeting_realtime_source(value).lower()):
+        if char.isalnum():
+            compare_chars.append(char)
+            positions.append(index)
+    return "".join(compare_chars), positions
+
+
+def strip_meeting_realtime_leading_separators(value: str) -> str:
+    return MEETING_REALTIME_LEADING_SEPARATOR_RE.sub("", value or "").strip()
+
+
+def split_meeting_realtime_sentences(value: str) -> tuple[list[str], str]:
+    text = normalize_meeting_realtime_source(value)
+    if not text:
+        return [], ""
+
+    completed: list[str] = []
+    start = 0
+    for index, char in enumerate(text):
+        if char not in MEETING_REALTIME_TRANSLATION_ENDINGS:
+            continue
+        sentence = strip_meeting_realtime_leading_separators(text[start : index + 1])
+        if sentence:
+            completed.append(sentence)
+        start = index + 1
+
+    tail = strip_meeting_realtime_leading_separators(text[start:])
+    return completed, tail
+
+
+def join_meeting_realtime_parts(parts: list[str]) -> str:
+    return normalize_meeting_realtime_source("".join(parts))
+
+
+def get_meeting_realtime_lengths(value: str) -> tuple[int, int]:
+    text = normalize_meeting_realtime_source(value)
+    return count_cjk_chars(text), len(normalize_meeting_realtime_compare(text))
+
+
+def is_tiny_meeting_realtime_fragment(value: str) -> bool:
+    cjk_count, compare_length = get_meeting_realtime_lengths(value)
+    if cjk_count > 0:
+        return cjk_count <= 1
+    return compare_length <= 2
+
+
+def is_natural_meeting_realtime_sentence(value: str) -> bool:
+    text = normalize_meeting_realtime_source(value)
+    if not text or not has_meeting_realtime_sentence_ending(text):
+        return False
+    if is_tiny_meeting_realtime_fragment(text):
+        return False
+    cjk_count, compare_length = get_meeting_realtime_lengths(text)
+    return (
+        cjk_count >= MEETING_REALTIME_TRANSLATION_IMMEDIATE_CJK_CHARS
+        or (cjk_count == 0 and compare_length >= MEETING_REALTIME_TRANSLATION_IMMEDIATE_OTHER_CHARS)
+    )
+
+
+def has_meeting_realtime_pause_commit_length(value: str) -> bool:
+    text = normalize_meeting_realtime_source(value)
+    if not text:
+        return False
+    if is_tiny_meeting_realtime_fragment(text):
+        return False
+    cjk_count, compare_length = get_meeting_realtime_lengths(text)
+    if has_meeting_realtime_sentence_ending(text):
+        if cjk_count >= MEETING_REALTIME_TRANSLATION_SHORT_CJK_CHARS:
+            return True
+        return cjk_count == 0 and compare_length >= MEETING_REALTIME_TRANSLATION_SHORT_OTHER_CHARS
+    if cjk_count >= MEETING_REALTIME_TRANSLATION_MIN_CJK_CHARS:
+        return True
+    return cjk_count == 0 and compare_length >= MEETING_REALTIME_TRANSLATION_MIN_OTHER_CHARS
+
+
+def get_meeting_realtime_pause_wait_seconds(value: str) -> float:
+    text = normalize_meeting_realtime_source(value)
+    if not has_meeting_realtime_pause_commit_length(text):
+        return 0.0
+    if is_natural_meeting_realtime_sentence(text):
+        return MEETING_REALTIME_TRANSLATION_MAX_WAIT_SECONDS
+    if has_meeting_realtime_sentence_ending(text):
+        return MEETING_REALTIME_TRANSLATION_SHORT_WAIT_SECONDS
+    return MEETING_REALTIME_TRANSLATION_MAX_WAIT_SECONDS
+
+
+def find_meeting_realtime_boundary_after_committed(text: str, committed_compare_key: str) -> int | None:
+    committed_key = str(committed_compare_key or "")
+    if not committed_key:
+        return 0
+
+    compare_text, positions = build_meeting_realtime_compare_map(text)
+    if not compare_text or not positions:
+        return None
+
+    if compare_text.startswith(committed_key):
+        compare_boundary = len(committed_key)
+    else:
+        matcher = SequenceMatcher(None, committed_key, compare_text)
+        matching_blocks = [block for block in matcher.get_matching_blocks() if block.size]
+        matched_count = sum(block.size for block in matching_blocks)
+        required_count = min(len(committed_key), max(3, int(len(committed_key) * 0.6)))
+        first_block_start = matching_blocks[0].b if matching_blocks else len(compare_text)
+        if matched_count < required_count or first_block_start > max(2, len(compare_text) // 4):
+            return None
+        compare_boundary = max(block.b + block.size for block in matching_blocks)
+
+    if compare_boundary <= 0:
+        return 0
+    if compare_boundary > len(positions):
+        return len(text)
+    return min(len(text), positions[compare_boundary - 1] + 1)
+
+
+def normalize_meeting_realtime_translation_output(value: str) -> str:
+    return normalize_meeting_realtime_source(value)
+
+
+def is_meaningless_meeting_realtime_segment(value: str) -> bool:
+    text = normalize_meeting_realtime_source(value)
+    compare = normalize_meeting_realtime_compare(text)
+    if not compare:
+        return True
+    if compare in MEETING_REALTIME_FILLER_ONLY:
+        return True
+    if len(compare) <= 2 and all(char in MEETING_REALTIME_FILLER_ONLY for char in compare):
+        return True
+    return False
+
+
+def is_meeting_realtime_revision(candidate: str, previous: str) -> bool:
+    candidate_key = normalize_meeting_realtime_compare(candidate)
+    previous_key = normalize_meeting_realtime_compare(previous)
+    if not candidate_key or not previous_key:
+        return False
+    if candidate_key.startswith(previous_key) or previous_key.startswith(candidate_key):
+        return True
+    shorter = min(len(candidate_key), len(previous_key))
+    if shorter <= 4:
+        return meeting_realtime_similarity(candidate_key, previous_key) >= 0.78
+    return meeting_realtime_similarity(candidate_key, previous_key) >= 0.86
+
+
+def has_meeting_realtime_sentence_ending(value: str) -> bool:
+    return normalize_meeting_realtime_source(value).endswith(MEETING_REALTIME_TRANSLATION_ENDINGS)
+
+
+def should_flush_meeting_translation_segment(segment: str, last_flush_at: float, now_value: float) -> bool:
+    text = str(segment or "").strip()
+    if not text:
+        return False
+    if text.endswith(MEETING_REALTIME_TRANSLATION_ENDINGS):
+        return True
+    cjk_count = count_cjk_chars(text)
+    if cjk_count >= MEETING_REALTIME_TRANSLATION_MIN_CJK_CHARS:
+        return True
+    if cjk_count == 0 and len(text) >= MEETING_REALTIME_TRANSLATION_MIN_OTHER_CHARS:
+        return True
+    return now_value - last_flush_at >= MEETING_REALTIME_TRANSLATION_MAX_WAIT_SECONDS
+
+
+async def translate_realtime_sentence(
+    raw_text: str,
+    target_language: str,
+    context: dict,
+    parameters: dict,
+    previous_sentences: list[str],
+) -> str:
+    translation_parameters = {
+        **parameters,
+        "output_language": target_language,
+        "realtime_sentence_translation": True,
+        "realtime_context_sentences": previous_sentences[-2:],
+    }
+    translated = await refine_text(
+        raw_text=raw_text,
+        mode="translation",
+        context=context,
+        parameters=translation_parameters,
+    )
+    return normalize_meeting_realtime_translation_output(translated)
+
+
+class MeetingRealtimeTranslator:
+    def __init__(self, websocket: WebSocket):
+        self.websocket = websocket
+        self.audio_id = ""
+        self.mode = "transcript"
+        self.context: dict = {}
+        self.parameters: dict = {}
+        self.committed_compare_key = ""
+        self.committed_sentences: list[str] = []
+        self.committed_sentence_keys: list[str] = []
+        self.pending_tail_text = ""
+        self.pending_tail_compare_key = ""
+        self.pending_tail_observed_at = 0.0
+        self.pending_tail_wait_seconds = 0.0
+        self.next_sentence_index = 1
+        self.translation_queue: list[dict] = []
+        self.active_tasks: set[asyncio.Task] = set()
+        self.flush_timer_task: asyncio.Task | None = None
+        self.closed = False
+
+    def reset(self, audio_id: str, mode: str, context: dict, parameters: dict) -> None:
+        self.cancel()
+        self.audio_id = audio_id
+        self.mode = mode
+        self.context = context if isinstance(context, dict) else {}
+        self.parameters = parameters if isinstance(parameters, dict) else {}
+        self.committed_compare_key = ""
+        self.committed_sentences = []
+        self.committed_sentence_keys = []
+        self.pending_tail_text = ""
+        self.pending_tail_compare_key = ""
+        self.pending_tail_observed_at = 0.0
+        self.pending_tail_wait_seconds = 0.0
+        self.next_sentence_index = 1
+        self.translation_queue = []
+        self.active_tasks = set()
+        self.flush_timer_task = None
+        self.closed = False
+
+    def update_config(self, mode: str, parameters: dict) -> None:
+        self.mode = mode
+        self.parameters = parameters if isinstance(parameters, dict) else {}
+        if not get_meeting_translation_target(self.parameters):
+            self._clear_pending_work(cancel_active=True)
+
+    def cancel(self) -> None:
+        self.closed = True
+        self._clear_pending_work(cancel_active=True)
+
+    def _clear_pending_work(self, cancel_active: bool) -> None:
+        self.pending_tail_text = ""
+        self.pending_tail_compare_key = ""
+        self.pending_tail_wait_seconds = 0.0
+        self.translation_queue = []
+        if cancel_active:
+            for task in list(self.active_tasks):
+                if not task.done():
+                    task.cancel()
+            self.active_tasks.clear()
+        if self.flush_timer_task and not self.flush_timer_task.done() and self.flush_timer_task is not asyncio.current_task():
+            self.flush_timer_task.cancel()
+        self.flush_timer_task = None
+
+    async def drain(self, timeout_seconds: float = 1.5) -> None:
+        if self.closed:
+            return
+
+        await self._commit_pending_tail(force=True)
+        self._start_next_translations()
+
+        deadline = time.monotonic() + timeout_seconds
+        while self.translation_queue or any(not task.done() for task in self.active_tasks):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            active = [task for task in self.active_tasks if not task.done()]
+            if not active:
+                self._start_next_translations()
+                active = [task for task in self.active_tasks if not task.done()]
+            if not active:
+                return
+            with suppress(asyncio.TimeoutError, asyncio.CancelledError, Exception):
+                await asyncio.wait_for(asyncio.gather(*(asyncio.shield(task) for task in active)), timeout=remaining)
+
+    async def observe_transcription(self, text: str, chunk_index: int) -> None:
+        del chunk_index
+        if self.closed or self.mode != "meeting_notes":
+            return
+        if not get_meeting_translation_target(self.parameters):
+            return
+
+        normalized_text = normalize_meeting_realtime_source(text)
+        if not normalized_text or is_meaningless_meeting_realtime_segment(normalized_text):
+            return
+
+        suffix = self._extract_uncommitted_suffix(normalized_text)
+        if not suffix:
+            return
+
+        completed_sentences, tail = split_meeting_realtime_sentences(suffix)
+        buffered_parts: list[str] = []
+        for sentence in completed_sentences:
+            buffered_parts.append(sentence)
+            candidate = join_meeting_realtime_parts(buffered_parts)
+            if is_natural_meeting_realtime_sentence(candidate):
+                await self._commit_sentence(candidate)
+                buffered_parts = []
+
+        pending_tail = join_meeting_realtime_parts([*buffered_parts, tail])
+        self._set_pending_tail(pending_tail)
+        await asyncio.sleep(0)
+
+    def _extract_uncommitted_suffix(self, normalized_text: str) -> str:
+        if not self.committed_compare_key:
+            return normalized_text
+
+        boundary = find_meeting_realtime_boundary_after_committed(normalized_text, self.committed_compare_key)
+        if boundary is None:
+            if self._is_already_committed(normalized_text):
+                return ""
+            return normalized_text
+
+        suffix = strip_meeting_realtime_leading_separators(normalized_text[boundary:])
+        return normalize_meeting_realtime_source(suffix)
+
+    def _is_already_committed(self, candidate: str) -> bool:
+        candidate_key = normalize_meeting_realtime_compare(candidate)
+        if not candidate_key:
+            return True
+        for committed_key in self.committed_sentence_keys[-12:]:
+            if candidate_key == committed_key:
+                return True
+            if len(candidate_key) <= len(committed_key) and (
+                committed_key.startswith(candidate_key)
+                or SequenceMatcher(None, candidate_key, committed_key).ratio() >= 0.88
+            ):
+                return True
+        return False
+
+    def _trim_committed_prefix_from_sentence(self, sentence: str) -> str:
+        if not self.committed_compare_key:
+            return sentence
+        boundary = find_meeting_realtime_boundary_after_committed(sentence, self.committed_compare_key)
+        if boundary is None or boundary <= 0:
+            return sentence
+        return normalize_meeting_realtime_source(strip_meeting_realtime_leading_separators(sentence[boundary:]))
+
+    def _set_pending_tail(self, tail: str) -> None:
+        normalized_tail = normalize_meeting_realtime_source(tail)
+        if not normalized_tail or is_meaningless_meeting_realtime_segment(normalized_tail):
+            self.pending_tail_text = ""
+            self.pending_tail_compare_key = ""
+            self.pending_tail_wait_seconds = 0.0
+            self._cancel_flush_timer()
+            return
+
+        normalized_tail = self._trim_committed_prefix_from_sentence(normalized_tail)
+        tail_key = normalize_meeting_realtime_compare(normalized_tail)
+        if not tail_key or self._is_already_committed(normalized_tail):
+            self.pending_tail_text = ""
+            self.pending_tail_compare_key = ""
+            self.pending_tail_wait_seconds = 0.0
+            self._cancel_flush_timer()
+            return
+
+        if tail_key == self.pending_tail_compare_key:
+            return
+
+        self.pending_tail_text = normalized_tail
+        self.pending_tail_compare_key = tail_key
+        self.pending_tail_observed_at = time.monotonic()
+        self.pending_tail_wait_seconds = get_meeting_realtime_pause_wait_seconds(normalized_tail)
+        self._cancel_flush_timer()
+        if self.pending_tail_wait_seconds > 0:
+            self.flush_timer_task = asyncio.create_task(self._flush_pending_after_delay())
+
+    def _cancel_flush_timer(self) -> None:
+        if self.flush_timer_task and not self.flush_timer_task.done() and self.flush_timer_task is not asyncio.current_task():
+            self.flush_timer_task.cancel()
+        self.flush_timer_task = None
+
+    async def _flush_pending_after_delay(self) -> None:
+        try:
+            wait_seconds = self.pending_tail_wait_seconds or MEETING_REALTIME_TRANSLATION_MAX_WAIT_SECONDS
+            await asyncio.sleep(wait_seconds)
+            if self.closed:
+                return
+            if time.monotonic() - self.pending_tail_observed_at >= wait_seconds:
+                await self._commit_pending_tail(force=False)
+        except asyncio.CancelledError:
+            raise
+        finally:
+            if self.flush_timer_task is asyncio.current_task():
+                self.flush_timer_task = None
+
+    async def _commit_pending_tail(self, force: bool) -> None:
+        tail = self.pending_tail_text
+        if not tail:
+            return
+        if not force and not has_meeting_realtime_pause_commit_length(tail):
+            return
+        self.pending_tail_text = ""
+        self.pending_tail_compare_key = ""
+        self.pending_tail_wait_seconds = 0.0
+        self._cancel_flush_timer()
+        await self._commit_sentence(tail)
+
+    async def _commit_sentence(self, sentence: str) -> None:
+        normalized = normalize_meeting_realtime_source(strip_meeting_realtime_leading_separators(sentence))
+        normalized = self._trim_committed_prefix_from_sentence(normalized)
+        if not normalized or is_meaningless_meeting_realtime_segment(normalized):
+            return
+        if is_tiny_meeting_realtime_fragment(normalized):
+            return
+        if self._is_already_committed(normalized):
+            return
+
+        compare_key = normalize_meeting_realtime_compare(normalized)
+        if not compare_key:
+            return
+
+        target_language = get_meeting_translation_target(self.parameters)
+        if not target_language:
+            return
+
+        sentence_index = self.next_sentence_index
+        self.next_sentence_index += 1
+        previous_sentences = self.committed_sentences[-2:]
+        self.committed_sentences.append(normalized)
+        self.committed_sentence_keys.append(compare_key)
+        self.committed_compare_key += compare_key
+
+        await self._notify_pending_sentence(normalized, sentence_index)
+        self.translation_queue.append({
+            "segment": normalized,
+            "target_language": target_language,
+            "parameters": {**self.parameters},
+            "context": dict(self.context),
+            "sentence_index": sentence_index,
+            "previous_sentences": previous_sentences,
+        })
+        self._start_next_translations()
+
+    async def _notify_pending_sentence(self, segment: str, sentence_index: int) -> None:
+        await send_ws_message(
+            self.websocket,
+            "meeting_translation_pending",
+            {
+                "audio_id": self.audio_id,
+                "source_text": segment,
+                "chunk_index": sentence_index,
+                "sentence_index": sentence_index,
+                "stable": False,
+                "committed": True,
+            },
+        )
+
+    def _start_next_translations(self) -> None:
+        if self.closed:
+            return
+        while self.translation_queue and len([task for task in self.active_tasks if not task.done()]) < MEETING_REALTIME_TRANSLATION_MAX_CONCURRENCY:
+            item = self.translation_queue.pop(0)
+            task = asyncio.create_task(self._translate_sentence(**item))
+            self.active_tasks.add(task)
+
+    async def _translate_sentence(
+        self,
+        segment: str,
+        target_language: str,
+        parameters: dict,
+        context: dict,
+        sentence_index: int,
+        previous_sentences: list[str],
+    ) -> None:
+        try:
+            translation_text = await translate_realtime_sentence(
+                raw_text=segment,
+                target_language=target_language,
+                context=context,
+                parameters=parameters,
+                previous_sentences=previous_sentences,
+            )
+            if self.closed or not translation_text:
+                return
+            await send_ws_message(
+                self.websocket,
+                "meeting_translation",
+                {
+                    "audio_id": self.audio_id,
+                    "text": translation_text,
+                    "source_text": segment,
+                    "target_language": target_language,
+                    "chunk_index": sentence_index,
+                    "sentence_index": sentence_index,
+                    "partial": True,
+                    "stable": True,
+                    "committed": True,
+                },
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            if not self.closed:
+                await send_ws_error_message(
+                    self.websocket,
+                    "meeting_translation_error",
+                    self.audio_id,
+                    str(error),
+                    "meeting_translation_failed",
+                )
+        finally:
+            current_task = asyncio.current_task()
+            if current_task in self.active_tasks:
+                self.active_tasks.discard(current_task)
+            if not self.closed:
+                self._start_next_translations()
+
+
+async def refine_voice_flow_text(
+    raw_text: str,
+    mode: str,
+    context: dict | None,
+    parameters: dict | None,
+) -> tuple[str, dict]:
+    refined = await refine_text(
+        raw_text=raw_text,
+        mode=mode,
+        context=context,
+        parameters=parameters,
+    )
+    if mode != "meeting_notes":
+        return refined, {}
+
+    target_language = get_meeting_translation_target(parameters)
+    if not target_language:
+        return refined, {"translation_text": ""}
+
+    translation_parameters = {
+        **(parameters if isinstance(parameters, dict) else {}),
+        "output_language": target_language,
+    }
+    translation_text = await refine_text(
+        raw_text=raw_text,
+        mode="translation",
+        context=context,
+        parameters=translation_parameters,
+    )
+    return refined, {"translation_text": translation_text}
 
 
 async def handle_voice_flow_request(
@@ -486,14 +1129,14 @@ async def handle_voice_flow_request(
         if not raw_text or not raw_text.strip():
             return create_flow_success_payload(refined_text="", raw_text="")
 
-        refined = await refine_text(
+        refined, extra_data = await refine_voice_flow_text(
             raw_text=raw_text,
             mode=mode,
             context=context,
             parameters=params,
         )
 
-        return create_flow_success_payload(refined_text=refined, raw_text=raw_text)
+        return create_flow_success_payload(refined_text=refined, raw_text=raw_text, extra_data=extra_data)
     except HTTPException:
         raise
     except Exception as error:
@@ -501,6 +1144,27 @@ async def handle_voice_flow_request(
     finally:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
+
+
+async def handle_text_refine_request(payload: dict) -> dict:
+    text = str(payload.get("text") or payload.get("raw_text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Text is required")
+
+    mode = payload.get("mode", "transcript") if isinstance(payload.get("mode"), str) else "transcript"
+    context = normalize_ws_object(payload.get("audio_context") or payload.get("context") or {})
+    parameters = normalize_ws_object(payload.get("parameters") or {})
+
+    try:
+        refined, extra_data = await refine_voice_flow_text(
+            raw_text=text,
+            mode=mode,
+            context=context,
+            parameters=parameters,
+        )
+        return create_flow_success_payload(refined_text=refined, raw_text=text, extra_data=extra_data)
+    except Exception as error:
+        return create_flow_error_payload(detail=str(error), code="text_refine_failed", raw_text=text)
 
 
 async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = None):
@@ -513,6 +1177,7 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
     audio_chunks: list[bytes] = []
     streaming_session = None
     streaming_chunk_index = 0
+    realtime_translator = MeetingRealtimeTranslator(websocket)
 
     try:
         while True:
@@ -549,6 +1214,7 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
                                     "chunk_index": streaming_chunk_index,
                                 },
                             )
+                            await realtime_translator.observe_transcription(result.text, streaming_chunk_index)
                 else:
                     audio_chunks.append(message["bytes"])
                     await websocket.send_json({
@@ -583,6 +1249,7 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
                 audio_chunks = []
                 streaming_session = None
                 streaming_chunk_index = 0
+                realtime_translator.reset(audio_id, mode, context, parameters)
                 sample_rate = get_pcm_streaming_sample_rate(parameters)
                 if sample_rate:
                     try:
@@ -600,6 +1267,9 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
                 continue
 
             if msg_type == "end_audio":
+                parameters = merge_ws_end_audio_parameters(parameters, data)
+                await realtime_translator.drain()
+                realtime_translator.cancel()
                 await send_ws_message(websocket, "audio_session_ending", {"audio_id": audio_id})
                 if streaming_session is not None:
                     current_streaming_session = streaming_session
@@ -625,7 +1295,7 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
                             {"text": raw_text, "audio_id": audio_id, "chunk_index": streaming_chunk_index},
                         )
                         try:
-                            refined = await refine_text(
+                            refined, extra_data = await refine_voice_flow_text(
                                 raw_text=raw_text,
                                 mode=mode,
                                 context=context,
@@ -652,6 +1322,7 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
                                 "user_prompt": raw_text,
                                 "web_metadata": None,
                                 "external_action": None,
+                                **extra_data,
                             },
                         )
                     else:
@@ -698,7 +1369,7 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
                             {"text": raw_text, "audio_id": audio_id, "chunk_index": 0},
                         )
                         try:
-                            refined = await refine_text(
+                            refined, extra_data = await refine_voice_flow_text(
                                 raw_text=raw_text,
                                 mode=mode,
                                 context=context,
@@ -725,6 +1396,7 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
                                 "user_prompt": raw_text,
                                 "web_metadata": None,
                                 "external_action": None,
+                                **extra_data,
                             },
                         )
                     else:
@@ -755,6 +1427,7 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
                 next_parameters = normalize_ws_object(data.get("parameters", {}))
                 if next_parameters:
                     parameters = {**parameters, **next_parameters}
+                realtime_translator.update_config(mode, parameters)
                 await send_ws_message(
                     websocket,
                     "process_mode",
@@ -773,6 +1446,11 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
 
     except WebSocketDisconnect:
         pass
+    finally:
+        try:
+            await realtime_translator.drain()
+        finally:
+            realtime_translator.cancel()
 
 
 def create_app(
@@ -858,6 +1536,13 @@ def create_app(
             audio_context=audio_context,
             parameters=parameters,
         )
+
+    @app.post("/ai/text_refine")
+    async def text_refine(request: Request):
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="JSON body must be an object")
+        return await handle_text_refine_request(payload)
 
     @app.websocket("/ws/rt_voice_flow")
     async def voice_flow_websocket(

@@ -1,7 +1,15 @@
 const crypto = require('crypto');
+const MEETING_LIVE_TARGET_LANGUAGES = require('../shared/meeting-live-target-languages.json');
+const MEETING_NOTE_TARGET_LANGUAGES = require('../shared/meeting-note-target-languages.json');
 
 const MEETING_NOTE_STATUSES = new Set(['draft', 'recording', 'processing', 'completed', 'error']);
 const MEETING_NOTE_SOURCES = new Set(['manual', 'recording', 'import']);
+const MEETING_AUDIO_SOURCES = new Set(['microphone', 'system', 'microphone_system']);
+const MEETING_TRANSLATION_TARGETS = new Set([
+  'off',
+  ...MEETING_LIVE_TARGET_LANGUAGES.map((language) => language.id),
+  ...MEETING_NOTE_TARGET_LANGUAGES.map((language) => language.id),
+]);
 const MAX_MEETING_TITLE_LENGTH = 120;
 const MAX_MEETING_TEXT_LENGTH = 2_000_000;
 
@@ -23,9 +31,12 @@ function normalizeMeetingNote(value = {}, fallback = {}) {
   const now = new Date().toISOString();
   const title = normalizeOptionalString(source.title ?? base.title, MAX_MEETING_TITLE_LENGTH);
   const transcript = normalizeText(source.transcript ?? base.transcript);
+  const translationText = normalizeText(source.translationText ?? base.translationText);
   const summary = normalizeText(source.summary ?? base.summary);
   const status = MEETING_NOTE_STATUSES.has(source.status) ? source.status : base.status || 'draft';
   const sourceType = MEETING_NOTE_SOURCES.has(source.source) ? source.source : base.source || 'manual';
+  const audioSource = MEETING_AUDIO_SOURCES.has(source.audioSource) ? source.audioSource : base.audioSource || 'microphone';
+  const targetLanguage = MEETING_TRANSLATION_TARGETS.has(source.targetLanguage) ? source.targetLanguage : base.targetLanguage || 'off';
   const importFile = source.importFile && typeof source.importFile === 'object' && !Array.isArray(source.importFile)
     ? source.importFile
     : base.importFile || null;
@@ -36,7 +47,12 @@ function normalizeMeetingNote(value = {}, fallback = {}) {
     status,
     source: sourceType,
     transcript,
+    translationText,
     summary,
+    audioSource,
+    targetLanguage,
+    showOriginal: typeof source.showOriginal === 'boolean' ? source.showOriginal : base.showOriginal !== false,
+    showTranslation: typeof source.showTranslation === 'boolean' ? source.showTranslation : base.showTranslation !== false,
     durationMs: Math.max(0, Number(source.durationMs ?? base.durationMs) || 0),
     importFile: importFile ? {
       name: normalizeOptionalString(importFile.name, 240),
@@ -78,6 +94,8 @@ function deleteMeetingNote(notes, id) {
 module.exports = {
   MEETING_NOTE_STATUSES,
   MEETING_NOTE_SOURCES,
+  MEETING_AUDIO_SOURCES,
+  MEETING_TRANSLATION_TARGETS,
   normalizeMeetingNote,
   normalizeMeetingNotes,
   upsertMeetingNote,

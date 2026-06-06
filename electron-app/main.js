@@ -12,6 +12,7 @@ const {
   screen,
   session,
   dialog,
+  desktopCapturer,
 } = require('electron');
 const os = require('os');
 const crypto = require('crypto');
@@ -33,6 +34,7 @@ const {
   isSameFocusedContext,
   readFocusedInfo,
   readFocusedTextTarget,
+  readVisibleWindows,
   readSelectedTextByClipboard,
   readSelectionSnapshot,
   restoreClipboardSnapshot,
@@ -61,12 +63,16 @@ const { createMainIpcRegistry } = require('./main-ipc-registry');
 const { createMacosPlatformCapabilities } = require('./macos-platform-capabilities');
 const { createAutoLearningDebugLogger } = require('./auto-learning-debug-logger');
 const { createVoiceBackendService } = require('./voice-backend-service');
+const { createMeetingDetectorService } = require('./meeting-detector');
 
 let quitAfterBackgroundAudioRestore = false;
 let appIsQuitting = false;
 let pendingInteractiveCardPayload = null;
+let latestVoiceState = null;
+let meetingDetectorService = null;
 let sendToMainRef = () => undefined;
 let sendToFloatingBarRef = () => undefined;
+let sendToMeetingSubtitlesRef = () => undefined;
 
 const SETTINGS_FILE_NAME = 'settings.json';
 const HISTORY_FILE_NAME = 'history.json';
@@ -346,6 +352,14 @@ function getFloatingPanelWindow() {
   return windowManager?.getFloatingPanelWindow() || null;
 }
 
+function getMeetingSubtitlesWindow() {
+  return windowManager?.getMeetingSubtitlesWindow() || null;
+}
+
+function getMeetingDetectionWindow() {
+  return windowManager?.getMeetingDetectionWindow() || null;
+}
+
 function sendToMain(channel, payload) {
   const target = getMainWindow();
   if (target && !target.isDestroyed()) {
@@ -395,8 +409,16 @@ function sendToFloatingPanel(channel, payload) {
   }
 }
 
+function sendToMeetingSubtitles(channel, payload) {
+  const target = getMeetingSubtitlesWindow();
+  if (target && !target.isDestroyed()) {
+    target.webContents.send(channel, payload);
+  }
+}
+
 sendToMainRef = sendToMain;
 sendToFloatingBarRef = sendToFloatingBar;
+sendToMeetingSubtitlesRef = sendToMeetingSubtitles;
 
 function emitKeyboardState(keys) {
   windowManager?.updateFloatingBarVisibility(keys);
@@ -427,6 +449,10 @@ function muteBackgroundSessionsForRecording() {
   return audioSessionService.muteBackgroundSessionsForRecording();
 }
 
+function listActiveAudioSessions() {
+  return audioSessionService.listActiveAudioSessions();
+}
+
 async function checkVoiceServerReady() {
   return voiceBackendClient.checkVoiceServerReady();
 }
@@ -455,6 +481,44 @@ async function callVoiceFlowBackend(payload = {}) {
   return voiceBackendClient.callVoiceFlowBackend(payload);
 }
 
+async function callTextRefineBackend(payload = {}) {
+  return voiceBackendClient.callTextRefineBackend(payload);
+}
+
+function isVoiceSessionActiveForMeetingDetection() {
+  return ['connecting', 'recording', 'stopping', 'transcribing'].includes(String(latestVoiceState?.status || ''));
+}
+
+function handleVoiceStateFromRenderer(payload = {}) {
+  latestVoiceState = payload && typeof payload === 'object' ? payload : {};
+  return windowManager.handleVoiceState(payload);
+}
+
+function handleMeetingDetected(payload = {}) {
+  sendToMain('meeting-detector:detected', payload);
+  windowManager.showMeetingDetectionNotification(payload);
+}
+
+function handleMeetingDetectorStartRecording(payload = {}) {
+  meetingDetectorService?.startRecording(payload);
+  windowManager.hideMeetingDetectionNotification();
+}
+
+function handleMeetingDetectorDismiss(payload = {}) {
+  meetingDetectorService?.dismiss(payload);
+  windowManager.hideMeetingDetectionNotification();
+}
+
+function requestAutoStartMeetingRecording(payload = {}) {
+  createMainWindow();
+  sendToMain('meeting:auto-start-recording', {
+    ...payload,
+    requestId: crypto.randomUUID(),
+    audioSource: 'microphone_system',
+    targetLanguage: 'off',
+  });
+}
+
 windowManager = createWindowManager({
   app,
   BrowserWindow,
@@ -462,6 +526,7 @@ windowManager = createWindowManager({
   Menu,
   nativeImage,
   session,
+  desktopCapturer,
   screen,
   baseDir: __dirname,
   preloadPath,
@@ -475,6 +540,7 @@ windowManager = createWindowManager({
   sendToMain,
   sendToFloatingBar,
   sendToFloatingPanel,
+  sendToMeetingSubtitles,
   getAppIsQuitting: () => appIsQuitting,
   isFloatingBarEnabled: () => readLocalSettings().showFloatingBar !== false,
   shouldHideMainWindowOnClose: () => readLocalSettings().hideMainWindowOnClose !== false,
@@ -482,10 +548,24 @@ windowManager = createWindowManager({
   processPlatform: process.platform,
 });
 
+meetingDetectorService = createMeetingDetectorService({
+  readFocusedInfo: readFocusedInfoForPlatform,
+  readVisibleWindows: process.platform === 'win32' ? readVisibleWindows : async () => [],
+  listActiveAudioSessions,
+  readLocalSettings,
+  isVoiceActive: isVoiceSessionActiveForMeetingDetection,
+  onDetected: handleMeetingDetected,
+  onStartRecording: requestAutoStartMeetingRecording,
+  onDismiss: () => undefined,
+  logger: console,
+});
+
 const mainIpcRegistry = createMainIpcRegistry({
   app,
   calculateDirectorySize,
   callVoiceFlowBackend,
+  callTextRefineBackend,
+  buildCurrentLlmRequestConfig,
   checkVoiceServerReady,
   clipboard,
   createClipboardSnapshot,
@@ -503,6 +583,7 @@ const mainIpcRegistry = createMainIpcRegistry({
   ensureVoiceServer,
   fs,
   getFloatingBar,
+  getMeetingSubtitlesWindow,
   getInteractiveCardPayload: () => pendingInteractiveCardPayload,
   getMainWindow,
   getVoiceModelStatus,
@@ -510,7 +591,9 @@ const mainIpcRegistry = createMainIpcRegistry({
   handleFloatingBarSetAlwaysOnTopForWindows: () => windowManager.handleFloatingBarSetAlwaysOnTopForWindows(),
   handleFloatingBarUpdatePositions: (payload) => windowManager.handleFloatingBarUpdatePositions(payload),
   handleFloatingPanelEvent: (payload) => windowManager.handleFloatingPanelEvent(payload),
-  handleVoiceState: (payload) => windowManager.handleVoiceState(payload),
+  handleVoiceState: handleVoiceStateFromRenderer,
+  handleMeetingDetectorStartRecording,
+  handleMeetingDetectorDismiss,
   ipcMain,
   isMuted: () => audioSessionService.isMuted(),
   isSameFocusedContext,
@@ -541,11 +624,14 @@ const mainIpcRegistry = createMainIpcRegistry({
   restoreMutedBackgroundSessions,
   sendToMain,
   sendToFloatingBar,
+  sendToMeetingSubtitles,
   shortcutCommandRepository,
   shortcutCommandRegistrar,
   setInteractiveCardPayload: (payload) => {
     pendingInteractiveCardPayload = payload;
   },
+  showMeetingSubtitles: (payload) => windowManager.showMeetingSubtitles(payload),
+  hideMeetingSubtitles: () => windowManager.hideMeetingSubtitles(),
   shell,
   spawnProcess: spawn,
   startVoiceModelDownload,
@@ -613,6 +699,7 @@ app.whenReady().then(() => {
   createTray();
   createMainWindow({ show: !START_HIDDEN });
   createFloatingBar();
+  meetingDetectorService?.start();
   startRightAltListener();
   shortcutCommandRegistrar.registerAll();
 });
@@ -634,6 +721,7 @@ app.on('before-quit', (event) => {
 app.on('will-quit', () => {
   voiceBackendService.stop();
   windowManager?.dispose();
+  meetingDetectorService?.stop();
   shortcutCommandRegistrar.dispose();
   rightAltListenerService.dispose();
   stopRightAltListener();

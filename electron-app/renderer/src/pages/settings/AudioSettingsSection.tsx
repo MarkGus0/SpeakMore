@@ -13,6 +13,7 @@ import { type LocalSettings } from '../../services/settingsStore'
 import { useI18n, type TranslationKey } from '../../i18n'
 import { getAudioStreamForDevice, stopStreamTracks } from '../../services/voice/audioCapture'
 import { cleanupAudioLevelMonitoring, startAudioLevelMonitoring } from '../../services/voice/audioLevelMonitor'
+import { captionTextSx, helperTextSx, itemTitleSx, sectionTitleSx } from '../../uiTokens'
 
 type AudioDevice = { deviceId: string; label?: string }
 
@@ -39,7 +40,7 @@ const testPanelSx = {
   mt: 1.5,
 }
 
-const sectionTitle = { fontSize: 16, fontWeight: 500, mt: 3, mb: 1 }
+const sectionTitle = { ...sectionTitleSx, mt: 3, mb: 1 }
 
 const audioToggleItems = [
   {
@@ -122,8 +123,8 @@ export default function AudioSettingsSection({
       <Typography sx={sectionTitle}>{t('settings.audio.title')}</Typography>
       <Box sx={rowSx}>
         <Box sx={{ minWidth: 0 }}>
-          <Typography sx={{ fontWeight: 600 }}>{t('settings.microphone')}</Typography>
-          <Typography sx={{ fontSize: 13, color: 'text.secondary', mt: 0.3 }}>
+          <Typography sx={itemTitleSx}>{t('settings.microphone')}</Typography>
+          <Typography sx={{ ...helperTextSx, color: 'text.secondary', mt: 0.3 }}>
             {selectedDeviceText}
           </Typography>
         </Box>
@@ -155,8 +156,8 @@ export default function AudioSettingsSection({
       <Box sx={testPanelSx}>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1.5 }}>
           <Box sx={{ minWidth: 0 }}>
-            <Typography sx={{ fontWeight: 600 }}>{t('settings.audio.microphoneTest')}</Typography>
-            <Typography sx={{ fontSize: 13, color: 'text.secondary', mt: 0.3 }}>
+            <Typography sx={itemTitleSx}>{t('settings.audio.microphoneTest')}</Typography>
+            <Typography sx={{ ...helperTextSx, color: 'text.secondary', mt: 0.3 }}>
               {isTesting ? t('settings.audio.microphoneTesting') : t('settings.audio.microphoneTestHint')}
             </Typography>
           </Box>
@@ -179,7 +180,7 @@ export default function AudioSettingsSection({
             value={Math.round(testLevel * 100)}
             sx={{ flex: 1, height: 8, borderRadius: 999, bgcolor: 'rgba(119,119,119,0.14)' }}
           />
-          <Typography sx={{ width: 42, fontSize: 12, color: 'text.secondary', textAlign: 'right' }}>
+          <Typography sx={{ ...captionTextSx, width: 42, color: 'text.secondary', textAlign: 'right' }}>
             {Math.round(testLevel * 100)}%
           </Typography>
         </Box>
@@ -194,8 +195,8 @@ export default function AudioSettingsSection({
         {audioToggleItems.map((item) => (
           <Box key={item.key} sx={rowSx}>
             <Box sx={{ minWidth: 0 }}>
-              <Typography sx={{ fontWeight: 600 }}>{t(item.title as TranslationKey)}</Typography>
-              <Typography sx={{ fontSize: 13, color: 'text.secondary', mt: 0.3 }}>
+              <Typography sx={itemTitleSx}>{t(item.title as TranslationKey)}</Typography>
+              <Typography sx={{ ...helperTextSx, color: 'text.secondary', mt: 0.3 }}>
                 {t(item.description as TranslationKey)}
               </Typography>
             </Box>

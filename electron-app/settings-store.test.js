@@ -4,17 +4,63 @@ const {
   DEFAULT_LANGUAGE,
   DEFAULT_ASR_DEVICE_MODE,
   DEFAULT_LLM_PROVIDERS,
+  DEFAULT_MEETING_LIVE_AUDIO_SOURCE,
+  DEFAULT_MEETING_LIVE_TARGET_LANGUAGE,
   DEFAULT_TRANSLATION_TARGET_LANGUAGE,
+  INTERFACE_LANGUAGES,
+  SUPPORTED_INTERFACE_LANGUAGES,
   normalizeLocalSettings,
   createSettingsStore,
 } = require('./settings-store');
 const sharedLlmProviders = require('../shared/llm-providers.json');
+const sharedTranslationTargetLanguages = require('../shared/translation-target-languages.json');
+const sharedMeetingLiveTargetLanguages = require('../shared/meeting-live-target-languages.json');
+const sharedInterfaceLanguages = require('../shared/interface-languages.json');
+
+const EXPECTED_INTERFACE_LANGUAGE_IDS = [
+  'en-US', 'zh-CN', 'zh-TW', 'ja-JP', 'ko-KR', 'es-ES', 'pt-BR',
+  'fr-FR', 'de-DE', 'it-IT', 'ru-RU', 'ar-SA', 'he-IL', 'hi-IN',
+  'id-ID', 'ms-MY', 'nl-NL', 'pl-PL', 'th-TH',
+];
 
 test('默认 LLM provider 元数据来自共享 JSON', () => {
   assert.strictEqual(DEFAULT_LLM_PROVIDERS, sharedLlmProviders);
 
   const openaiProvider = DEFAULT_LLM_PROVIDERS.find((provider) => provider.id === 'openai');
   assert.equal(openaiProvider.defaultModel, 'gpt-5.4');
+});
+
+test('界面语言元数据来自共享 JSON 并覆盖截图语言', () => {
+  assert.strictEqual(INTERFACE_LANGUAGES, sharedInterfaceLanguages);
+  assert.deepEqual(
+    INTERFACE_LANGUAGES.map((language) => language.id),
+    EXPECTED_INTERFACE_LANGUAGE_IDS,
+  );
+  assert.equal(
+    INTERFACE_LANGUAGES.every((language) => SUPPORTED_INTERFACE_LANGUAGES.has(language.id)),
+    true,
+  );
+  assert.equal(
+    INTERFACE_LANGUAGES.every((language) => language.labelKey === `settings.interfaceLanguage.${language.id}`),
+    true,
+  );
+});
+
+test('翻译目标语言元数据来自共享 JSON 并包含设置页扩展语言', () => {
+  assert.deepEqual(
+    sharedTranslationTargetLanguages.map((language) => language.id),
+    [
+      'zh-CN', 'zh-TW', 'en', 'ja', 'ko', 'es', 'pt', 'pt-BR', 'fr', 'de',
+      'it', 'ru', 'uk', 'ar', 'he', 'fa', 'hi', 'bn', 'ur', 'th',
+      'vi', 'id', 'ms', 'fil', 'my', 'km', 'lo', 'nl', 'pl', 'tr',
+      'el', 'cs', 'ro', 'hu', 'sv', 'da', 'no', 'fi', 'sw',
+    ],
+  );
+  assert.equal(sharedTranslationTargetLanguages.some((language) => language.id === 'yue'), false);
+  assert.deepEqual(
+    sharedMeetingLiveTargetLanguages.map((language) => language.id),
+    ['en', 'zh', 'ja', 'ko', 'es', 'fr', 'de'],
+  );
 });
 
 test('normalizeLocalSettings 会回退不支持的翻译目标语言和空设备', () => {
@@ -34,6 +80,9 @@ test('normalizeLocalSettings 会回退不支持的翻译目标语言和空设备
   assert.equal(settings.muteBackgroundAudioDuringRecording, true);
   assert.equal(settings.showActiveMicrophoneHint, true);
   assert.equal(settings.remindOnNewAudioDevice, true);
+  assert.equal(settings.meetingDetectionEnabled, true);
+  assert.equal(settings.meetingLiveAudioSource, DEFAULT_MEETING_LIVE_AUDIO_SOURCE);
+  assert.equal(settings.meetingLiveTargetLanguage, DEFAULT_MEETING_LIVE_TARGET_LANGUAGE);
   assert.equal(settings.showFloatingBar, true);
   assert.equal(settings.hideMainWindowOnClose, true);
   assert.equal(settings.modelCacheDir, '');
@@ -46,6 +95,9 @@ test('normalizeLocalSettings 会保留音频和应用行为开关', () => {
     muteBackgroundAudioDuringRecording: false,
     showActiveMicrophoneHint: false,
     remindOnNewAudioDevice: false,
+    meetingDetectionEnabled: false,
+    meetingLiveAudioSource: 'system',
+    meetingLiveTargetLanguage: 'ko',
     showFloatingBar: false,
     hideMainWindowOnClose: false,
   });
@@ -54,6 +106,9 @@ test('normalizeLocalSettings 会保留音频和应用行为开关', () => {
   assert.equal(settings.muteBackgroundAudioDuringRecording, false);
   assert.equal(settings.showActiveMicrophoneHint, false);
   assert.equal(settings.remindOnNewAudioDevice, false);
+  assert.equal(settings.meetingDetectionEnabled, false);
+  assert.equal(settings.meetingLiveAudioSource, 'system');
+  assert.equal(settings.meetingLiveTargetLanguage, 'ko');
   assert.equal(settings.showFloatingBar, false);
   assert.equal(settings.hideMainWindowOnClose, false);
 });
@@ -73,10 +128,18 @@ test('normalizeLocalSettings 会保留合法的 ASR 运行设备模式', () => {
   assert.equal(normalizeLocalSettings({ asrDeviceMode: 'auto' }).asrDeviceMode, DEFAULT_ASR_DEVICE_MODE);
 });
 
-test('normalizeLocalSettings 会保留英文界面语言并回退未知界面语言', () => {
+test('normalizeLocalSettings 会保留截图界面语言并回退未知界面语言', () => {
   assert.equal(
     normalizeLocalSettings({ preferredLanguage: 'en-US' }).preferredLanguage,
     'en-US',
+  );
+  assert.equal(
+    normalizeLocalSettings({ preferredLanguage: 'ja-JP' }).preferredLanguage,
+    'ja-JP',
+  );
+  assert.equal(
+    normalizeLocalSettings({ preferredLanguage: 'th-TH' }).preferredLanguage,
+    'th-TH',
   );
   assert.equal(
     normalizeLocalSettings({ preferredLanguage: 'xx' }).preferredLanguage,
@@ -116,11 +179,13 @@ test('createSettingsStore 读取和写入时都会同步 legacy store', () => {
   let synced = null;
   const store = createSettingsStore({
     readJsonFile: () => ({
-      translationTargetLanguage: 'ja',
+      translationTargetLanguage: 'fr',
       selectedAudioDeviceId: 'mic-1',
       modelCacheDir: 'D:\\Models\\FunASR',
       asrDeviceMode: 'mps',
       launchAtSystemStartup: true,
+      meetingLiveAudioSource: 'microphone_system',
+      meetingLiveTargetLanguage: 'es',
       muteBackgroundAudioDuringRecording: false,
       showFloatingBar: false,
       llm: {
@@ -140,15 +205,17 @@ test('createSettingsStore 读取和写入时都会同步 legacy store', () => {
   });
 
   const settings = store.readLocalSettings();
-  assert.equal(settings.translationTargetLanguage, 'ja');
+  assert.equal(settings.translationTargetLanguage, 'fr');
   assert.equal(synced.selectedAudioDeviceId, 'mic-1');
   assert.equal(settings.modelCacheDir, 'D:\\Models\\FunASR');
   assert.equal(settings.asrDeviceMode, 'mps');
+  assert.equal(settings.meetingLiveAudioSource, 'microphone_system');
+  assert.equal(settings.meetingLiveTargetLanguage, 'es');
   assert.equal(settings.muteBackgroundAudioDuringRecording, false);
   assert.equal(synced.showFloatingBar, false);
 
   const next = store.writeLocalSettings({
-    translationTargetLanguage: 'en',
+    translationTargetLanguage: 'zh-CN',
     selectedAudioDeviceId: 'default',
     modelCacheDir: 'E:\\SpeakMoreModels',
     asrDeviceMode: 'cpu',
@@ -157,18 +224,24 @@ test('createSettingsStore 读取和写入时都会同步 legacy store', () => {
     muteBackgroundAudioDuringRecording: true,
     showActiveMicrophoneHint: false,
     remindOnNewAudioDevice: false,
+    meetingDetectionEnabled: false,
+    meetingLiveAudioSource: 'system',
+    meetingLiveTargetLanguage: 'de',
     showFloatingBar: true,
     hideMainWindowOnClose: false,
     llm: settings.llm,
   });
 
-  assert.equal(written.translationTargetLanguage, 'en');
+  assert.equal(written.translationTargetLanguage, 'zh-CN');
   assert.equal(written.modelCacheDir, 'E:\\SpeakMoreModels');
   assert.equal(written.asrDeviceMode, 'cpu');
   assert.equal(written.interactionSoundsEnabled, false);
+  assert.equal(written.meetingDetectionEnabled, false);
+  assert.equal(written.meetingLiveAudioSource, 'system');
+  assert.equal(written.meetingLiveTargetLanguage, 'de');
   assert.equal(written.hideMainWindowOnClose, false);
-  assert.equal(next.translationTargetLanguage, 'en');
-  assert.equal(synced.translationTargetLanguage, 'en');
+  assert.equal(next.translationTargetLanguage, 'zh-CN');
+  assert.equal(synced.translationTargetLanguage, 'zh-CN');
   assert.equal(synced.muteBackgroundAudioDuringRecording, true);
 });
 

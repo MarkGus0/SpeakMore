@@ -81,7 +81,9 @@ test('createMainIpcRegistry 只注册一次并按固定顺序分发依赖', () =
     dictionaryRepository: { name: 'dictionaryRepository' },
     emitDictionaryChanged,
     emitSettingsChanged,
+    buildCurrentLlmRequestConfig: () => ({ provider_id: 'deepseek' }),
     callVoiceFlowBackend: () => undefined,
+    callTextRefineBackend: () => undefined,
     checkVoiceServerReady: () => undefined,
     ensureVoiceBackendStarted: () => undefined,
     ensureVoiceServer: () => undefined,
@@ -139,6 +141,9 @@ test('createMainIpcRegistry 只注册一次并按固定顺序分发依赖', () =
   assert.equal(calls[0][1].clipboard, clipboard);
   assert.equal(calls[0][1].getLocalUser(), localUser);
   assert.equal(calls[1][1].getDeviceId(), 'device-1');
+  assert.equal(typeof calls[1][1].buildCurrentLlmRequestConfig, 'function');
+  assert.equal(typeof calls[1][1].callVoiceFlowBackend, 'function');
+  assert.equal(typeof calls[1][1].callTextRefineBackend, 'function');
   assert.equal(calls[2][1].emitSettingsChanged, emitSettingsChanged);
   assert.equal(calls[3][1].emitDictionaryChanged, emitDictionaryChanged);
   assert.equal(typeof calls[4][1].ensureVoiceServer, 'function');

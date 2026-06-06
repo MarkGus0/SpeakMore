@@ -169,6 +169,64 @@ function createVoiceBackendClient({
     };
   }
 
+  async function callTextRefineBackend(payload = {}) {
+    let response = null;
+    let result = null;
+    try {
+      response = await fetchImpl(urls.textRefineUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          text: String(payload.text || payload.rawText || payload.raw_text || ''),
+          mode: normalizeVoiceMode(payload.mode),
+          audio_context: parseJsonObject(payload.audioContext || payload.audio_context),
+          parameters: buildVoiceFlowParameters(payload, formOptions),
+        }),
+      });
+      result = await readJsonSafely(response);
+    } catch (error) {
+      return {
+        success: false,
+        aborted: false,
+        debug: result,
+        detail: String(error?.message || error || 'text refine request failed'),
+        code: 'text_refine_unavailable',
+        paywall: null,
+        error: String(error?.message || error || 'text refine request failed'),
+      };
+    }
+
+    if (!response.ok || !result || typeof result !== 'object' || result?.status === 'ERROR') {
+      const detail = result?.data?.detail || result?.data?.refine_text || resolveVoiceServerProbeDetail(urls.textRefineUrl, response.status, result);
+      return {
+        success: false,
+        aborted: false,
+        debug: result,
+        detail,
+        code: result?.data?.code || 'text_refine_failed',
+        paywall: result?.data?.important_notification || null,
+        web_metadata: result?.data?.web_metadata ?? null,
+        external_action: result?.data?.external_action ?? null,
+        error: result?.data?.refine_text || detail,
+      };
+    }
+
+    const resultData = result.data || {};
+
+    return {
+      success: true,
+      aborted: false,
+      debug: result,
+      data: resultData,
+      detail: '',
+      code: '',
+      paywall: null,
+      web_metadata: resultData.web_metadata ?? null,
+      external_action: resultData.external_action ?? null,
+      ...resultData,
+    };
+  }
+
   return {
     urls,
     checkVoiceServerReady,
@@ -176,6 +234,7 @@ function createVoiceBackendClient({
     startVoiceModelDownload,
     reloadVoiceServerConfig,
     callVoiceFlowBackend,
+    callTextRefineBackend,
   };
 }
 

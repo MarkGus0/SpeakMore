@@ -172,6 +172,54 @@ class VoiceFlowContractTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
 
+    def test_text_refine_success_payload_uses_existing_refiner(self):
+        app = self.create_ready_app()
+
+        with patch("main.refine_text", return_value="hello refined") as refine_text, TestClient(app) as client:
+            self.wait_until_ready(client)
+            response = client.post(
+                "/ai/text_refine",
+                json={
+                    "text": "hello",
+                    "mode": "transcript",
+                    "audio_context": {"source": "history_retry"},
+                    "parameters": {"llm": {"provider_id": "deepseek"}},
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()["data"]
+        self.assertEqual(payload["refine_text"], "hello refined")
+        self.assertEqual(payload["user_prompt"], "hello")
+        refine_text.assert_called_once_with(
+            raw_text="hello",
+            mode="transcript",
+            context={"source": "history_retry"},
+            parameters={"llm": {"provider_id": "deepseek"}},
+        )
+
+    def test_text_refine_rejects_empty_text(self):
+        app = self.create_ready_app()
+
+        with TestClient(app) as client:
+            self.wait_until_ready(client)
+            response = client.post("/ai/text_refine", json={"text": "   ", "mode": "transcript"})
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_text_refine_error_payload_includes_detail_and_code(self):
+        app = self.create_ready_app()
+
+        with patch("main.refine_text", side_effect=RuntimeError("llm boom")), TestClient(app) as client:
+            self.wait_until_ready(client)
+            response = client.post("/ai/text_refine", json={"text": "hello", "mode": "transcript"})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()["data"]
+        self.assertEqual(payload["detail"], "llm boom")
+        self.assertEqual(payload["code"], "text_refine_failed")
+        self.assertEqual(payload["user_prompt"], "hello")
+
     def test_voice_flow_rejects_unsupported_media_extension(self):
         app = self.create_ready_app()
 

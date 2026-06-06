@@ -17,9 +17,28 @@ DEFAULT_LLM_MODEL = "deepseek-chat"
 DEFAULT_TRANSLATION_TARGET_LANGUAGE_ID = "en"
 DEFAULT_TRANSLATION_TARGET_LANGUAGE_NAME = "English"
 MAX_CUSTOM_PROMPT_CHARS = 12000
+AUDIO_QUALITY_NUMERIC_FIELDS = (
+    "average_rms",
+    "peak",
+    "clipping_ratio",
+    "speech_frame_ratio",
+    "low_volume_ratio",
+    "estimated_noise_floor",
+)
+AUDIO_QUALITY_HINT_LABELS = {
+    "low_volume": "低音量",
+    "clipping": "削波或爆音",
+    "likely_noisy": "背景噪声较大",
+    "mostly_silence": "大部分为静音或人声很少",
+}
 FALLBACK_TRANSLATION_TARGET_LANGUAGE_NAMES = {
     "en": "English",
+    "zh": "Chinese",
     "ja": "Japanese",
+    "ko": "Korean",
+    "es": "Spanish",
+    "fr": "French",
+    "de": "German",
 }
 TRANSLATION_TARGET_LANGUAGES_PATH = (
     Path(__file__).resolve().parent.parent
@@ -61,11 +80,15 @@ def load_translation_target_language_metadata() -> tuple[dict[str, str], dict[st
         prompt_name = str(item.get("promptName", "")).strip()
         if language_id and prompt_name:
             names[language_id] = prompt_name
+            item_aliases = item.get("aliases", [])
+            if not isinstance(item_aliases, list):
+                item_aliases = []
             for alias in (
                 language_id,
                 prompt_name,
                 item.get("label", ""),
                 item.get("displayName", ""),
+                *item_aliases,
             ):
                 normalized_alias = normalize_translation_alias(alias)
                 if normalized_alias:
@@ -82,6 +105,10 @@ def load_translation_target_language_names() -> dict[str, str]:
 TRANSLATION_TARGET_LANGUAGE_NAMES, TRANSLATION_TARGET_LANGUAGE_ALIASES = load_translation_target_language_metadata()
 
 
+def resolve_translation_target_language_id(value: object) -> str:
+    return TRANSLATION_TARGET_LANGUAGE_ALIASES.get(normalize_translation_alias(value), "")
+
+
 def summarize_text_for_log(value: object) -> dict:
     text = str(value or "").strip()
     return {
@@ -92,7 +119,7 @@ def summarize_text_for_log(value: object) -> dict:
 
 
 def normalize_translation_target_language_id(value: object) -> str:
-    language_id = TRANSLATION_TARGET_LANGUAGE_ALIASES.get(normalize_translation_alias(value), "")
+    language_id = resolve_translation_target_language_id(value)
     if language_id:
         return language_id
     if DEFAULT_TRANSLATION_TARGET_LANGUAGE_ID in TRANSLATION_TARGET_LANGUAGE_NAMES:
@@ -117,7 +144,19 @@ def normalize_custom_command_prompt(parameters: dict | None) -> str:
     return prompt
 
 
+def is_realtime_sentence_translation(parameters: dict | None) -> bool:
+    return isinstance(parameters, dict) and parameters.get("realtime_sentence_translation") is True
+
+
 def resolve_system_prompt(mode: str, parameters: dict | None = None) -> str:
+    if mode == "translation" and is_realtime_sentence_translation(parameters):
+        return (
+            "You are a fast live meeting interpreter. Translate only the current committed sentence "
+            "into the target language. Use the previous sentences only as hidden context. "
+            "Do not repeat previous sentences. Do not include the source text, labels, markdown, "
+            "explanations, timestamps, emoji, or extra commentary. Return only the translation."
+        )
+
     if mode != "custom_command":
         return SYSTEM_PROMPTS.get(mode, SYSTEM_PROMPTS["transcript"])
 
@@ -184,7 +223,13 @@ def create_openai_compatible_client(config: dict) -> AsyncOpenAI:
     )
 
 
-async def request_anthropic_completion(config: dict, system_prompt: str, user_message: str) -> str:
+async def request_anthropic_completion(
+    config: dict,
+    system_prompt: str,
+    user_message: str,
+    temperature: float = 0.3,
+    max_tokens: int = 2048,
+) -> str:
     url = f"{config['base_url']}/messages"
     headers = {
         "content-type": "application/json",
@@ -195,8 +240,8 @@ async def request_anthropic_completion(config: dict, system_prompt: str, user_me
         "model": config["model"],
         "system": system_prompt,
         "messages": [{"role": "user", "content": user_message}],
-        "temperature": 0.3,
-        "max_tokens": 2048,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
     }
 
     async with httpx.AsyncClient(timeout=60) as client:
@@ -214,7 +259,13 @@ async def request_anthropic_completion(config: dict, system_prompt: str, user_me
     return ""
 
 
-async def request_openai_compatible_completion(config: dict, system_prompt: str, user_message: str) -> str:
+async def request_openai_compatible_completion(
+    config: dict,
+    system_prompt: str,
+    user_message: str,
+    temperature: float = 0.3,
+    max_tokens: int = 2048,
+) -> str:
     client = create_openai_compatible_client(config)
     response = await client.chat.completions.create(
         model=config["model"],
@@ -222,8 +273,8 @@ async def request_openai_compatible_completion(config: dict, system_prompt: str,
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message},
         ],
-        temperature=0.3,
-        max_tokens=2048,
+        temperature=temperature,
+        max_tokens=max_tokens,
     )
     return response.choices[0].message.content.strip()
 
@@ -276,6 +327,56 @@ def build_dictionary_context(dictionary_terms: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def normalize_audio_quality(parameters: dict | None) -> dict:
+    if not isinstance(parameters, dict):
+        return {}
+
+    quality = parameters.get("audio_quality")
+    if not isinstance(quality, dict):
+        return {}
+
+    normalized: dict[str, object] = {}
+    for field in AUDIO_QUALITY_NUMERIC_FIELDS:
+        value = quality.get(field)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        normalized[field] = round(float(value), 4)
+
+    hints = []
+    raw_hints = quality.get("hints", [])
+    if isinstance(raw_hints, list):
+        for hint in raw_hints:
+            text = str(hint or "").strip()
+            if text in AUDIO_QUALITY_HINT_LABELS and text not in hints:
+                hints.append(text)
+    if hints:
+        normalized["hints"] = hints
+
+    return normalized
+
+
+def build_audio_quality_context(parameters: dict | None) -> str:
+    quality = normalize_audio_quality(parameters)
+    if not quality:
+        return ""
+
+    lines = ["本轮音频质量提示："]
+    hints = quality.get("hints")
+    if isinstance(hints, list) and hints:
+        labels = [AUDIO_QUALITY_HINT_LABELS.get(str(hint), str(hint)) for hint in hints]
+        lines.append(f"- 检测到：{'、'.join(labels)}。")
+
+    metrics = []
+    for field in AUDIO_QUALITY_NUMERIC_FIELDS:
+        if field in quality:
+            metrics.append(f"{field}={quality[field]}")
+    if metrics:
+        lines.append(f"- 质量指标：{', '.join(metrics)}。")
+
+    lines.append("- 处理原则：音频质量不佳时少猜保真，只修复可确认的口语噪声和 ASR 错词，不编造人名、地点、时间、数字、任务对象或专有名词。")
+    return "\n".join(lines)
+
+
 def build_refiner_user_message(
     raw_text: str,
     mode: str = "transcript",
@@ -283,6 +384,7 @@ def build_refiner_user_message(
     parameters: dict | None = None,
 ) -> str:
     dictionary_context = build_dictionary_context(normalize_dictionary_terms(parameters))
+    audio_quality_context = build_audio_quality_context(parameters)
     user_message = raw_text
 
     if mode == "transcript" and context:
@@ -310,7 +412,22 @@ def build_refiner_user_message(
             parameters.get("output_language") if isinstance(parameters, dict) else None,
         )
         target_lang = format_target_language_for_prompt(target_language_id)
-        user_message = f"目标语言：{target_lang}（语言代码：{target_language_id}）\n\n待翻译的语音转写文本：\n{raw_text}"
+        if is_realtime_sentence_translation(parameters):
+            previous_sentences = []
+            if isinstance(parameters, dict) and isinstance(parameters.get("realtime_context_sentences"), list):
+                previous_sentences = [
+                    str(item or "").strip()
+                    for item in parameters.get("realtime_context_sentences", [])[-2:]
+                    if str(item or "").strip()
+                ]
+            context_line = "\n".join(previous_sentences)
+            user_message = (
+                f"Target language: {target_lang} ({target_language_id})\n"
+                f"Previous sentences for context only:\n{context_line or '(none)'}\n\n"
+                f"Current sentence to translate:\n{raw_text}"
+            )
+        else:
+            user_message = f"目标语言：{target_lang}（语言代码：{target_language_id}）\n\n待翻译的语音转写文本：\n{raw_text}"
 
     elif mode == "custom_command":
         command_name = ""
@@ -344,9 +461,18 @@ def build_refiner_user_message(
     elif mode == "ask_anything":
         print("[Refiner][ask_anything] 未收到 parameters")
 
-    if dictionary_context:
-        return f"{dictionary_context}\n\n{user_message}"
+    context_blocks = [item for item in (dictionary_context, audio_quality_context) if item]
+    if context_blocks:
+        if mode == "transcript" and user_message == raw_text:
+            user_message = f"Transcription to refine:\n{raw_text}"
+        return "\n\n".join([*context_blocks, user_message])
     return user_message
+
+
+def resolve_completion_options(mode: str, parameters: dict | None) -> dict:
+    if mode == "translation" and is_realtime_sentence_translation(parameters):
+        return {"temperature": 0.0, "max_tokens": 128}
+    return {"temperature": 0.3, "max_tokens": 2048}
 
 
 async def refine_text(
@@ -378,13 +504,14 @@ async def refine_text(
         context=context,
         parameters=parameters,
     )
+    completion_options = resolve_completion_options(mode, parameters)
 
     try:
         llm_config = normalize_request_llm_config(parameters)
         if llm_config:
             if llm_config["auth_type"] == "anthropic":
-                return await request_anthropic_completion(llm_config, system_prompt, user_message)
-            return await request_openai_compatible_completion(llm_config, system_prompt, user_message)
+                return await request_anthropic_completion(llm_config, system_prompt, user_message, **completion_options)
+            return await request_openai_compatible_completion(llm_config, system_prompt, user_message, **completion_options)
 
         client = _get_client()
         response = await client.chat.completions.create(
@@ -393,8 +520,8 @@ async def refine_text(
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message},
             ],
-            temperature=0.3,
-            max_tokens=2048,
+            temperature=completion_options["temperature"],
+            max_tokens=completion_options["max_tokens"],
         )
         return response.choices[0].message.content.strip()
     except Exception as e:

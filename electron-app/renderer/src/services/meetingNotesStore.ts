@@ -1,8 +1,10 @@
 import { ipcClient } from './ipc'
-import { getCurrentLlmConfig } from './settingsStore'
+import { getCurrentLlmConfig, type MeetingLiveTargetLanguage } from './settingsStore'
 
 export type MeetingNoteStatus = 'draft' | 'recording' | 'processing' | 'completed' | 'error'
 export type MeetingNoteSource = 'manual' | 'recording' | 'import'
+export type MeetingAudioSource = 'microphone' | 'system' | 'microphone_system'
+export type MeetingTranslationTarget = MeetingLiveTargetLanguage
 
 export type MeetingNote = {
   id: string
@@ -10,7 +12,12 @@ export type MeetingNote = {
   status: MeetingNoteStatus
   source: MeetingNoteSource
   transcript: string
+  translationText: string
   summary: string
+  audioSource: MeetingAudioSource
+  targetLanguage: MeetingTranslationTarget
+  showOriginal: boolean
+  showTranslation: boolean
   durationMs: number
   importFile: { name: string; size: number; type: string } | null
   createdAt: string
@@ -28,6 +35,7 @@ export type MeetingNoteChangeEvent = {
 export type MeetingImportResult = {
   success: boolean
   transcript: string
+  translationText: string
   summary: string
   detail: string
 }
@@ -47,7 +55,12 @@ export function createDraftMeetingNote(): Partial<MeetingNote> {
     status: 'draft',
     source: 'manual',
     transcript: '',
+    translationText: '',
     summary: '',
+    audioSource: 'microphone',
+    targetLanguage: 'off',
+    showOriginal: true,
+    showTranslation: true,
     durationMs: 0,
     importFile: null,
     createdAt,
@@ -104,10 +117,10 @@ export function isSupportedMeetingMediaFile(file: File) {
 
 export async function importMeetingMediaFile(file: File): Promise<MeetingImportResult> {
   if (!isSupportedMeetingMediaFile(file)) {
-    return { success: false, transcript: '', summary: '', detail: 'unsupported_media_type' }
+    return { success: false, transcript: '', translationText: '', summary: '', detail: 'unsupported_media_type' }
   }
   if (file.size > MAX_MEETING_MEDIA_BYTES) {
-    return { success: false, transcript: '', summary: '', detail: 'media_file_too_large' }
+    return { success: false, transcript: '', translationText: '', summary: '', detail: 'media_file_too_large' }
   }
 
   try {
@@ -118,7 +131,7 @@ export async function importMeetingMediaFile(file: File): Promise<MeetingImportR
 
   const llm = await getCurrentLlmConfig()
   if (!llm.api_key.trim()) {
-    return { success: false, transcript: '', summary: '', detail: 'llm_api_key_missing' }
+    return { success: false, transcript: '', translationText: '', summary: '', detail: 'llm_api_key_missing' }
   }
 
   const formData = new FormData()
@@ -141,6 +154,7 @@ export async function importMeetingMediaFile(file: File): Promise<MeetingImportR
       return {
         success: false,
         transcript: String(data.user_prompt || ''),
+        translationText: String(data.translation_text || ''),
         summary: '',
         detail: String(data.detail || data.refine_text || response.statusText || 'voice_flow_failed'),
       }
@@ -148,6 +162,7 @@ export async function importMeetingMediaFile(file: File): Promise<MeetingImportR
     return {
       success: true,
       transcript: String(data.user_prompt || ''),
+      translationText: String(data.translation_text || ''),
       summary: String(data.refine_text || ''),
       detail: '',
     }
@@ -155,6 +170,7 @@ export async function importMeetingMediaFile(file: File): Promise<MeetingImportR
     return {
       success: false,
       transcript: '',
+      translationText: '',
       summary: '',
       detail: error instanceof Error ? error.message : String(error),
     }

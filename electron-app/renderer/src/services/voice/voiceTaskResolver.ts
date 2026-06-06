@@ -12,6 +12,7 @@ import {
   type FocusedSelectionSnapshot,
 } from './focusedContext'
 import type { VoiceMode } from './voiceTypes'
+import type { MeetingAudioSource, MeetingTranslationTarget } from '../meetingNotesStore'
 
 export type VoiceTaskDelivery = 'paste' | 'floating-panel' | 'none'
 
@@ -27,6 +28,12 @@ export type VoiceTask = {
     id: string
     name: string
     prompt: string
+  }
+  meetingOptions?: {
+    audioSource: MeetingAudioSource
+    targetLanguage: MeetingTranslationTarget
+    showOriginal: boolean
+    showTranslation: boolean
   }
 }
 
@@ -181,6 +188,9 @@ export async function resolveShortcutCommandVoiceTask(
   }, 'paste')
 }
 
-export function createMeetingNotesVoiceTask(): VoiceTask {
-  return createTask('MeetingNotes', NO_SELECTION_SNAPSHOT, 'none')
+export function createMeetingNotesVoiceTask(options?: VoiceTask['meetingOptions']): VoiceTask {
+  return {
+    ...createTask('MeetingNotes', NO_SELECTION_SNAPSHOT, 'none'),
+    ...(options ? { meetingOptions: options } : {}),
+  }
 }

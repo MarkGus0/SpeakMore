@@ -5,27 +5,46 @@
  */
 import { ipcClient } from './ipc'
 import translationTargetLanguages from '../../../../shared/translation-target-languages.json'
+import meetingLiveTargetLanguages from '../../../../shared/meeting-live-target-languages.json'
+import meetingNoteTargetLanguages from '../../../../shared/meeting-note-target-languages.json'
+import interfaceLanguages from '../../../../shared/interface-languages.json'
 import llmProviders from '../../../../shared/llm-providers.json'
 
 export type TranslationTargetLanguage = string
-export type InterfaceLanguage = 'zh-CN' | 'en-US'
+export type InterfaceLanguage = string
 export type LlmAuthType = 'bearer' | 'anthropic'
 export type AsrDeviceMode = 'default' | 'mps' | 'cuda' | 'cpu'
+export type MeetingLiveAudioSource = 'microphone' | 'system' | 'microphone_system'
+export type MeetingLiveTargetLanguage = 'off' | TranslationTargetLanguage
 
 export type TranslationTargetLanguageConfig = {
   id: string
   label: string
   displayName: string
+  secondaryLabel?: string
   promptName: string
+  aliases?: string[]
+}
+
+export type InterfaceLanguageConfig = {
+  id: InterfaceLanguage
+  labelKey: string
 }
 
 export const TRANSLATION_TARGET_LANGUAGES: TranslationTargetLanguageConfig[] = translationTargetLanguages
+export const MEETING_LIVE_TARGET_LANGUAGES: TranslationTargetLanguageConfig[] = meetingLiveTargetLanguages
+export const MEETING_NOTE_TARGET_LANGUAGES: TranslationTargetLanguageConfig[] = meetingNoteTargetLanguages
+export const INTERFACE_LANGUAGES: InterfaceLanguageConfig[] = interfaceLanguages
 export const DEFAULT_TRANSLATION_TARGET_LANGUAGE: TranslationTargetLanguage =
-  TRANSLATION_TARGET_LANGUAGES[0]?.id ?? 'en'
+  TRANSLATION_TARGET_LANGUAGES.some((language) => language.id === 'en')
+    ? 'en'
+    : TRANSLATION_TARGET_LANGUAGES[0]?.id ?? 'en'
 
 const translationTargetLanguageIds = new Set(TRANSLATION_TARGET_LANGUAGES.map((language) => language.id))
-const interfaceLanguageIds = new Set<InterfaceLanguage>(['zh-CN', 'en-US'])
+const interfaceLanguageIds = new Set<InterfaceLanguage>(INTERFACE_LANGUAGES.map((language) => language.id))
 const asrDeviceModes = new Set<AsrDeviceMode>(['default', 'mps', 'cuda', 'cpu'])
+const meetingLiveAudioSources = new Set<MeetingLiveAudioSource>(['microphone', 'system', 'microphone_system'])
+const meetingLiveTargetLanguageIds = new Set<MeetingLiveTargetLanguage>(['off', ...MEETING_LIVE_TARGET_LANGUAGES.map((language) => language.id)])
 
 export type LlmProvider = {
   id: string
@@ -85,6 +104,9 @@ export type LocalSettings = {
   muteBackgroundAudioDuringRecording: boolean
   showActiveMicrophoneHint: boolean
   remindOnNewAudioDevice: boolean
+  meetingDetectionEnabled: boolean
+  meetingLiveAudioSource: MeetingLiveAudioSource
+  meetingLiveTargetLanguage: MeetingLiveTargetLanguage
   showFloatingBar: boolean
   hideMainWindowOnClose: boolean
   modelCacheDir: string
@@ -101,6 +123,9 @@ export const defaultSettings: LocalSettings = {
   muteBackgroundAudioDuringRecording: true,
   showActiveMicrophoneHint: true,
   remindOnNewAudioDevice: true,
+  meetingDetectionEnabled: true,
+  meetingLiveAudioSource: 'microphone',
+  meetingLiveTargetLanguage: 'off',
   showFloatingBar: true,
   hideMainWindowOnClose: true,
   modelCacheDir: '',
@@ -171,6 +196,18 @@ function normalizeAsrDeviceMode(value: unknown): AsrDeviceMode {
     : 'default'
 }
 
+function normalizeMeetingLiveAudioSource(value: unknown): MeetingLiveAudioSource {
+  return typeof value === 'string' && meetingLiveAudioSources.has(value as MeetingLiveAudioSource)
+    ? value as MeetingLiveAudioSource
+    : 'microphone'
+}
+
+function normalizeMeetingLiveTargetLanguage(value: unknown): MeetingLiveTargetLanguage {
+  return typeof value === 'string' && meetingLiveTargetLanguageIds.has(value as MeetingLiveTargetLanguage)
+    ? value as MeetingLiveTargetLanguage
+    : 'off'
+}
+
 export function normalizeLlmSettings(value: unknown): LlmSettings {
   const settings = isRecord(value) ? value : {}
   const providedProviders = Array.isArray(settings.providers) ? settings.providers : []
@@ -204,6 +241,9 @@ export function normalizeSettings(settings?: Partial<LocalSettings> | null): Loc
     muteBackgroundAudioDuringRecording: normalizeBoolean(settings?.muteBackgroundAudioDuringRecording, true),
     showActiveMicrophoneHint: normalizeBoolean(settings?.showActiveMicrophoneHint, true),
     remindOnNewAudioDevice: normalizeBoolean(settings?.remindOnNewAudioDevice, true),
+    meetingDetectionEnabled: normalizeBoolean(settings?.meetingDetectionEnabled, true),
+    meetingLiveAudioSource: normalizeMeetingLiveAudioSource(settings?.meetingLiveAudioSource),
+    meetingLiveTargetLanguage: normalizeMeetingLiveTargetLanguage(settings?.meetingLiveTargetLanguage),
     showFloatingBar: normalizeBoolean(settings?.showFloatingBar, true),
     hideMainWindowOnClose: normalizeBoolean(settings?.hideMainWindowOnClose, true),
     modelCacheDir: normalizeOptionalPath(settings?.modelCacheDir),

@@ -52,6 +52,26 @@ class RefinerPromptTest(unittest.TestCase):
         self.assertIn("不总结", prompt)
         self.assertIn("不省略", prompt)
 
+    def test_voice_input_normalization_prompt_covers_real_world_speech(self):
+        prompt = VOICE_INPUT_NORMALIZATION_PROMPT
+
+        self.assertIn("口吃、重复、吞吐", prompt)
+        self.assertIn("自我纠正", prompt)
+        self.assertIn("换个说法", prompt)
+        self.assertIn("最后确认", prompt)
+        self.assertTrue("想到啥说啥" in prompt or "一边想一边说" in prompt)
+
+    def test_voice_input_normalization_prompt_covers_task_planning_and_noisy_audio(self):
+        prompt = VOICE_INPUT_NORMALIZATION_PROMPT
+
+        self.assertIn("日常任务计划采用积极触发", prompt)
+        self.assertIn("接下来、今天、明天", prompt)
+        self.assertIn("要去、去干嘛、见谁", prompt)
+        self.assertIn("不为缺失字段补全信息", prompt)
+        self.assertIn("嘈杂环境", prompt)
+        self.assertIn("少猜保真", prompt)
+        self.assertIn("不编造人名、地点、时间、数字、任务对象或专有名词", prompt)
+
     def test_mode_prompts_keep_their_final_task_boundaries(self):
         transcript_prompt = SYSTEM_PROMPTS["transcript"]
         translation_prompt = SYSTEM_PROMPTS["translation"]
@@ -161,6 +181,32 @@ class RefinerPromptTest(unittest.TestCase):
 
         self.assertEqual(message, "目标语言：English（语言代码：en）\n\n待翻译的语音转写文本：\n你好")
 
+    def test_realtime_translation_uses_short_sentence_prompt_and_options(self):
+        fake_client = FakeClient()
+
+        with patch("refiner._get_client", return_value=fake_client):
+            result = asyncio.run(refiner.refine_text(
+                raw_text="今天先讨论预算。",
+                mode="translation",
+                parameters={
+                    "output_language": "en",
+                    "realtime_sentence_translation": True,
+                    "realtime_context_sentences": ["上一句只作为上下文。"],
+                },
+            ))
+
+        self.assertEqual(result, "translated text")
+        call = fake_client.chat.completions.calls[0]
+        system_prompt = call["messages"][0]["content"]
+        user_message = call["messages"][1]["content"]
+        self.assertIn("fast live meeting interpreter", system_prompt)
+        self.assertIn("Do not repeat previous sentences", system_prompt)
+        self.assertIn("Previous sentences for context only", user_message)
+        self.assertIn("Current sentence to translate", user_message)
+        self.assertIn("今天先讨论预算。", user_message)
+        self.assertEqual(call["temperature"], 0.0)
+        self.assertEqual(call["max_tokens"], 128)
+
     def test_translation_target_language_accepts_prompt_name_alias(self):
         message = refiner.build_refiner_user_message(
             raw_text="你好",
@@ -169,6 +215,28 @@ class RefinerPromptTest(unittest.TestCase):
         )
 
         self.assertEqual(message, "目标语言：Japanese（语言代码：ja）\n\n待翻译的语音转写文本：\n你好")
+
+    def test_translation_target_language_accepts_extended_language_metadata(self):
+        cases = {
+            "zh-CN": "Simplified Chinese",
+            "zh-TW": "Traditional Chinese",
+            "pt-BR": "Brazilian Portuguese",
+            "sw": "Swahili",
+            "fr": "French",
+        }
+
+        for candidate, prompt_name in cases.items():
+            with self.subTest(candidate=candidate):
+                language_id = refiner.normalize_translation_target_language_id(candidate)
+                message = refiner.build_refiner_user_message(
+                    raw_text="你好",
+                    mode="translation",
+                    parameters={"output_language": candidate},
+                )
+
+                self.assertIn(f"目标语言：{prompt_name}", message)
+                self.assertIn(f"语言代码：{language_id}", message)
+                self.assertNotEqual(language_id, "en" if candidate != "en" else "")
 
     def test_build_dictionary_context_formats_enabled_terms(self):
         context = refiner.build_dictionary_context([
@@ -196,6 +264,33 @@ class RefinerPromptTest(unittest.TestCase):
         self.assertIn("client to api 应写作 Client2API", message)
         self.assertIn("Transcription to refine", message)
         self.assertIn("我在使用 client to api", message)
+
+    def test_build_refiner_user_message_injects_audio_quality_context(self):
+        message = refiner.build_refiner_user_message(
+            raw_text="我明天要去公司然后见一下王总",
+            mode="transcript",
+            parameters={
+                "audio_quality": {
+                    "average_rms": 0.01234,
+                    "peak": 0.2,
+                    "clipping_ratio": 0,
+                    "speech_frame_ratio": 0.18,
+                    "low_volume_ratio": 0.82,
+                    "estimated_noise_floor": 0.021,
+                    "hints": ["low_volume", "likely_noisy", "unknown_hint"],
+                },
+            },
+        )
+
+        self.assertIn("本轮音频质量提示", message)
+        self.assertIn("低音量", message)
+        self.assertIn("背景噪声较大", message)
+        self.assertIn("average_rms=0.0123", message)
+        self.assertIn("estimated_noise_floor=0.021", message)
+        self.assertIn("少猜保真", message)
+        self.assertIn("Transcription to refine", message)
+        self.assertIn("我明天要去公司然后见一下王总", message)
+        self.assertNotIn("unknown_hint", message)
 
     def test_build_dictionary_context_limits_terms(self):
         terms = [{"phrase": f"词{i}", "aliases": [f"alias{i}"]} for i in range(120)]

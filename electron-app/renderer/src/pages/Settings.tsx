@@ -7,6 +7,7 @@ import LanguageSettingsSection from './settings/LanguageSettingsSection'
 import LlmSettingsSection from './settings/LlmSettingsSection'
 import MacOSPermissionSection from './settings/MacOSPermissionSection'
 import ShortcutSettingsSection from './settings/ShortcutSettingsSection'
+import VoiceModelSettingsSection from './settings/VoiceModelSettingsSection'
 import { useSettingsPageState } from './settings/useSettingsPageState'
 import { useI18n } from '../i18n'
 
@@ -43,12 +44,13 @@ export default function Settings() {
         refreshDevices={refreshDevices}
         updateSettings={updateSettings}
       />
+      <VoiceModelSettingsSection settings={settings} updateSettings={updateSettings} />
+      <AsrRuntimeSettingsSection settings={settings} updateSettings={updateSettings} />
       <ApplicationBehaviorSettingsSection
         settings={settings}
         settingsSaveMessage={settingsSaveMessage}
         updateSettings={updateSettings}
       />
-      <AsrRuntimeSettingsSection settings={settings} updateSettings={updateSettings} />
       <LanguageSettingsSection settings={settings} updateSettings={updateSettings} />
       <LlmSettingsSection
         llmView={llmView}

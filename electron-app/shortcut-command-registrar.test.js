@@ -70,3 +70,29 @@ test('createShortcutCommandRegistrar reports duplicate accelerator conflicts', (
   assert.equal(status.b.status, 'conflict');
   assert.equal(status.b.detail, 'duplicate_accelerator');
 });
+
+test('createShortcutCommandRegistrar registers edited voice input accelerator', () => {
+  const registered = new Map();
+  const triggered = [];
+  const registrar = createShortcutCommandRegistrar({
+    globalShortcut: {
+      register(accelerator, callback) {
+        registered.set(accelerator, callback);
+        return true;
+      },
+      unregister() {},
+    },
+    readShortcutCommands: () => [
+      { id: 'voice_input', name: 'Voice Input', enabled: true, shortcut: { accelerator: 'F8', display: 'F8', fixed: false } },
+      { id: 'smart_assistant', name: 'Smart Assistant', enabled: true, shortcut: { accelerator: '', display: 'F8 x 2', fixed: true } },
+    ],
+    emitTriggered: (command) => triggered.push(command.id),
+  });
+
+  const status = registrar.registerAll();
+  assert.equal(status.voice_input.status, 'registered');
+  assert.equal(status.smart_assistant.status, 'fixed');
+
+  registered.get('F8')();
+  assert.deepEqual(triggered, ['voice_input']);
+});

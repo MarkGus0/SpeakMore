@@ -1,15 +1,26 @@
 const TRANSLATION_TARGET_LANGUAGES = require('../shared/translation-target-languages.json');
+const MEETING_LIVE_TARGET_LANGUAGES = require('../shared/meeting-live-target-languages.json');
+const INTERFACE_LANGUAGES = require('../shared/interface-languages.json');
 const DEFAULT_LLM_PROVIDERS = require('../shared/llm-providers.json');
 
 const DEFAULT_LANGUAGE = 'zh-CN';
 const DEFAULT_LLM_PROVIDER_ID = 'deepseek';
-const DEFAULT_TRANSLATION_TARGET_LANGUAGE = TRANSLATION_TARGET_LANGUAGES[0]?.id || 'en';
+const DEFAULT_TRANSLATION_TARGET_LANGUAGE = TRANSLATION_TARGET_LANGUAGES.some((language) => language.id === 'en')
+  ? 'en'
+  : TRANSLATION_TARGET_LANGUAGES[0]?.id || 'en';
 const DEFAULT_ASR_DEVICE_MODE = 'default';
-const SUPPORTED_INTERFACE_LANGUAGES = new Set(['zh-CN', 'en-US']);
+const DEFAULT_MEETING_LIVE_AUDIO_SOURCE = 'microphone';
+const DEFAULT_MEETING_LIVE_TARGET_LANGUAGE = 'off';
+const SUPPORTED_INTERFACE_LANGUAGES = new Set(INTERFACE_LANGUAGES.map((language) => language.id));
 const SUPPORTED_ASR_DEVICE_MODES = new Set(['default', 'mps', 'cuda', 'cpu']);
+const SUPPORTED_MEETING_AUDIO_SOURCES = new Set(['microphone', 'system', 'microphone_system']);
 const SUPPORTED_TRANSLATION_TARGET_LANGUAGES = new Set(
   TRANSLATION_TARGET_LANGUAGES.map((language) => language.id),
 );
+const SUPPORTED_MEETING_TRANSLATION_TARGETS = new Set([
+  'off',
+  ...MEETING_LIVE_TARGET_LANGUAGES.map((language) => language.id),
+]);
 
 function createDefaultLlmSettings() {
   return {
@@ -30,6 +41,9 @@ function createDefaultLocalSettings() {
     muteBackgroundAudioDuringRecording: true,
     showActiveMicrophoneHint: true,
     remindOnNewAudioDevice: true,
+    meetingDetectionEnabled: true,
+    meetingLiveAudioSource: DEFAULT_MEETING_LIVE_AUDIO_SOURCE,
+    meetingLiveTargetLanguage: DEFAULT_MEETING_LIVE_TARGET_LANGUAGE,
     showFloatingBar: true,
     hideMainWindowOnClose: true,
     llm: createDefaultLlmSettings(),
@@ -57,6 +71,14 @@ function normalizeBoolean(value, fallback = false) {
 
 function normalizeAsrDeviceMode(value) {
   return SUPPORTED_ASR_DEVICE_MODES.has(value) ? value : DEFAULT_ASR_DEVICE_MODE;
+}
+
+function normalizeMeetingLiveAudioSource(value) {
+  return SUPPORTED_MEETING_AUDIO_SOURCES.has(value) ? value : DEFAULT_MEETING_LIVE_AUDIO_SOURCE;
+}
+
+function normalizeMeetingLiveTargetLanguage(value) {
+  return SUPPORTED_MEETING_TRANSLATION_TARGETS.has(value) ? value : DEFAULT_MEETING_LIVE_TARGET_LANGUAGE;
 }
 
 function normalizeLlmProvider(candidate, fallback) {
@@ -130,6 +152,9 @@ function normalizeLocalSettings(value = {}) {
     muteBackgroundAudioDuringRecording: normalizeBoolean(settings.muteBackgroundAudioDuringRecording, true),
     showActiveMicrophoneHint: normalizeBoolean(settings.showActiveMicrophoneHint, true),
     remindOnNewAudioDevice: normalizeBoolean(settings.remindOnNewAudioDevice, true),
+    meetingDetectionEnabled: normalizeBoolean(settings.meetingDetectionEnabled, true),
+    meetingLiveAudioSource: normalizeMeetingLiveAudioSource(settings.meetingLiveAudioSource),
+    meetingLiveTargetLanguage: normalizeMeetingLiveTargetLanguage(settings.meetingLiveTargetLanguage),
     showFloatingBar: normalizeBoolean(settings.showFloatingBar, true),
     hideMainWindowOnClose: normalizeBoolean(settings.hideMainWindowOnClose, true),
     modelCacheDir: normalizeOptionalPath(settings.modelCacheDir),
@@ -192,15 +217,22 @@ module.exports = {
   DEFAULT_ASR_DEVICE_MODE,
   DEFAULT_LLM_PROVIDER_ID,
   DEFAULT_LLM_PROVIDERS,
+  INTERFACE_LANGUAGES,
+  DEFAULT_MEETING_LIVE_AUDIO_SOURCE,
+  DEFAULT_MEETING_LIVE_TARGET_LANGUAGE,
   DEFAULT_TRANSLATION_TARGET_LANGUAGE,
   SUPPORTED_ASR_DEVICE_MODES,
   SUPPORTED_INTERFACE_LANGUAGES,
+  SUPPORTED_MEETING_AUDIO_SOURCES,
+  SUPPORTED_MEETING_TRANSLATION_TARGETS,
   SUPPORTED_TRANSLATION_TARGET_LANGUAGES,
   createDefaultLlmSettings,
   createDefaultLocalSettings,
   normalizeStringMap,
   normalizeOptionalPath,
   normalizeAsrDeviceMode,
+  normalizeMeetingLiveAudioSource,
+  normalizeMeetingLiveTargetLanguage,
   normalizeLlmProvider,
   normalizeLlmSettings,
   normalizeLlmRequestConfig,

@@ -43,17 +43,34 @@ export type VoiceError = {
   detail?: string
 }
 
+export type MeetingLiveSegment = {
+  id: string
+  sourceText: string
+  translationText: string
+  targetLanguage: string
+  chunkIndex: number
+  sentenceIndex?: number
+  createdAt: string
+  status: 'pending' | 'translated' | 'skipped'
+  normalizedSourceText: string
+  isDuplicate?: boolean
+}
+
 export type VoiceSession = {
   status: VoiceStatus
   mode: VoiceMode
   audioId: string | null
   rawText: string
   refinedText: string
+  translationText: string
+  meetingLiveSegments?: MeetingLiveSegment[]
   durationMs: number
   textLength: number
   error: VoiceError | null
   inputLevel: number
   noticeText?: string
+  retryAudioWavBase64?: string
+  paused?: boolean
 }
 
 export type FloatingBarState = {
@@ -71,11 +88,15 @@ export const initialVoiceSession: VoiceSession = {
   audioId: null,
   rawText: '',
   refinedText: '',
+  translationText: '',
+  meetingLiveSegments: [],
   durationMs: 0,
   textLength: 0,
   error: null,
   inputLevel: 0,
   noticeText: '',
+  retryAudioWavBase64: '',
+  paused: false,
 }
 
 export function toVoiceFlowMode(mode: VoiceMode): VoiceFlowMode {
@@ -89,7 +110,7 @@ export function toVoiceFlowMode(mode: VoiceMode): VoiceFlowMode {
 export function createVoiceError(code: VoiceErrorCode, detail?: string): VoiceError {
   const messageByCode: Record<VoiceErrorCode, string> = {
     backend_unavailable: '语音后端未就绪，首次运行可能正在下载模型，请稍后重试',
-    voice_model_missing: '还没有下载语音模型，请先下载模型。',
+    voice_model_missing: '还没有下载语音模型，请到设置页下载模型。',
     llm_api_key_missing: '还没有填写 DeepSeek API Key，请先到设置页填写后再使用。',
     websocket_timeout: '连接语音后端超时，请稍后重试',
     websocket_closed: '语音连接已断开，请重试',

@@ -6,6 +6,7 @@
 import { Box, Button, MenuItem, Select, TextField, Typography } from '@mui/material'
 import { type LlmProvider, type LlmSettings } from '../../services/settingsStore'
 import { useI18n } from '../../i18n'
+import { bodyTextSx, captionTextSx, sectionTitleSx } from '../../uiTokens'
 
 type LlmSettingsSectionProps = {
   llmView: LlmSettings
@@ -30,7 +31,7 @@ const rowSx = {
   borderBottom: '1px solid rgba(119,119,119,0.08)',
 }
 
-const sectionTitle = { fontSize: 16, fontWeight: 500 }
+const sectionTitle = sectionTitleSx
 
 export default function LlmSettingsSection({
   llmView,
@@ -66,12 +67,12 @@ export default function LlmSettingsSection({
         )}
       </Box>
       {llmSaveMessage && (
-        <Typography sx={{ fontSize: 12, color: saveMessageColor, mb: 1 }}>
+        <Typography sx={{ ...captionTextSx, color: saveMessageColor, mb: 1 }}>
           {visibleSaveMessage}
         </Typography>
       )}
       <Box sx={rowSx}>
-        <Typography>{t('settings.provider')}</Typography>
+        <Typography sx={bodyTextSx}>{t('settings.provider')}</Typography>
         <Select
           size="small"
           value={llmView.providerId}
@@ -86,7 +87,7 @@ export default function LlmSettingsSection({
       </Box>
       {currentProvider?.allowBaseUrlEdit ? (
         <Box sx={rowSx}>
-          <Typography>Base URL</Typography>
+          <Typography sx={bodyTextSx}>Base URL</Typography>
           <TextField
             fullWidth
             size="small"
@@ -100,7 +101,7 @@ export default function LlmSettingsSection({
         </Box>
       ) : null}
       <Box sx={rowSx}>
-        <Typography>API Key</Typography>
+        <Typography sx={bodyTextSx}>API Key</Typography>
         <TextField
           fullWidth
           size="small"
@@ -114,7 +115,7 @@ export default function LlmSettingsSection({
         />
       </Box>
       <Box sx={rowSx}>
-        <Typography>{t('settings.model')}</Typography>
+        <Typography sx={bodyTextSx}>{t('settings.model')}</Typography>
         <TextField
           fullWidth
           size="small"

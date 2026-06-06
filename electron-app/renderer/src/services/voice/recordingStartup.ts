@@ -3,7 +3,7 @@
  *
  * 需要理解后端 ready、WebSocket、麦克风、词典和 start_audio 参数时看这里。
  */
-import { getAudioStream, stopStreamTracks, type RecordingTransport } from './audioCapture'
+import { getAudioStream, getMeetingAudioStream, stopStreamTracks, type RecordingTransport } from './audioCapture'
 import { loadPromptDictionaryTerms, type PromptDictionaryTerm } from '../dictionaryStore'
 import { ipcClient } from '../ipc'
 import {
@@ -71,7 +71,10 @@ export async function prepareRecordingStart(
     const transportPromise = Promise.resolve<RecordingTransport>('pcm16')
     const socketPromise = socketControls.ensureOpenWebSocket()
     const parameterInputsPromise = prepareStartAudioParameterInputs(task.mode, llm)
-    const streamPromise = getAudioStream().then((stream) => {
+    const streamPromise = (task.mode === 'MeetingNotes'
+      ? getMeetingAudioStream(task.meetingOptions?.audioSource || 'microphone')
+      : getAudioStream()
+    ).then((stream) => {
       pendingStream = stream
       if (shouldStopPendingStream) {
         stopStreamTracks(stream)
@@ -86,7 +89,7 @@ export async function prepareRecordingStart(
       readyPromise,
       parameterInputsPromise,
     ])
-    const parameters = getStartAudioParameters(task.mode, task.selectedText, transport, parameterInputs, task.customCommand)
+    const parameters = getStartAudioParameters(task.mode, task.selectedText, transport, parameterInputs, task.customCommand, task.meetingOptions)
     console.info('[voice][startup] start_audio 参数已准备', {
       mode: task.mode,
       hasSelectedTextParameter: typeof parameters.selected_text === 'string' && Boolean(String(parameters.selected_text).trim()),
@@ -135,6 +138,7 @@ export function getStartAudioParameters(
   _transport: RecordingTransport = 'pcm16',
   inputs: StartAudioParameterInputs,
   customCommand?: StartAudioCustomCommand,
+  meetingOptions?: VoiceTask['meetingOptions'],
 ): Record<string, unknown> {
   // 词典和 LLM 配置是本轮请求参数，必须在 start_audio 前固定下来，避免录音中途变化。
   const { dictionaryTerms, llm, translationTargetLanguage } = inputs
@@ -164,6 +168,16 @@ export function getStartAudioParameters(
       custom_prompt: customCommand?.prompt || '',
       command_id: customCommand?.id || '',
       command_name: customCommand?.name || '',
+    }
+  }
+
+  if (mode === 'MeetingNotes') {
+    return {
+      ...baseParameters,
+      meeting_audio_source: meetingOptions?.audioSource || 'microphone',
+      meeting_translation_target_language: meetingOptions?.targetLanguage || 'off',
+      show_original: meetingOptions?.showOriginal !== false,
+      show_translation: meetingOptions?.showTranslation !== false,
     }
   }
 

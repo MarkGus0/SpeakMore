@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   deleteMeetingNote,
+  MEETING_TRANSLATION_TARGETS,
   normalizeMeetingNote,
   upsertMeetingNote,
 } = require('./meeting-note-store');
@@ -23,6 +24,24 @@ test('normalizeMeetingNote creates safe local meeting note defaults', () => {
   assert.equal(note.transcript, 'transcript');
   assert.equal(note.summary, 'summary');
   assert.equal(note.durationMs, 0);
+});
+
+test('normalizeMeetingNote preserves extended meeting translation targets', () => {
+  const note = normalizeMeetingNote({
+    title: 'Live translation',
+    targetLanguage: 'fr',
+  });
+
+  assert.equal(MEETING_TRANSLATION_TARGETS.has('zh'), true);
+  assert.equal(MEETING_TRANSLATION_TARGETS.has('ko'), true);
+  assert.equal(MEETING_TRANSLATION_TARGETS.has('es'), true);
+  assert.equal(MEETING_TRANSLATION_TARGETS.has('fr'), true);
+  assert.equal(MEETING_TRANSLATION_TARGETS.has('de'), true);
+  assert.equal(MEETING_TRANSLATION_TARGETS.has('ru'), true);
+  assert.equal(MEETING_TRANSLATION_TARGETS.has('pt'), true);
+  assert.equal(note.targetLanguage, 'fr');
+  assert.equal(normalizeMeetingNote({ targetLanguage: 'ru' }).targetLanguage, 'ru');
+  assert.equal(normalizeMeetingNote({ targetLanguage: 'pt' }).targetLanguage, 'pt');
 });
 
 test('upsertMeetingNote updates existing notes and deleteMeetingNote removes them', () => {

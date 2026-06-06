@@ -335,6 +335,54 @@ test('createWindowManager 创建悬浮条、悬浮面板和托盘', () => {
   assert.equal(manager.getMainWindow().shown, true);
 });
 
+test('createWindowManager shows meeting detection notification and hides after timeout', () => {
+  const BrowserWindow = createFakeBrowserWindowClass();
+  const timers = [];
+  const manager = createWindowManager({
+    app: { quit: () => undefined },
+    BrowserWindow,
+    Tray: createFakeTrayClass(),
+    Menu: { buildFromTemplate: (template) => template },
+    nativeImage: { createFromPath: (filePath) => ({ filePath, resize: () => ({ filePath }) }) },
+    session: { fromPartition: (partition) => ({ partition }) },
+    screen: {
+      getCursorScreenPoint: () => ({ x: 0, y: 0 }),
+      getDisplayNearestPoint: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }),
+      getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }),
+    },
+    path,
+    baseDir: 'C:\\repo\\SpeakMore\\electron-app',
+    preloadPath: () => 'C:\\repo\\SpeakMore\\electron-app\\preload.js',
+    resolveBottomCenterBounds: (_, windowSize) => ({ x: 11, y: 22, width: windowSize.width, height: windowSize.height }),
+    setTimer: (callback, ms) => {
+      timers.push({ callback, ms });
+      return timers.length;
+    },
+    clearTimer: () => undefined,
+  });
+
+  manager.showMeetingDetectionNotification({ appName: 'Feishu', visibleMs: 15000 });
+  const notification = manager.getMeetingDetectionWindow();
+
+  assert.equal(notification.loadFilePath, path.join('C:\\repo\\SpeakMore\\electron-app', 'renderer', 'dist', 'meeting-detection.html'));
+  assert.equal(notification.showInactiveCallCount, 1);
+  assert.equal(notification.focused, false);
+  assert.deepEqual(notification.ignoreMouseEvents, { flag: false, options: undefined });
+  assert.deepEqual(notification.webContents.sent[0], {
+    channel: 'meeting-detector:detected',
+    payload: { visible: true, appName: 'Feishu', visibleMs: 15000 },
+  });
+  assert.equal(timers[0].ms, 15000);
+
+  timers[0].callback();
+
+  assert.equal(notification.hidden, true);
+  assert.deepEqual(notification.webContents.sent.at(-1), {
+    channel: 'meeting-detector:detected',
+    payload: { visible: false },
+  });
+});
+
 test('显示悬浮窗口时使用非激活显示，避免抢占外部输入焦点', () => {
   const BrowserWindow = createFakeBrowserWindowClass();
   const manager = createWindowManager({

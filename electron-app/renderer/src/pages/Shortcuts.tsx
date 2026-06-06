@@ -14,15 +14,19 @@ import {
   Typography,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
+import BubbleChartIcon from '@mui/icons-material/BubbleChart'
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
 import KeyboardIcon from '@mui/icons-material/Keyboard'
 import MicIcon from '@mui/icons-material/Mic'
 import SmartToyIcon from '@mui/icons-material/SmartToy'
+import TagIcon from '@mui/icons-material/Tag'
 import TerminalIcon from '@mui/icons-material/Terminal'
 import TranslateIcon from '@mui/icons-material/Translate'
 import { useI18n, type TranslationKey } from '../i18n'
-import { pageSx, pageTitleSx } from '../uiTokens'
+import { captionTextSx, helperTextSx, itemTitleSx, pageDescriptionSx, pageSx, pageTitleSx, sectionTitleSx } from '../uiTokens'
+import { ShortcutBindingDialog } from '../components/ShortcutBindingDialog'
 import {
   deleteShortcutCommand,
   getShortcutRegistrationStatus,
@@ -31,29 +35,38 @@ import {
   subscribeShortcutCommandChanges,
   type ShortcutCommand,
   type ShortcutCommandRegistrationStatus,
-  type ShortcutCommandShortcut,
 } from '../services/shortcutCommandStore'
 
 const defaultCommandNames: Record<string, string> = {
   voice_input: 'Voice Input',
   smart_assistant: 'Smart Assistant',
   hands_free_mode: 'Hands-Free Mode',
-  translate_to_english: 'Translate to English',
+  translate_to_english: 'English Translation Command',
   terminal_assistant: 'Terminal Assistant',
   professional_polish: 'Professional Polish',
   abstract_mode: 'Abstract Mode',
-  internet_dark: 'Corporate Jargon Mode',
+  internet_dark: 'Internet Jargon',
 }
 
 const defaultCommandDescriptions: Record<string, string> = {
   voice_input: 'Hold to speak, release to transcribe and paste.',
-  smart_assistant: 'Double-tap Right Alt to ask a question and show the answer in the floating panel.',
+  smart_assistant: 'Double-tap the voice input shortcut to ask a question and show the answer in the floating panel.',
   hands_free_mode: 'Press once to start recording, then press again to stop.',
-  translate_to_english: 'Translate spoken content into natural, fluent English.',
+  translate_to_english: 'A separately bindable shortcut command. Record speech and translate it into natural English.',
   terminal_assistant: 'Convert spoken requests into directly executable command-line text.',
   professional_polish: 'Rewrite spoken content into polished workplace communication.',
   abstract_mode: 'Rewrite text with abstract slang, expressive energy, and emoji-heavy style.',
-  internet_dark: 'Turn casual speech into corporate buzzword-filled project language.',
+  internet_dark: 'Turn casual speech into internet slang and corporate jargon.',
+}
+
+const legacyDefaultCommandNames: Record<string, string[]> = {
+  translate_to_english: ['Translate to English'],
+  internet_dark: ['Corporate Jargon Mode'],
+}
+
+const legacyDefaultCommandDescriptions: Record<string, string[]> = {
+  translate_to_english: ['Translate spoken content into natural, fluent English.'],
+  internet_dark: ['Turn casual speech into corporate buzzword-filled project language.'],
 }
 
 const commandIconById: Record<string, React.ReactNode> = {
@@ -62,12 +75,16 @@ const commandIconById: Record<string, React.ReactNode> = {
   hands_free_mode: <KeyboardIcon sx={{ fontSize: 18 }} />,
   translate_to_english: <TranslateIcon sx={{ fontSize: 18 }} />,
   terminal_assistant: <TerminalIcon sx={{ fontSize: 18 }} />,
+  professional_polish: <AutoFixHighIcon sx={{ fontSize: 18 }} />,
+  abstract_mode: <BubbleChartIcon sx={{ fontSize: 18 }} />,
+  internet_dark: <TagIcon sx={{ fontSize: 18 }} />,
 }
 
 function commandText(command: ShortcutCommand, field: 'name' | 'description', t: (key: TranslationKey) => string) {
   const defaultValue = field === 'name' ? defaultCommandNames[command.id] : defaultCommandDescriptions[command.id]
+  const legacyValues = field === 'name' ? legacyDefaultCommandNames[command.id] : legacyDefaultCommandDescriptions[command.id]
   const key = `shortcuts.command.${command.id}.${field}` as TranslationKey
-  if (defaultValue && command[field] === defaultValue) return t(key)
+  if ([defaultValue, ...(legacyValues || [])].filter(Boolean).includes(command[field])) return t(key)
   return command[field]
 }
 
@@ -84,32 +101,6 @@ function createEmptyCustomCommand(): Partial<ShortcutCommand> {
     deletable: true,
     shortcut: { accelerator: '', keys: [], display: '', fixed: false },
     delivery: 'paste',
-  }
-}
-
-function normalizeKeyName(key: string) {
-  if (key === ' ') return 'Space'
-  if (key === 'Esc') return 'Escape'
-  if (key.length === 1) return key.toUpperCase()
-  return key
-}
-
-function shortcutFromKeyboardEvent(event: React.KeyboardEvent): ShortcutCommandShortcut {
-  const key = normalizeKeyName(event.key)
-  const modifiers = [
-    event.ctrlKey ? 'Ctrl' : '',
-    event.altKey ? 'Alt' : '',
-    event.shiftKey ? 'Shift' : '',
-    event.metaKey ? 'Meta' : '',
-  ].filter(Boolean)
-  const isModifierOnly = ['Control', 'Shift', 'Alt', 'Meta'].includes(key)
-  const keys = isModifierOnly ? modifiers : [...modifiers, key].filter((item, index, values) => values.indexOf(item) === index)
-  const display = keys.join(' + ')
-  return {
-    accelerator: display,
-    keys,
-    display,
-    fixed: false,
   }
 }
 
@@ -131,20 +122,16 @@ function ShortcutCommandDialog({
 }) {
   const { t } = useI18n()
   const [draft, setDraft] = useState<Partial<ShortcutCommand>>(command || createEmptyCustomCommand())
-  const [recording, setRecording] = useState(false)
 
   useEffect(() => {
     setDraft(command || createEmptyCustomCommand())
-    setRecording(false)
   }, [command])
 
   if (!command) return null
 
   const isBuiltin = draft.kind === 'builtin'
   const canEditText = !isBuiltin
-  const canEditShortcut = !draft.shortcut?.fixed
   const canDelete = Boolean(draft.id && draft.deletable)
-  const shortcutDisplay = draft.shortcut?.display || t('shortcuts.shortcutUnset')
 
   return (
     <Dialog open onClose={onClose} fullWidth maxWidth="sm">
@@ -165,25 +152,6 @@ function ShortcutCommandDialog({
           minRows={5}
           onChange={(event) => setDraft((current) => ({ ...current, prompt: event.target.value }))}
         />
-        <Box>
-          <Typography sx={{ fontSize: 13, color: 'text.secondary', mb: 0.75 }}>{t('shortcuts.shortcutLabel')}</Typography>
-          <Button
-            variant="outlined"
-            disabled={!canEditShortcut}
-            startIcon={<KeyboardIcon />}
-            onClick={() => setRecording(true)}
-            onKeyDown={(event) => {
-              if (!recording) return
-              event.preventDefault()
-              event.stopPropagation()
-              setDraft((current) => ({ ...current, shortcut: shortcutFromKeyboardEvent(event) }))
-              setRecording(false)
-            }}
-            sx={{ justifyContent: 'flex-start', borderRadius: '8px', minWidth: 220 }}
-          >
-            {recording ? t('shortcuts.recordingShortcut') : shortcutDisplay}
-          </Button>
-        </Box>
         <TextField
           label={t('shortcuts.descriptionLabel')}
           value={draft.description || ''}
@@ -216,18 +184,24 @@ function ShortcutCommandDialog({
 function CommandRow({
   command,
   status,
+  unavailable = false,
   onToggle,
   onEdit,
+  onRecordShortcut,
 }: {
   command: ShortcutCommand
   status?: ShortcutCommandRegistrationStatus[string]
+  unavailable?: boolean
   onToggle: (command: ShortcutCommand) => void
   onEdit: (command: ShortcutCommand) => void
+  onRecordShortcut: (command: ShortcutCommand) => void
 }) {
   const { t } = useI18n()
   const name = commandText(command, 'name', t)
   const description = commandText(command, 'description', t)
   const shortcut = command.shortcut?.display || t('shortcuts.shortcutUnset')
+  const canRecordShortcut = command.id === 'voice_input' || !command.shortcut?.fixed
+  const canEditCommand = command.kind === 'custom'
 
   return (
     <Box
@@ -240,6 +214,7 @@ function CommandRow({
         borderRadius: '8px',
         p: 1.5,
         bgcolor: '#fff',
+        opacity: unavailable ? 0.56 : 1,
       }}
     >
       <Box sx={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 1.25 }}>
@@ -247,21 +222,48 @@ function CommandRow({
           {commandIconById[command.id] || <KeyboardIcon sx={{ fontSize: 18 }} />}
         </Box>
         <Box sx={{ minWidth: 0 }}>
-          <Typography sx={{ fontSize: 15, fontWeight: 600 }}>{name}</Typography>
-          <Typography sx={{ fontSize: 12, color: 'text.secondary', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <Typography sx={itemTitleSx}>{name}</Typography>
+          <Typography sx={{ ...captionTextSx, color: 'text.secondary', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {description}
           </Typography>
         </Box>
       </Box>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, justifyContent: 'flex-end' }}>
-        <Chip size="small" label={shortcut} variant="outlined" />
+        <Button
+          disabled={!canRecordShortcut || unavailable}
+          onClick={() => onRecordShortcut(command)}
+          variant="outlined"
+          sx={{
+            minWidth: 0,
+            height: 34,
+            px: 1.35,
+            borderRadius: 999,
+            color: 'text.primary',
+            borderColor: 'rgba(0,0,0,0.24)',
+            bgcolor: canRecordShortcut && !unavailable ? '#fff' : '#fafafa',
+            fontSize: 14,
+            fontWeight: 600,
+            '&.Mui-disabled': {
+              color: 'text.primary',
+              borderColor: 'rgba(0,0,0,0.20)',
+              bgcolor: '#fafafa',
+              opacity: 1,
+            },
+          }}
+        >
+          {shortcut}
+        </Button>
         <Chip size="small" label={statusLabel(status, t)} />
       </Box>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-        <Switch checked={command.enabled} onChange={() => onToggle(command)} size="small" />
-        <IconButton aria-label={`${t('shortcuts.edit')} ${name}`} onClick={() => onEdit(command)} size="small">
-          <EditIcon sx={{ fontSize: 18 }} />
-        </IconButton>
+        <Switch checked={command.enabled && !unavailable} disabled={unavailable} onChange={() => onToggle(command)} size="small" />
+        {canEditCommand ? (
+          <IconButton aria-label={`${t('shortcuts.edit')} ${name}`} onClick={() => onEdit(command)} size="small">
+            <EditIcon sx={{ fontSize: 18 }} />
+          </IconButton>
+        ) : (
+          <Box sx={{ width: 30, height: 30 }} />
+        )}
       </Box>
     </Box>
   )
@@ -272,6 +274,7 @@ export default function Shortcuts() {
   const [commands, setCommands] = useState<ShortcutCommand[]>([])
   const [registrationStatus, setRegistrationStatus] = useState<ShortcutCommandRegistrationStatus>({})
   const [editingCommand, setEditingCommand] = useState<Partial<ShortcutCommand> | null>(null)
+  const [recordingShortcutCommand, setRecordingShortcutCommand] = useState<ShortcutCommand | null>(null)
 
   const refresh = useCallback(async () => {
     const [nextCommands, nextStatus] = await Promise.all([
@@ -294,8 +297,10 @@ export default function Shortcuts() {
     recommended: commands.filter((command) => command.category === 'recommended'),
     custom: commands.filter((command) => command.category === 'custom'),
   }), [commands])
+  const voiceInputEnabled = commands.find((command) => command.id === 'voice_input')?.enabled !== false
 
   const handleToggle = async (command: ShortcutCommand) => {
+    if (command.id === 'smart_assistant' && !voiceInputEnabled) return
     await saveShortcutCommand({ id: command.id, enabled: !command.enabled })
     await refresh()
   }
@@ -303,6 +308,16 @@ export default function Shortcuts() {
   const handleSave = async (command: Partial<ShortcutCommand>) => {
     await saveShortcutCommand(command)
     setEditingCommand(null)
+    await refresh()
+  }
+
+  const handleRecordShortcut = async (command: ShortcutCommand) => {
+    setRecordingShortcutCommand(command)
+  }
+
+  const handleSaveShortcut = async (command: Partial<ShortcutCommand>) => {
+    await saveShortcutCommand(command)
+    setRecordingShortcutCommand(null)
     await refresh()
   }
 
@@ -314,18 +329,20 @@ export default function Shortcuts() {
 
   const renderSection = (title: string, items: ShortcutCommand[], emptyText = '') => (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-      <Typography sx={{ fontSize: 14, fontWeight: 600, color: 'text.secondary' }}>{title}</Typography>
+      <Typography sx={{ ...sectionTitleSx, color: 'text.secondary' }}>{title}</Typography>
       {items.length ? items.map((command) => (
         <CommandRow
           key={command.id}
           command={command}
           status={registrationStatus[command.id]}
+          unavailable={command.id === 'smart_assistant' && !voiceInputEnabled}
           onToggle={handleToggle}
           onEdit={setEditingCommand}
+          onRecordShortcut={handleRecordShortcut}
         />
       )) : (
         <Box sx={{ border: '1px dashed rgba(119,119,119,0.20)', borderRadius: '8px', p: 2 }}>
-          <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>{emptyText}</Typography>
+          <Typography sx={{ ...helperTextSx, color: 'text.secondary' }}>{emptyText}</Typography>
         </Box>
       )}
     </Box>
@@ -336,7 +353,7 @@ export default function Shortcuts() {
       <Box sx={{ display: 'flex', alignItems: 'start', justifyContent: 'space-between', gap: 2 }}>
         <Box>
           <Typography sx={pageTitleSx}>{t('shortcuts.title')}</Typography>
-          <Typography sx={{ fontSize: 14, color: 'text.secondary', mt: 0.5 }}>{t('shortcuts.subtitle')}</Typography>
+          <Typography sx={{ ...pageDescriptionSx, color: 'text.secondary', mt: 0.5 }}>{t('shortcuts.subtitle')}</Typography>
         </Box>
         <Button variant="contained" startIcon={<AddIcon />} onClick={() => setEditingCommand(createEmptyCustomCommand())}>
           {t('shortcuts.addCommand')}
@@ -352,6 +369,11 @@ export default function Shortcuts() {
         onClose={() => setEditingCommand(null)}
         onSave={handleSave}
         onDelete={handleDelete}
+      />
+      <ShortcutBindingDialog
+        command={recordingShortcutCommand}
+        onClose={() => setRecordingShortcutCommand(null)}
+        onSave={handleSaveShortcut}
       />
     </Box>
   )

@@ -21,6 +21,7 @@ import {
   resolveVoiceTask,
   type VoiceTask,
 } from './voice/voiceTaskResolver'
+import type { MeetingAudioSource, MeetingTranslationTarget } from './meetingNotesStore'
 import type { ShortcutCommand } from './shortcutCommandStore'
 import {
   createVoiceError,
@@ -28,6 +29,7 @@ import {
   toFloatingBarState,
   toVoiceFlowMode,
   type VoiceError,
+  type MeetingLiveSegment,
   type VoiceMode,
   type VoiceSession,
   type VoiceStatus,
@@ -82,7 +84,10 @@ const voiceSocket = createVoiceSocketManager({
     return status === 'recording' || status === 'transcribing'
   },
   onRawText: handleRawText,
-  onFinalText: (text) => void completeSession(text),
+  onMeetingTranslationPending: handleMeetingTranslationPending,
+  onMeetingTranslation: handleMeetingTranslation,
+  onMeetingTranslationError: handleMeetingTranslationError,
+  onFinalText: (text, payload) => void completeSession(text, payload),
   onError: failSession,
   onInterrupt: (detail) => failSession(createVoiceError('backend_unavailable', detail || '会话已被中断')),
 })
@@ -143,7 +148,14 @@ export async function toggleRecordingByShortcutCommand(command: ShortcutCommand)
   await startRecordingFromShortcutCommand(command)
 }
 
-export async function toggleMeetingNotesRecording() {
+export type MeetingRecordingOptions = {
+  audioSource: MeetingAudioSource
+  targetLanguage: MeetingTranslationTarget
+  showOriginal: boolean
+  showTranslation: boolean
+}
+
+export async function toggleMeetingNotesRecording(options?: MeetingRecordingOptions) {
   const session = getVoiceSession()
   if (session.status === 'recording') {
     stopRecording()
@@ -154,7 +166,34 @@ export async function toggleMeetingNotesRecording() {
     return
   }
 
-  await startRecordingWithTask('MeetingNotes', async () => createMeetingNotesVoiceTask())
+  await startRecordingWithTask('MeetingNotes', async () => createMeetingNotesVoiceTask(options))
+}
+
+export function updateMeetingNotesRecordingOptions(options: MeetingRecordingOptions) {
+  const session = getVoiceSession()
+  if (session.mode !== 'MeetingNotes' || !['connecting', 'recording'].includes(session.status)) return false
+
+  const socket = voiceSocket.getSocket()
+  if (!socket || socket.readyState !== WebSocket.OPEN) return false
+
+  if (activeTask) {
+    activeTask = {
+      ...activeTask,
+      meetingOptions: options,
+    }
+  }
+
+  socket.send(JSON.stringify({
+    type: 'set_mode_config',
+    mode: 'meeting_notes',
+    parameters: {
+      meeting_audio_source: options.audioSource,
+      meeting_translation_target_language: options.targetLanguage,
+      show_original: options.showOriginal !== false,
+      show_translation: options.showTranslation !== false,
+    },
+  }))
+  return true
 }
 
 function toShortcutIntent(mode: VoiceMode): ShortcutIntent {
@@ -233,7 +272,9 @@ async function startRecordingWithTask(initialMode: VoiceMode, resolveTask: () =>
 
     transportRuntime.start()
     lifecycle.markRecordingStarted()
-    lifecycle.startRecordingLimitTimers()
+    if (task.mode !== 'MeetingNotes') {
+      lifecycle.startRecordingLimitTimers()
+    }
     const microphoneNotice = await buildActiveMicrophoneNotice(prepared.stream, task.mode)
     if (!isSessionActive(audioId)) return
     if (microphoneNotice) {
@@ -259,11 +300,16 @@ export function stopRecording() {
     lifecycle.clearRecordingLimitTimers()
     setSessionStatus('stopping')
     void playInteractionSound('stop')
+    const audioQuality = transportRuntime.getAudioQuality()
     cleanupRecording()
 
     const socket = voiceSocket.getSocket()
     if (socket?.readyState === WebSocket.OPEN && session.audioId) {
-      socket.send(JSON.stringify({ type: 'end_audio', audio_id: session.audioId }))
+      socket.send(JSON.stringify({
+        type: 'end_audio',
+        audio_id: session.audioId,
+        ...(audioQuality ? { parameters: { audio_quality: audioQuality } } : {}),
+      }))
       setSessionStatus('transcribing')
       lifecycle.startTranscribeTimeout()
       return
@@ -290,6 +336,7 @@ export function cancelRecording() {
 
   lifecycle.clearTranscribeTimeout()
   cleanupRecording()
+  transportRuntime.discardRetryAudio()
   voiceSocket.closeWebSocketSilently()
   void restoreBackgroundAudio()
   lifecycle.resetRecordingStarted()
@@ -302,6 +349,22 @@ export function cancelRecording() {
     error: null,
     inputLevel: 0,
     noticeText: '',
+    retryAudioWavBase64: '',
+    translationText: '',
+    meetingLiveSegments: [],
+    paused: false,
+  })
+}
+
+export function setRecordingPaused(paused: boolean) {
+  const session = getVoiceSession()
+  if (session.status !== 'recording') return
+  transportRuntime.setPaused(paused)
+  setSession({
+    ...session,
+    paused,
+    inputLevel: paused ? 0 : session.inputLevel,
+    noticeText: paused ? '已暂停' : '',
   })
 }
 
@@ -310,6 +373,7 @@ export function disposeRecorder() {
   activeTask = null
   lifecycle.dispose()
   cleanupRecording()
+  transportRuntime.discardRetryAudio()
   void restoreBackgroundAudio()
   voiceSocket.closeWebSocketSilently()
   sessionStore.clearListeners()
@@ -333,31 +397,38 @@ function failSession(error: VoiceError) {
   activeTask = null
   lifecycle.clearTranscribeTimeout()
   const durationMs = lifecycle.getDurationMs()
+  const retryAudioWavBase64 = transportRuntime.getRetryAudioWavBase64()
   cleanupRecording()
   void restoreBackgroundAudio()
-  setSession({ ...getVoiceSession(), status: 'error', durationMs, error, noticeText: '' })
+  setSession({ ...getVoiceSession(), status: 'error', durationMs, error, noticeText: '', retryAudioWavBase64, paused: false })
+  transportRuntime.discardRetryAudio()
   lifecycle.resetRecordingStarted()
 }
 
-async function completeSession(refinedText: string) {
+async function completeSession(refinedText: string, payload: Record<string, unknown> = {}) {
   // 完成路径必须先冻结本轮结果，再恢复后台音频和决定展示/粘贴方式。
   lifecycle.clearActive()
   lifecycle.clearTranscribeTimeout()
   const currentSession = getVoiceSession()
   const durationMs = lifecycle.getDurationMs()
   const resultText = refinedText || currentSession.rawText
+  const translationText = typeof payload.translation_text === 'string' ? payload.translation_text : currentSession.translationText
   const textLength = countTextLength(resultText)
   const completedSession = {
     ...currentSession,
     status: 'completed' as const,
     refinedText: resultText,
+    translationText,
+    meetingLiveSegments: [],
     durationMs,
     textLength,
     error: null,
     noticeText: '',
+    paused: false,
   }
 
   setSession(completedSession)
+  transportRuntime.discardRetryAudio()
   lifecycle.resetRecordingStarted()
   await restoreBackgroundAudio()
   const task = activeTask
@@ -370,6 +441,166 @@ async function completeSession(refinedText: string) {
 function handleRawText(text: string) {
   // 流式转写会多次更新 rawText，最终结果仍以后端完成消息为准。
   setSession({ ...getVoiceSession(), rawText: text, textLength: countTextLength(text) })
+}
+
+const MEETING_LIVE_EMOJI_RE = /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2300}-\u{23FF}\u{2B00}-\u{2BFF}\uFE0E\uFE0F]/gu
+const MEETING_LIVE_ZERO_WIDTH_RE = /[\u200B-\u200D\uFEFF]/g
+
+function normalizeMeetingLiveSourceText(value: unknown) {
+  return String(value || '')
+    .normalize('NFKC')
+    .replace(MEETING_LIVE_EMOJI_RE, '')
+    .replace(MEETING_LIVE_ZERO_WIDTH_RE, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function normalizeMeetingLiveCompare(value: unknown) {
+  return normalizeMeetingLiveSourceText(value).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
+}
+
+function readMeetingLiveChunkIndex(payload: Record<string, unknown> | undefined, fallback: number) {
+  const sentenceIndex = Number(payload?.sentence_index)
+  if (Number.isFinite(sentenceIndex) && sentenceIndex > 0) return sentenceIndex
+  const value = Number(payload?.chunk_index)
+  return Number.isFinite(value) && value > 0 ? value : fallback
+}
+
+function readMeetingLiveReplaceChunkIndex(payload: Record<string, unknown> | undefined) {
+  const value = Number(payload?.replaces_chunk_index)
+  return Number.isFinite(value) && value > 0 ? value : 0
+}
+
+function readMeetingLiveTargetLanguage(payload: Record<string, unknown> | undefined) {
+  const payloadTarget = typeof payload?.target_language === 'string' ? payload.target_language.trim() : ''
+  if (payloadTarget && payloadTarget !== 'off') return payloadTarget
+  const taskTarget = activeTask?.meetingOptions?.targetLanguage
+  return taskTarget && taskTarget !== 'off' ? taskTarget : 'en'
+}
+
+function updateMeetingTranslationText(segments: MeetingLiveSegment[]) {
+  return segments
+    .filter((item) => item.status === 'translated' && !item.isDuplicate)
+    .map((item) => item.translationText)
+    .filter(Boolean)
+    .join('\n')
+}
+
+function upsertMeetingLiveSegment(
+  previousSegments: MeetingLiveSegment[],
+  segment: MeetingLiveSegment,
+  replaceChunkIndex = 0,
+) {
+  const targetChunkIndex = replaceChunkIndex || segment.chunkIndex
+  const existingIndex = previousSegments.findIndex((item) => item.chunkIndex === targetChunkIndex && item.targetLanguage === segment.targetLanguage)
+  const nextCompare = normalizeMeetingLiveCompare(segment.normalizedSourceText || segment.sourceText)
+  const duplicateSourceIndex = previousSegments.findIndex((item) => {
+    if (item.targetLanguage !== segment.targetLanguage) return false
+    const existingCompare = normalizeMeetingLiveCompare(item.normalizedSourceText || item.sourceText)
+    return Boolean(existingCompare && nextCompare && existingCompare === nextCompare)
+  })
+  const targetIndex = existingIndex >= 0 ? existingIndex : duplicateSourceIndex
+  if (targetIndex < 0) {
+    if (segment.status === 'skipped' || segment.isDuplicate) return previousSegments
+    return [...previousSegments, { ...segment, chunkIndex: targetChunkIndex }]
+  }
+
+  const existing = previousSegments[targetIndex]
+  const existingCompare = normalizeMeetingLiveCompare(existing.normalizedSourceText || existing.sourceText)
+  if (
+    segment.status === 'translated'
+    && existing.status === 'pending'
+    && existingCompare
+    && nextCompare
+    && existingCompare !== nextCompare
+    && existingCompare.startsWith(nextCompare)
+  ) {
+    return previousSegments
+  }
+
+  return previousSegments.map((item, index) => index === targetIndex
+    ? {
+      ...item,
+      ...segment,
+      id: item.id,
+      chunkIndex: item.chunkIndex,
+      sentenceIndex: item.sentenceIndex || item.chunkIndex,
+      createdAt: item.createdAt,
+    }
+    : item)
+}
+
+function handleMeetingTranslationPending(payload?: Record<string, unknown>) {
+  const session = getVoiceSession()
+  if (session.mode !== 'MeetingNotes' || !['connecting', 'recording'].includes(session.status)) return
+
+  const sourceText = normalizeMeetingLiveSourceText(payload?.source_text)
+  if (!sourceText) return
+  const previousSegments = session.meetingLiveSegments || []
+  const targetLanguage = readMeetingLiveTargetLanguage(payload)
+  const chunkIndex = readMeetingLiveChunkIndex(payload, previousSegments.length + 1)
+  const replaceChunkIndex = readMeetingLiveReplaceChunkIndex(payload)
+  const createdAt = new Date().toISOString()
+  const segment: MeetingLiveSegment = {
+    id: `${replaceChunkIndex || chunkIndex}-${targetLanguage}-${createdAt}`,
+    sourceText,
+    translationText: '',
+    targetLanguage,
+    chunkIndex,
+    sentenceIndex: chunkIndex,
+    createdAt,
+    status: payload?.status === 'skipped' ? 'skipped' : 'pending',
+    normalizedSourceText: normalizeMeetingLiveSourceText(sourceText),
+    isDuplicate: Boolean(payload?.is_duplicate),
+  }
+  const nextSegments = upsertMeetingLiveSegment(previousSegments, segment, replaceChunkIndex)
+  setSession({
+    ...session,
+    meetingLiveSegments: nextSegments,
+    translationText: updateMeetingTranslationText(nextSegments),
+    noticeText: '',
+  })
+}
+
+function handleMeetingTranslation(text: string, payload?: Record<string, unknown>) {
+  const value = normalizeMeetingLiveSourceText(text)
+  if (!value) return
+  const session = getVoiceSession()
+  if (session.mode !== 'MeetingNotes' || !['connecting', 'recording', 'stopping', 'transcribing'].includes(session.status)) return
+  const previousSegments = session.meetingLiveSegments || []
+  const sourceText = normalizeMeetingLiveSourceText(payload?.source_text)
+  const targetLanguage = readMeetingLiveTargetLanguage(payload)
+  const chunkIndex = readMeetingLiveChunkIndex(payload, previousSegments.length + 1)
+  const replaceChunkIndex = readMeetingLiveReplaceChunkIndex(payload)
+  const createdAt = new Date().toISOString()
+  const segment: MeetingLiveSegment = {
+    id: `${replaceChunkIndex || chunkIndex}-${targetLanguage}-${createdAt}`,
+    sourceText,
+    translationText: value,
+    targetLanguage,
+    chunkIndex,
+    sentenceIndex: chunkIndex,
+    createdAt,
+    status: payload?.status === 'skipped' ? 'skipped' : 'translated',
+    normalizedSourceText: normalizeMeetingLiveSourceText(sourceText),
+    isDuplicate: Boolean(payload?.is_duplicate),
+  }
+  const nextSegments = upsertMeetingLiveSegment(previousSegments, segment, replaceChunkIndex)
+  setSession({
+    ...session,
+    meetingLiveSegments: nextSegments,
+    translationText: updateMeetingTranslationText(nextSegments),
+    noticeText: '',
+  })
+}
+
+function handleMeetingTranslationError(detail: string) {
+  const session = getVoiceSession()
+  if (session.mode !== 'MeetingNotes' || !['connecting', 'recording'].includes(session.status)) return
+  setSession({
+    ...session,
+    noticeText: detail ? `实时翻译暂时失败：${detail}` : '实时翻译暂时失败，已继续转写',
+  })
 }
 
 function showRecordingLimitWarning() {

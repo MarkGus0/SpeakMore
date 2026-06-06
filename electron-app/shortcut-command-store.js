@@ -41,7 +41,7 @@ The user will input plain text. Rewrite it in a "mentally unstable, abstract sla
 3. Step 3 (Emoji Bombing): Insert a random emoji every 2-3 words, like 🥵✨👠🥺👊.`;
 
 const INTERNET_DARK_PROMPT = `[Instructions]
-The user will input casual speech. Rewrite it in corporate buzzword-filled jargon, treating life like a project status report.
+The user will input casual speech. Rewrite it into internet jargon and corporate buzzword language, treating daily life like a project status report.
 
 [Rewriting Formula]
 1. Step 1 (Vocabulary Replacement):
@@ -49,6 +49,7 @@ The user will input casual speech. Rewrite it in corporate buzzword-filled jargo
   - sleeping -> standby retrospective
   - shopping -> resource exchange and conversion
   - chatting -> pipeline alignment
+  - if the input is Chinese, prefer familiar internet/workplace jargon such as 破防, 上价值, 对齐颗粒度, 闭环, 抓手, 赋能, 沉淀, 心智, 链路
 2. Step 2 (Sentence Restructuring): Use phrases like "through the leverage of..., achieving the closed loop of..., unlocking the underlying logic of..."
 3. Step 3 (Elevation): Forcefully elevate the value—make small things sound like "strategic-level iterations."`;
 
@@ -72,7 +73,7 @@ const DEFAULT_SHORTCUT_COMMANDS = [
   {
     id: 'smart_assistant',
     name: 'Smart Assistant',
-    description: 'Double-tap Right Alt to ask a question and show the answer in the floating panel.',
+    description: 'Double-tap the voice input shortcut to ask a question and show the answer in the floating panel.',
     prompt: '',
     category: 'default',
     kind: 'builtin',
@@ -99,14 +100,14 @@ const DEFAULT_SHORTCUT_COMMANDS = [
   },
   {
     id: 'translate_to_english',
-    name: 'Translate to English',
-    description: 'Translate spoken content into natural, fluent English.',
+    name: 'English Translation Command',
+    description: 'A separately bindable shortcut command. Record speech and translate it into natural English.',
     prompt: TRANSLATE_TO_ENGLISH_PROMPT,
     category: 'recommended',
     kind: 'preset',
     action: 'custom-command',
     enabled: true,
-    editable: true,
+    editable: false,
     deletable: false,
     shortcut: { accelerator: 'Tab', keys: ['Tab'], display: 'Tab', fixed: false },
     delivery: 'paste',
@@ -120,7 +121,7 @@ const DEFAULT_SHORTCUT_COMMANDS = [
     kind: 'preset',
     action: 'custom-command',
     enabled: false,
-    editable: true,
+    editable: false,
     deletable: false,
     shortcut: { accelerator: '', keys: [], display: '', fixed: false },
     delivery: 'paste',
@@ -134,7 +135,7 @@ const DEFAULT_SHORTCUT_COMMANDS = [
     kind: 'preset',
     action: 'custom-command',
     enabled: false,
-    editable: true,
+    editable: false,
     deletable: false,
     shortcut: { accelerator: '', keys: [], display: '', fixed: false },
     delivery: 'paste',
@@ -148,21 +149,21 @@ const DEFAULT_SHORTCUT_COMMANDS = [
     kind: 'preset',
     action: 'custom-command',
     enabled: false,
-    editable: true,
+    editable: false,
     deletable: false,
     shortcut: { accelerator: '', keys: [], display: '', fixed: false },
     delivery: 'paste',
   },
   {
     id: 'internet_dark',
-    name: 'Corporate Jargon Mode',
-    description: 'Turn casual speech into corporate buzzword-filled project language.',
+    name: 'Internet Jargon',
+    description: 'Turn casual speech into internet slang and corporate jargon.',
     prompt: INTERNET_DARK_PROMPT,
     category: 'recommended',
     kind: 'preset',
     action: 'custom-command',
     enabled: false,
-    editable: true,
+    editable: false,
     deletable: false,
     shortcut: { accelerator: '', keys: [], display: '', fixed: false },
     delivery: 'paste',
@@ -170,6 +171,36 @@ const DEFAULT_SHORTCUT_COMMANDS = [
 ];
 
 const DEFAULT_COMMAND_BY_ID = new Map(DEFAULT_SHORTCUT_COMMANDS.map((command) => [command.id, command]));
+
+function createSmartAssistantShortcut(voiceShortcut = {}) {
+  const display = typeof voiceShortcut.display === 'string' && voiceShortcut.display.trim()
+    ? voiceShortcut.display.trim()
+    : 'Right Alt';
+  const keys = Array.isArray(voiceShortcut.keys) && voiceShortcut.keys.length
+    ? [...voiceShortcut.keys, 'x 2']
+    : ['Right Alt', 'x 2'];
+  return {
+    accelerator: '',
+    keys,
+    display: `${display} x 2`,
+    fixed: true,
+  };
+}
+
+function applyDefaultCommandDependencies(commands = []) {
+  const nextCommands = commands.map((command) => ({ ...command }));
+  const voiceInput = nextCommands.find((command) => command.id === 'voice_input');
+  const smartAssistant = nextCommands.find((command) => command.id === 'smart_assistant');
+
+  if (smartAssistant) {
+    smartAssistant.shortcut = createSmartAssistantShortcut(voiceInput?.shortcut);
+    if (voiceInput && !voiceInput.enabled) {
+      smartAssistant.enabled = false;
+    }
+  }
+
+  return nextCommands;
+}
 
 function createId(prefix = 'command') {
   return `${prefix}_${typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex')}`;
@@ -238,7 +269,7 @@ function mergeDefaultCommand(defaultCommand, persistedCommand = {}) {
     updatedAt: persistedCommand.updatedAt,
   };
 
-  if (defaultCommand.kind !== 'builtin') {
+  if (defaultCommand.kind === 'custom') {
     persistedPatch.name = persistedCommand.name;
     persistedPatch.description = persistedCommand.description;
     persistedPatch.prompt = persistedCommand.prompt;
@@ -264,7 +295,9 @@ function mergeShortcutCommands(persistedCommands = []) {
       .filter((item) => item && typeof item === 'object' && typeof item.id === 'string')
       .map((item) => [item.id, item]),
   );
-  const defaults = DEFAULT_SHORTCUT_COMMANDS.map((command) => mergeDefaultCommand(command, persistedById.get(command.id)));
+  const defaults = applyDefaultCommandDependencies(
+    DEFAULT_SHORTCUT_COMMANDS.map((command) => mergeDefaultCommand(command, persistedById.get(command.id))),
+  );
   const customCommands = persistedList
     .filter((command) => command && typeof command === 'object' && !DEFAULT_COMMAND_BY_ID.has(command.id))
     .map((command) => normalizeShortcutCommand(command, {
@@ -284,11 +317,14 @@ function createUpsertPayloadForExisting(existingCommand, payload = {}) {
   const patch = {
     id: existingCommand.id,
     enabled: payload.enabled,
-    shortcut: payload.shortcut,
     updatedAt: new Date().toISOString(),
   };
 
-  if (existingCommand.kind !== 'builtin') {
+  if (!existingCommand.shortcut?.fixed || existingCommand.id === 'voice_input') {
+    patch.shortcut = payload.shortcut;
+  }
+
+  if (existingCommand.kind === 'custom') {
     patch.name = payload.name;
     patch.description = payload.description;
     patch.prompt = payload.prompt;
@@ -312,13 +348,13 @@ function upsertShortcutCommand(commands, payload = {}) {
       enabled: true,
       delivery: 'paste',
     });
-    return [candidate, ...existing];
+    return applyDefaultCommandDependencies([candidate, ...existing]);
   }
 
-  return existing.map((command) => {
+  return applyDefaultCommandDependencies(existing.map((command) => {
     if (command.id !== existingCommand.id) return command;
     return normalizeShortcutCommand(createUpsertPayloadForExisting(command, payload), command);
-  });
+  }));
 }
 
 function deleteShortcutCommand(commands, id) {

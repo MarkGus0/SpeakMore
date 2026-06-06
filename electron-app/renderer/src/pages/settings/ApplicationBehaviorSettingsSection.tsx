@@ -6,6 +6,7 @@
 import { Alert, Box, Switch, Typography } from '@mui/material'
 import { useI18n, type TranslationKey } from '../../i18n'
 import { type LocalSettings } from '../../services/settingsStore'
+import { helperTextSx, itemTitleSx, sectionTitleSx } from '../../uiTokens'
 
 type ApplicationBehaviorSettingsSectionProps = {
   settings: LocalSettings
@@ -13,7 +14,7 @@ type ApplicationBehaviorSettingsSectionProps = {
   updateSettings: (next: LocalSettings) => Promise<void>
 }
 
-const sectionTitle = { fontSize: 16, fontWeight: 500, mt: 4, mb: 1 }
+const sectionTitle = { ...sectionTitleSx, mt: 4, mb: 1 }
 
 const behaviorPanelSx = {
   bgcolor: 'rgba(119,119,119,0.06)',
@@ -27,6 +28,11 @@ const behaviorItems = [
     key: 'launchAtSystemStartup',
     title: 'settings.appBehavior.launchAtStartup',
     description: 'settings.appBehavior.launchAtStartupHint',
+  },
+  {
+    key: 'meetingDetectionEnabled',
+    title: 'settings.appBehavior.meetingDetection',
+    description: 'settings.appBehavior.meetingDetectionHint',
   },
   {
     key: 'showFloatingBar',
@@ -70,8 +76,8 @@ export default function ApplicationBehaviorSettingsSection({
               sx={{ mt: -0.5 }}
             />
             <Box sx={{ minWidth: 0 }}>
-              <Typography sx={{ fontWeight: 600 }}>{t(item.title as TranslationKey)}</Typography>
-              <Typography sx={{ fontSize: 13, color: 'text.secondary', mt: 0.6 }}>
+              <Typography sx={itemTitleSx}>{t(item.title as TranslationKey)}</Typography>
+              <Typography sx={{ ...helperTextSx, color: 'text.secondary', mt: 0.6 }}>
                 {t(item.description as TranslationKey)}
               </Typography>
             </Box>
