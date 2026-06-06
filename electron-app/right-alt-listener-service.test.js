@@ -100,13 +100,18 @@ test('handleListenerLine 忽略左 Command 协议键', () => {
   assert.deepEqual(handled, []);
 });
 
-test('macOS Option 监听器只按右 Option keycode 映射 RightAlt', () => {
+test('macOS Option 监听器只按右 Option 和右 Command 映射语音快捷键', () => {
   const source = fs.readFileSync(path.join(__dirname, 'macos-option-listener.c'), 'utf8');
 
   assert.match(source, /KEY_CODE_RIGHT_OPTION\s*=\s*61/);
+  assert.match(source, /KEY_CODE_RIGHT_COMMAND\s*=\s*54/);
+  assert.match(source, /KEY_CODE_LEFT_COMMAND\s*=\s*55/);
   assert.match(source, /NX_DEVICERALTKEYMASK/);
-  assert.match(source, /key_code\s*==\s*KEY_CODE_RIGHT_OPTION/);
+  assert.match(source, /NX_DEVICERCMDKEYMASK/);
+  assert.match(source, /emit_key\("RightCommand", right_command_is_down\)/);
   assert.doesNotMatch(source, /kCGEventFlagMaskAlternate\)\s*!=\s*0/);
+  assert.doesNotMatch(source, /kCGEventFlagMaskCommand\)\s*!=\s*0/);
+  assert.doesNotMatch(source, /emit_key\("Space", true\)/);
 });
 
 test('start 在非 Windows 平台不启动监听进程', () => {
