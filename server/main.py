@@ -21,6 +21,7 @@ from asr import (
     DOWNLOAD_SOURCE,
     create_streaming_asr_session,
     get_asr_runtime_device_status,
+    join_asr_text,
     preload_asr_model,
     resolve_streaming_model_source,
     transcribe_audio,
@@ -635,14 +636,32 @@ MEETING_REALTIME_TRANSLATION_FAST_CJK_CHARS = 14
 MEETING_REALTIME_TRANSLATION_FAST_OTHER_WORDS = 8
 MEETING_REALTIME_STABLE_COMMIT_OBSERVATIONS = 2
 MEETING_REALTIME_STABLE_FAST_COMMIT_SECONDS = 0.05
-MEETING_REALTIME_TRANSLATION_ENDINGS = tuple(".!?\n\u3002\uff01\uff1f")
-MEETING_REALTIME_LEADING_SEPARATOR_RE = re.compile(r"^[\s,，、。.!?！？;；:：]+")
+MEETING_REALTIME_SENTENCE_GRACE_SECONDS = 0.34
+MEETING_REALTIME_LOCAL_TRANSLATION_TIMEOUT_SECONDS = 2.2
+MEETING_REALTIME_TRANSLATION_ENDINGS = tuple(".!?\n\u3002\uff01\uff1f\u061f\u06d4\u0964")
+MEETING_REALTIME_LEADING_SEPARATOR_RE = re.compile(r"^[\s,，、،。.!?！？\u061f\u06d4\u0964;；؛:：]+")
 MEETING_REALTIME_CONNECTOR_PREFIX_RE = re.compile(
-    r"^\s*(但|但是|然后|接下来|所以|另外|还有|同时|并且|以及|不过|其次|第二点|第三点|第四点|最后|再一个|还有一个|then\b|and\b|but\b|so\b|also\b|next\b|second\b|third\b|finally\b)",
+    r"^\s*(但|但是|然后|接下来|所以|另外|还有|同时|并且|以及|不过|其次|第二点|第三点|第四点|最后|再一个|还有一个|"
+    r"そして|それで|でも|しかし|次に|また|그리고|하지만|그래서|다음|"
+    r"then\b|and\b|but\b|so\b|also\b|next\b|second\b|third\b|finally\b|"
+    r"y\b|pero\b|entonces\b|adem[aá]s\b|luego\b|tamb[ií]en\b|porque\b|"
+    r"et\b|mais\b|donc\b|ensuite\b|aussi\b|parce\s+que\b|"
+    r"und\b|aber\b|also\b|dann\b|au[ßs]erdem\b|weil\b|"
+    r"e\b|ma\b|quindi\b|poi\b|anche\b|mas\b|ent[aã]o\b|tamb[eé]m\b|"
+    r"и\b|но\b|поэтому\b|затем\b|также\b|"
+    r"و|لكن|ثم|لذلك|אבל|ואז|וגם|"
+    r"और|लेकिन|फिर|और\s+फिर|"
+    r"และ|แต่|ดังนั้น|แล้ว|"
+    r"v[aà]\b|nhưng\b|n[eê]n\b|ti[eế]p\s+theo\b|"
+    r"dan\b|tapi\b|tetapi\b|lalu\b|kemudian\b|ve\b|ama\b|fakat\b|sonra\b)",
     re.IGNORECASE,
 )
 MEETING_REALTIME_UNFINISHED_SUFFIX_RE = re.compile(
-    r"(然后|但是|因为|所以|接下来|另外|还有|以及|并且|如果|假如|关于|针对|先|再|要|需要|会|将|把|让|这个|那个|就是|the|and|but|because|so|if|to|of)$",
+    r"(然后|但是|因为|所以|接下来|另外|还有|以及|并且|如果|假如|关于|针对|先|再|要|需要|会|将|把|让|这个|那个|就是|"
+    r"そして|でも|しかし|그리고|하지만|그래서|"
+    r"the|and|but|because|so|if|to|of|for|with|from|"
+    r"y|pero|porque|para|de|que|et|mais|parce que|und|aber|weil|"
+    r"e|ma|perch[eé]|mas|porque|и|но|و|لكن|אבל|और|लेकिन|และ|แต่|dan|tapi|ve|ama)$",
     re.IGNORECASE,
 )
 MEETING_REALTIME_COMPLETE_SIGNAL_RE = re.compile(
@@ -684,6 +703,114 @@ def count_cjk_chars(value: str) -> int:
     return sum(1 for char in value if "\u4e00" <= char <= "\u9fff")
 
 
+def count_chars_in_ranges(value: str, ranges: tuple[tuple[int, int], ...]) -> int:
+    total = 0
+    for char in value:
+        code = ord(char)
+        if any(start <= code <= end for start, end in ranges):
+            total += 1
+    return total
+
+
+MEETING_REALTIME_SCRIPT_RANGES = {
+    "japanese": ((0x3040, 0x30FF),),
+    "korean": ((0xAC00, 0xD7AF), (0x1100, 0x11FF), (0x3130, 0x318F)),
+    "cjk": ((0x3400, 0x4DBF), (0x4E00, 0x9FFF), (0xF900, 0xFAFF)),
+    "thai": ((0x0E00, 0x0E7F),),
+    "lao": ((0x0E80, 0x0EFF),),
+    "khmer": ((0x1780, 0x17FF),),
+    "myanmar": ((0x1000, 0x109F),),
+    "indic": (
+        (0x0900, 0x097F),
+        (0x0980, 0x09FF),
+        (0x0A00, 0x0A7F),
+        (0x0A80, 0x0AFF),
+        (0x0B00, 0x0B7F),
+        (0x0B80, 0x0BFF),
+        (0x0C00, 0x0C7F),
+        (0x0C80, 0x0CFF),
+        (0x0D00, 0x0D7F),
+    ),
+    "arabic": ((0x0600, 0x06FF), (0x0750, 0x077F), (0x08A0, 0x08FF)),
+    "hebrew": ((0x0590, 0x05FF),),
+    "cyrillic": ((0x0400, 0x052F),),
+    "greek": ((0x0370, 0x03FF),),
+    "latin": ((0x0041, 0x005A), (0x0061, 0x007A), (0x00C0, 0x024F), (0x1E00, 0x1EFF)),
+}
+MEETING_REALTIME_COMPACT_SCRIPT_PROFILES = {"cjk", "japanese", "korean", "thai", "lao", "khmer", "myanmar"}
+MEETING_REALTIME_WORD_SCRIPT_PROFILES = {"latin", "cyrillic", "greek", "arabic", "hebrew", "indic", "mixed", "unknown"}
+MEETING_REALTIME_SCRIPT_THRESHOLDS = {
+    "cjk": {"short": 5, "immediate": 9, "pause": 11, "fast": 18, "force": 4, "wait": 0.82},
+    "japanese": {"short": 6, "immediate": 10, "pause": 12, "fast": 18, "force": 5, "wait": 0.86},
+    "korean": {"short": 5, "immediate": 9, "pause": 11, "fast": 17, "force": 4, "wait": 0.86},
+    "thai": {"short": 8, "immediate": 14, "pause": 18, "fast": 26, "force": 7, "wait": 1.0},
+    "lao": {"short": 8, "immediate": 14, "pause": 18, "fast": 26, "force": 7, "wait": 1.0},
+    "khmer": {"short": 8, "immediate": 14, "pause": 18, "fast": 26, "force": 7, "wait": 1.0},
+    "myanmar": {"short": 8, "immediate": 14, "pause": 18, "fast": 26, "force": 7, "wait": 1.0},
+    "latin": {"short": 3, "immediate": 5, "pause": 6, "fast": 10, "force": 2, "wait": 0.95},
+    "cyrillic": {"short": 3, "immediate": 5, "pause": 6, "fast": 10, "force": 2, "wait": 0.95},
+    "greek": {"short": 3, "immediate": 5, "pause": 6, "fast": 10, "force": 2, "wait": 0.95},
+    "arabic": {"short": 3, "immediate": 5, "pause": 6, "fast": 10, "force": 2, "wait": 0.98},
+    "hebrew": {"short": 3, "immediate": 5, "pause": 6, "fast": 10, "force": 2, "wait": 0.98},
+    "indic": {"short": 3, "immediate": 5, "pause": 6, "fast": 10, "force": 2, "wait": 1.0},
+    "mixed": {"short": 3, "immediate": 5, "pause": 6, "fast": 10, "force": 2, "wait": 0.95},
+    "unknown": {"short": 3, "immediate": 5, "pause": 6, "fast": 10, "force": 2, "wait": 0.95},
+}
+
+
+def detect_meeting_realtime_source_profile(value: str) -> str:
+    text = normalize_meeting_realtime_source(value)
+    if not text:
+        return "unknown"
+    counts = {
+        name: count_chars_in_ranges(text, ranges)
+        for name, ranges in MEETING_REALTIME_SCRIPT_RANGES.items()
+    }
+    if counts["japanese"] > 0:
+        return "japanese"
+    if counts["korean"] > 0:
+        return "korean"
+    if counts["cjk"] > 0:
+        return "cjk"
+    compact_profile = max(("thai", "lao", "khmer", "myanmar"), key=lambda name: counts[name])
+    if counts[compact_profile] > 0:
+        return compact_profile
+    word_profile = max(("latin", "cyrillic", "greek", "arabic", "hebrew", "indic"), key=lambda name: counts[name])
+    if counts[word_profile] > 0:
+        non_zero = sum(1 for name in ("latin", "cyrillic", "greek", "arabic", "hebrew", "indic") if counts[name] > 0)
+        return "mixed" if non_zero > 1 and counts[word_profile] < sum(counts.values()) * 0.7 else word_profile
+    return "unknown"
+
+
+def get_meeting_realtime_words(value: str) -> list[str]:
+    text = normalize_meeting_realtime_source(value)
+    return re.findall(r"[^\W_]+(?:['’.-][^\W_]+)*", text, flags=re.UNICODE)
+
+
+def count_meeting_realtime_significant_chars(value: str) -> int:
+    text = normalize_meeting_realtime_source(value)
+    return sum(1 for char in text if char.isalnum())
+
+
+def get_meeting_realtime_commit_metrics(value: str) -> dict[str, int | str | bool]:
+    profile = detect_meeting_realtime_source_profile(value)
+    compact = profile in MEETING_REALTIME_COMPACT_SCRIPT_PROFILES
+    words = get_meeting_realtime_words(value)
+    return {
+        "profile": profile,
+        "compact": compact,
+        "units": count_meeting_realtime_significant_chars(value) if compact else len(words),
+        "words": len(words),
+        "compare_length": len(normalize_meeting_realtime_compare(value)),
+        "cjk_count": count_cjk_chars(value),
+    }
+
+
+def get_meeting_realtime_thresholds(value: str) -> dict[str, float]:
+    profile = str(get_meeting_realtime_commit_metrics(value)["profile"])
+    return MEETING_REALTIME_SCRIPT_THRESHOLDS.get(profile, MEETING_REALTIME_SCRIPT_THRESHOLDS["unknown"])
+
+
 def normalize_meeting_realtime_source(value: str) -> str:
     text = unicodedata.normalize("NFKC", str(value or ""))
     chars = []
@@ -696,9 +823,9 @@ def normalize_meeting_realtime_source(value: str) -> str:
         chars.append(char)
     text = "".join(chars)
     text = re.sub(r"[\u200b\u200c\u200d\ufeff]", "", text)
-    text = re.sub(r"([.!?\u3002\uff01\uff1f,，、]){2,}", r"\1", text)
+    text = re.sub(r"([.!?\u3002\uff01\uff1f\u061f\u06d4\u0964,，、،]){2,}", r"\1", text)
     text = re.sub(r"\s+", " ", text).strip()
-    text = re.sub(r"\s+([.!?\u3002\uff01\uff1f,，、;；:：])", r"\1", text)
+    text = re.sub(r"\s+([.!?\u3002\uff01\uff1f\u061f\u06d4\u0964,，、،;；؛:：])", r"\1", text)
     text = re.sub(r"(?<=[\u4e00-\u9fff])\s+(?=[\u4e00-\u9fff])", "", text)
     return text
 
@@ -760,7 +887,13 @@ def ends_with_meeting_realtime_unfinished_suffix(value: str) -> bool:
 
 
 def join_meeting_realtime_parts(parts: list[str]) -> str:
-    return normalize_meeting_realtime_source("".join(parts))
+    text = ""
+    for part in parts:
+        normalized_part = normalize_meeting_realtime_source(part)
+        if not normalized_part:
+            continue
+        text = join_asr_text(text, normalized_part)
+    return normalize_meeting_realtime_source(text)
 
 
 def get_meeting_realtime_lengths(value: str) -> tuple[int, int]:
@@ -769,10 +902,10 @@ def get_meeting_realtime_lengths(value: str) -> tuple[int, int]:
 
 
 def is_tiny_meeting_realtime_fragment(value: str) -> bool:
-    cjk_count, compare_length = get_meeting_realtime_lengths(value)
-    if cjk_count > 0:
-        return cjk_count <= 1
-    return compare_length <= 2
+    metrics = get_meeting_realtime_commit_metrics(value)
+    if bool(metrics["compact"]):
+        return int(metrics["units"]) <= 1
+    return int(metrics["units"]) <= 1 and int(metrics["compare_length"]) <= 3
 
 
 def is_natural_meeting_realtime_sentence(value: str) -> bool:
@@ -781,11 +914,9 @@ def is_natural_meeting_realtime_sentence(value: str) -> bool:
         return False
     if is_tiny_meeting_realtime_fragment(text):
         return False
-    cjk_count, compare_length = get_meeting_realtime_lengths(text)
-    return (
-        cjk_count >= MEETING_REALTIME_TRANSLATION_IMMEDIATE_CJK_CHARS
-        or (cjk_count == 0 and compare_length >= MEETING_REALTIME_TRANSLATION_IMMEDIATE_OTHER_CHARS)
-    )
+    metrics = get_meeting_realtime_commit_metrics(text)
+    thresholds = get_meeting_realtime_thresholds(text)
+    return int(metrics["units"]) >= int(thresholds["immediate"]) or int(metrics["compare_length"]) >= 18
 
 
 def is_likely_complete_meeting_realtime_clause(value: str) -> bool:
@@ -794,11 +925,11 @@ def is_likely_complete_meeting_realtime_clause(value: str) -> bool:
         return False
     if starts_with_meeting_realtime_connector(text) or ends_with_meeting_realtime_unfinished_suffix(text):
         return False
-    cjk_count, compare_length = get_meeting_realtime_lengths(text)
-    if cjk_count > 0:
-        return cjk_count >= MEETING_REALTIME_TRANSLATION_COMPLETE_CJK_CHARS and bool(MEETING_REALTIME_COMPLETE_SIGNAL_RE.search(text))
-    words = re.findall(r"[A-Za-z0-9']+", text)
-    return len(words) >= MEETING_REALTIME_TRANSLATION_COMPLETE_OTHER_WORDS and compare_length >= MEETING_REALTIME_TRANSLATION_SHORT_OTHER_CHARS
+    metrics = get_meeting_realtime_commit_metrics(text)
+    thresholds = get_meeting_realtime_thresholds(text)
+    if bool(MEETING_REALTIME_COMPLETE_SIGNAL_RE.search(text)):
+        return int(metrics["units"]) >= max(3, int(thresholds["short"]))
+    return int(metrics["units"]) >= int(thresholds["pause"]) and int(metrics["compare_length"]) >= 18
 
 
 def has_meeting_realtime_pause_commit_length(value: str) -> bool:
@@ -809,16 +940,13 @@ def has_meeting_realtime_pause_commit_length(value: str) -> bool:
         return False
     if ends_with_meeting_realtime_unfinished_suffix(text):
         return False
-    cjk_count, compare_length = get_meeting_realtime_lengths(text)
+    metrics = get_meeting_realtime_commit_metrics(text)
+    thresholds = get_meeting_realtime_thresholds(text)
     if has_meeting_realtime_sentence_ending(text):
-        if cjk_count >= MEETING_REALTIME_TRANSLATION_SHORT_CJK_CHARS:
-            return True
-        return cjk_count == 0 and compare_length >= MEETING_REALTIME_TRANSLATION_SHORT_OTHER_CHARS
+        return int(metrics["units"]) >= int(thresholds["short"]) or int(metrics["compare_length"]) >= 12
     if is_likely_complete_meeting_realtime_clause(text):
         return True
-    if cjk_count >= MEETING_REALTIME_TRANSLATION_MIN_CJK_CHARS:
-        return True
-    return cjk_count == 0 and compare_length >= MEETING_REALTIME_TRANSLATION_MIN_OTHER_CHARS
+    return int(metrics["units"]) >= int(thresholds["pause"]) and int(metrics["compare_length"]) >= 18
 
 
 def is_force_committable_meeting_realtime_tail(value: str) -> bool:
@@ -831,32 +959,28 @@ def is_force_committable_meeting_realtime_tail(value: str) -> bool:
         return False
     if has_meeting_realtime_pause_commit_length(text):
         return True
-    cjk_count, compare_length = get_meeting_realtime_lengths(text)
+    metrics = get_meeting_realtime_commit_metrics(text)
+    thresholds = get_meeting_realtime_thresholds(text)
     if has_meeting_realtime_sentence_ending(text):
-        if cjk_count > 0:
-            return cjk_count >= 2
-        return compare_length >= 3
-    if cjk_count > 0:
-        return cjk_count >= 4
-    words = re.findall(r"[A-Za-z0-9']+", text)
-    return len(words) >= 2 and compare_length >= MEETING_REALTIME_TRANSLATION_SHORT_OTHER_CHARS
+        return int(metrics["units"]) >= max(1, int(thresholds["force"])) or int(metrics["compare_length"]) >= 4
+    if bool(metrics["compact"]):
+        return int(metrics["units"]) >= int(thresholds["force"])
+    return int(metrics["units"]) >= int(thresholds["force"]) and int(metrics["compare_length"]) >= 8
 
 
 def get_meeting_realtime_pause_wait_seconds(value: str) -> float:
     text = normalize_meeting_realtime_source(value)
     if not has_meeting_realtime_pause_commit_length(text):
         return 0.0
-    cjk_count, _compare_length = get_meeting_realtime_lengths(text)
-    word_count = len(re.findall(r"[A-Za-z0-9']+", text))
-    if cjk_count >= MEETING_REALTIME_TRANSLATION_FAST_CJK_CHARS or word_count >= MEETING_REALTIME_TRANSLATION_FAST_OTHER_WORDS:
-        return 0.45
-    if is_likely_complete_meeting_realtime_clause(text):
-        return 0.55
-    if is_natural_meeting_realtime_sentence(text):
-        return MEETING_REALTIME_TRANSLATION_MAX_WAIT_SECONDS
+    metrics = get_meeting_realtime_commit_metrics(text)
+    thresholds = get_meeting_realtime_thresholds(text)
     if has_meeting_realtime_sentence_ending(text):
-        return MEETING_REALTIME_TRANSLATION_SHORT_WAIT_SECONDS
-    return MEETING_REALTIME_TRANSLATION_MAX_WAIT_SECONDS
+        return MEETING_REALTIME_SENTENCE_GRACE_SECONDS
+    if int(metrics["units"]) >= int(thresholds["fast"]):
+        return 0.55
+    if is_likely_complete_meeting_realtime_clause(text):
+        return 0.72
+    return float(thresholds["wait"])
 
 
 def find_meeting_realtime_boundary_after_committed(text: str, committed_compare_key: str) -> int | None:
@@ -1298,6 +1422,8 @@ async def translate_text_with_engine(
                 target_language_name=target_language_name,
                 previous_sentences=previous_sentences,
                 previous_context_pairs=previous_context_pairs,
+                max_tokens=get_realtime_translation_token_budget(raw_text) if realtime else 256,
+                timeout_seconds=MEETING_REALTIME_LOCAL_TRANSLATION_TIMEOUT_SECONDS if realtime else 8.0,
             )
             if translated:
                 return {
@@ -1452,23 +1578,64 @@ class MeetingRealtimeTranslator:
             with suppress(asyncio.TimeoutError, asyncio.CancelledError, Exception):
                 await asyncio.wait_for(asyncio.gather(*(asyncio.shield(task) for task in active)), timeout=remaining)
 
-    async def observe_transcription(self, text: str, chunk_index: int, stable: bool = False) -> None:
+    async def observe_transcription(
+        self,
+        text: str,
+        chunk_index: int,
+        stable: bool = False,
+        segment_text: str = "",
+    ) -> None:
         del chunk_index
         if self.closed or self.mode != "meeting_notes":
             return
         if not get_meeting_translation_target(self.parameters):
             return
+        if not stable:
+            return
 
         normalized_text = normalize_meeting_realtime_source(text)
-        if not normalized_text or is_meaningless_meeting_realtime_segment(normalized_text):
+        normalized_segment = normalize_meeting_realtime_source(segment_text)
+        if not normalized_text and not normalized_segment:
             return
 
-        suffix = self._extract_uncommitted_suffix(normalized_text)
+        using_stable_segment = bool(stable and normalized_segment)
+        if using_stable_segment:
+            suffix = normalized_segment
+        else:
+            if not normalized_text or is_meaningless_meeting_realtime_segment(normalized_text):
+                return
+            suffix = self._extract_uncommitted_suffix(normalized_text)
         if not suffix:
             return
+        if is_meaningless_meeting_realtime_segment(suffix):
+            return
+
+        if self.pending_tail_text:
+            pending_tail = self.pending_tail_text
+            pending_key = normalize_meeting_realtime_compare(pending_tail)
+            suffix_key = normalize_meeting_realtime_compare(suffix)
+            if (
+                not using_stable_segment
+                and pending_key
+                and suffix_key.startswith(pending_key)
+                and suffix_key != pending_key
+                and has_meeting_realtime_pause_commit_length(pending_tail)
+            ):
+                boundary = find_meeting_realtime_boundary_after_committed(suffix, pending_key)
+                await self._commit_pending_tail(force=False)
+                suffix = normalize_meeting_realtime_source(strip_meeting_realtime_leading_separators(suffix[boundary or 0 :]))
+                if not suffix:
+                    return
+            merged_tail = self._merge_pending_tail(pending_tail, suffix) if self.pending_tail_text else ""
+            if merged_tail:
+                self._clear_pending_tail_only()
+                suffix = merged_tail
+            elif self.pending_tail_text:
+                await self._commit_pending_tail(force=False)
 
         completed_sentences, tail = split_meeting_realtime_sentences(suffix)
         buffered_parts: list[str] = []
+        completed_groups: list[str] = []
         for index, sentence in enumerate(completed_sentences):
             buffered_parts.append(sentence)
             next_sentence = completed_sentences[index + 1] if index + 1 < len(completed_sentences) else tail
@@ -1476,13 +1643,18 @@ class MeetingRealtimeTranslator:
                 continue
             candidate = join_meeting_realtime_parts(buffered_parts)
             if is_natural_meeting_realtime_sentence(candidate):
-                await self._commit_sentence(candidate)
+                completed_groups.append(candidate)
                 buffered_parts = []
 
         pending_tail = join_meeting_realtime_parts([*buffered_parts, tail])
+        if pending_tail:
+            for candidate in completed_groups:
+                await self._commit_sentence(candidate)
+        elif completed_groups:
+            for candidate in completed_groups[:-1]:
+                await self._commit_sentence(candidate)
+            pending_tail = completed_groups[-1]
         self._set_pending_tail(pending_tail, allow_timer=stable)
-        if stable:
-            await self._commit_pending_tail(force=False)
         await asyncio.sleep(0)
 
     def _extract_uncommitted_suffix(self, normalized_text: str) -> str:
@@ -1520,24 +1692,46 @@ class MeetingRealtimeTranslator:
             return sentence
         return normalize_meeting_realtime_source(strip_meeting_realtime_leading_separators(sentence[boundary:]))
 
+    def _clear_pending_tail_only(self) -> None:
+        self.pending_tail_text = ""
+        self.pending_tail_compare_key = ""
+        self.pending_tail_wait_seconds = 0.0
+        self.pending_tail_stable_count = 0
+        self._cancel_flush_timer()
+
+    def _merge_pending_tail(self, pending_tail: str, next_suffix: str) -> str:
+        pending = normalize_meeting_realtime_source(pending_tail)
+        suffix = normalize_meeting_realtime_source(next_suffix)
+        if not pending or not suffix:
+            return ""
+        pending_key = normalize_meeting_realtime_compare(pending)
+        suffix_key = normalize_meeting_realtime_compare(suffix)
+        if not pending_key or not suffix_key:
+            return ""
+        if pending_key == suffix_key:
+            return pending if len(pending) >= len(suffix) else suffix
+        if suffix_key.startswith(pending_key):
+            return suffix
+        if pending_key.startswith(suffix_key):
+            return pending
+        if starts_with_meeting_realtime_connector(suffix) or ends_with_meeting_realtime_unfinished_suffix(pending):
+            return join_meeting_realtime_parts([pending, suffix])
+        if not has_meeting_realtime_pause_commit_length(pending):
+            return join_meeting_realtime_parts([pending, suffix])
+        if meeting_realtime_similarity(pending, suffix) >= 0.9:
+            return pending if len(pending_key) >= len(suffix_key) else suffix
+        return ""
+
     def _set_pending_tail(self, tail: str, allow_timer: bool = True) -> None:
         normalized_tail = normalize_meeting_realtime_source(tail)
         if not normalized_tail or is_meaningless_meeting_realtime_segment(normalized_tail):
-            self.pending_tail_text = ""
-            self.pending_tail_compare_key = ""
-            self.pending_tail_wait_seconds = 0.0
-            self.pending_tail_stable_count = 0
-            self._cancel_flush_timer()
+            self._clear_pending_tail_only()
             return
 
         normalized_tail = self._trim_committed_prefix_from_sentence(normalized_tail)
         tail_key = normalize_meeting_realtime_compare(normalized_tail)
         if not tail_key or self._is_already_committed(normalized_tail):
-            self.pending_tail_text = ""
-            self.pending_tail_compare_key = ""
-            self.pending_tail_wait_seconds = 0.0
-            self.pending_tail_stable_count = 0
-            self._cancel_flush_timer()
+            self._clear_pending_tail_only()
             return
 
         if tail_key == self.pending_tail_compare_key:
@@ -1592,11 +1786,7 @@ class MeetingRealtimeTranslator:
                 return
         elif not has_meeting_realtime_pause_commit_length(tail):
             return
-        self.pending_tail_text = ""
-        self.pending_tail_compare_key = ""
-        self.pending_tail_wait_seconds = 0.0
-        self.pending_tail_stable_count = 0
-        self._cancel_flush_timer()
+        self._clear_pending_tail_only()
         await self._commit_sentence(tail)
 
     async def _commit_sentence(self, sentence: str) -> None:
@@ -1619,13 +1809,15 @@ class MeetingRealtimeTranslator:
 
         sentence_index = self.next_sentence_index
         self.next_sentence_index += 1
+        sentence_id = self._make_sentence_id(sentence_index)
+        source_fingerprint = compare_key
         previous_sentences = self.committed_sentences[-2:]
         previous_context_pairs = self.translated_context_pairs[-2:]
         self.committed_sentences.append(normalized)
         self.committed_sentence_keys.append(compare_key)
         self.committed_compare_key += compare_key
 
-        await self._notify_pending_sentence(normalized, sentence_index)
+        await self._notify_pending_sentence(normalized, sentence_index, target_language, sentence_id, source_fingerprint)
         if len(self.translation_queue) >= MEETING_REALTIME_TRANSLATION_MAX_QUEUE:
             self.translation_queue = self.translation_queue[-(MEETING_REALTIME_TRANSLATION_MAX_QUEUE - 1) :]
         self.translation_queue.append({
@@ -1634,20 +1826,35 @@ class MeetingRealtimeTranslator:
             "parameters": {**self.parameters},
             "context": dict(self.context),
             "sentence_index": sentence_index,
+            "sentence_id": sentence_id,
+            "source_fingerprint": source_fingerprint,
             "previous_sentences": previous_sentences,
             "previous_context_pairs": previous_context_pairs,
         })
         self._start_next_translations()
 
-    async def _notify_pending_sentence(self, segment: str, sentence_index: int) -> None:
+    def _make_sentence_id(self, sentence_index: int) -> str:
+        return f"{self.audio_id or 'meeting'}:sentence:{sentence_index}"
+
+    async def _notify_pending_sentence(
+        self,
+        segment: str,
+        sentence_index: int,
+        target_language: str,
+        sentence_id: str,
+        source_fingerprint: str,
+    ) -> None:
         await send_ws_message(
             self.websocket,
             "meeting_translation_pending",
             {
                 "audio_id": self.audio_id,
                 "source_text": segment,
+                "source_fingerprint": source_fingerprint,
+                "target_language": target_language,
                 "chunk_index": sentence_index,
                 "sentence_index": sentence_index,
+                "sentence_id": sentence_id,
                 "stable": False,
                 "committed": True,
                 "commit_policy": "sentence_or_phrase_group",
@@ -1670,6 +1877,8 @@ class MeetingRealtimeTranslator:
         parameters: dict,
         context: dict,
         sentence_index: int,
+        sentence_id: str,
+        source_fingerprint: str,
         previous_sentences: list[str],
         previous_context_pairs: list[dict],
     ) -> None:
@@ -1706,9 +1915,11 @@ class MeetingRealtimeTranslator:
                     "audio_id": self.audio_id,
                     "text": translation_text,
                     "source_text": segment,
+                    "source_fingerprint": source_fingerprint,
                     "target_language": target_language,
                     "chunk_index": sentence_index,
                     "sentence_index": sentence_index,
+                    "sentence_id": sentence_id,
                     "partial": True,
                     "stable": True,
                     "committed": True,
@@ -1925,6 +2136,10 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
                     for result in results:
                         streaming_chunk_index += 1
                         result_text = normalize_meeting_transcription_text(result.text, mode)
+                        result_segment_text = normalize_meeting_transcription_text(
+                            str(getattr(result, "segment_text", "") or ""),
+                            mode,
+                        )
                         if result_text:
                             result_stable = bool(getattr(result, "stable", True))
                             result_utterance_index = int(getattr(result, "utterance_index", 0) or streaming_chunk_index)
@@ -1933,6 +2148,8 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
                                 "transcription",
                                 {
                                     "text": result_text,
+                                    "segment_text": result_segment_text,
+                                    "stable_segment_text": result_segment_text if result_stable else "",
                                     "audio_id": audio_id,
                                     "chunk_index": streaming_chunk_index,
                                     "utterance_index": result_utterance_index,
@@ -1948,6 +2165,7 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
                                 result_text,
                                 streaming_chunk_index,
                                 stable=result_stable,
+                                segment_text=result_segment_text if result_stable else "",
                             )
                 else:
                     audio_chunks.append(message["bytes"])
@@ -2028,6 +2246,14 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
                             "transcription",
                             {
                                 "text": raw_text,
+                                "segment_text": normalize_meeting_transcription_text(
+                                    str(getattr(final_result, "segment_text", "") or raw_text),
+                                    mode,
+                                ),
+                                "stable_segment_text": normalize_meeting_transcription_text(
+                                    str(getattr(final_result, "segment_text", "") or raw_text),
+                                    mode,
+                                ),
                                 "audio_id": audio_id,
                                 "chunk_index": streaming_chunk_index,
                                 "utterance_index": streaming_chunk_index,

@@ -244,9 +244,13 @@ class WsProtocolContractTest(unittest.TestCase):
             asyncio.run(ws_voice_flow(websocket))
 
         translation = next(message for message in websocket.sent_messages if message["K"] == "meeting_translation")
+        pending = next(message for message in websocket.sent_messages if message["K"] == "meeting_translation_pending")
         self.assertEqual(translation["V"]["text"], "hello everyone translated")
         self.assertEqual(translation["V"]["source_text"], "hello everyone.")
         self.assertEqual(translation["V"]["target_language"], "en")
+        self.assertEqual(pending["V"]["target_language"], "en")
+        self.assertEqual(pending["V"]["sentence_id"], translation["V"]["sentence_id"])
+        self.assertEqual(pending["V"]["source_fingerprint"], translation["V"]["source_fingerprint"])
         self.assertTrue(translation["V"]["partial"])
         self.assertTrue(translation["V"]["stable"])
         pending_index = next(index for index, message in enumerate(websocket.sent_messages) if message["K"] == "meeting_translation_pending")
@@ -547,6 +551,118 @@ class WsProtocolContractTest(unittest.TestCase):
             "最后确认排期。",
         ])
         self.assertTrue(all(message["V"].get("committed") is True for message in translations))
+        self.assertEqual(
+            [message["V"]["sentence_id"] for message in pendings],
+            [message["V"]["sentence_id"] for message in translations],
+        )
+
+    def test_meeting_notes_stable_segment_text_prevents_old_sentence_retranslation(self):
+        class FakeStreamingSession:
+            def __init__(self):
+                self.outputs = [
+                    ("Your time is limited.", "Your time is limited."),
+                    (
+                        "Your time is limited. so don't waste it living someone else's life.",
+                        "so don't waste it living someone else's life.",
+                    ),
+                ]
+
+            def append_pcm16(self, _chunk):
+                text, segment_text = self.outputs.pop(0)
+                return [
+                    type(
+                        "StreamingResult",
+                        (),
+                        {
+                            "text": text,
+                            "segment_text": segment_text,
+                            "stable": True,
+                            "is_partial": False,
+                            "utterance_index": 1,
+                            "asr_latency_ms": 12,
+                        },
+                    )()
+                ]
+
+        websocket = FakeWebSocket([
+            {
+                "type": "websocket.receive",
+                "text": json.dumps({
+                    "type": "start_audio",
+                    "audio_id": "audio-1",
+                    "mode": "meeting_notes",
+                    "audio_context": {},
+                    "parameters": {
+                        "audio_format": {"type": "pcm_s16le", "sample_rate": 16000, "channels": 1},
+                        "meeting_translation_target_language": "fr",
+                    },
+                }),
+            },
+            {"type": "websocket.receive", "bytes": b"\x01\x00"},
+            {"type": "websocket.receive", "bytes": b"\x02\x00"},
+        ])
+
+        with patch("main.create_streaming_asr_session", return_value=FakeStreamingSession()), patch(
+            "main.refine_text",
+            new_callable=AsyncMock,
+        ) as refine:
+            refine.side_effect = lambda raw_text, mode, context, parameters: f"translated: {raw_text}"
+            asyncio.run(ws_voice_flow(websocket))
+
+        translations = [message for message in websocket.sent_messages if message["K"] == "meeting_translation"]
+        self.assertEqual(len(translations), 1)
+        self.assertEqual(
+            translations[0]["V"]["source_text"],
+            "Your time is limited. so don't waste it living someone else's life.",
+        )
+        self.assertEqual(translations[0]["V"]["target_language"], "fr")
+        self.assertEqual(translations[0]["V"]["sentence_index"], 1)
+        refine.assert_called_once()
+
+    def test_meeting_notes_multilingual_sources_use_natural_sentence_groups(self):
+        websocket = FakeWebSocket([])
+        translator = MeetingRealtimeTranslator(websocket)
+        translator.reset(
+            "audio-1",
+            "meeting_notes",
+            {},
+            {"meeting_translation_target_language": "de"},
+        )
+
+        async def run_multilingual_scenario():
+            await translator.observe_transcription(
+                "今日は会議を始めます。そして予算を確認します。",
+                1,
+                stable=True,
+                segment_text="今日は会議を始めます。そして予算を確認します。",
+            )
+            await translator.observe_transcription(
+                "Revisamos el presupuesto y luego confirmamos la agenda.",
+                2,
+                stable=True,
+                segment_text="Revisamos el presupuesto y luego confirmamos la agenda.",
+            )
+            await translator.observe_transcription(
+                "نراجع الميزانية ثم نؤكد الخطة؟",
+                3,
+                stable=True,
+                segment_text="نراجع الميزانية ثم نؤكد الخطة؟",
+            )
+            await translator.drain()
+
+        with patch("main.refine_text", new_callable=AsyncMock) as refine:
+            refine.side_effect = lambda raw_text, mode, context, parameters: f"translated: {raw_text}"
+            asyncio.run(run_multilingual_scenario())
+
+        translations = [message for message in websocket.sent_messages if message["K"] == "meeting_translation"]
+        self.assertEqual([message["V"]["source_text"] for message in translations], [
+            "今日は会議を始めます。そして予算を確認します。",
+            "Revisamos el presupuesto y luego confirmamos la agenda.",
+            "نراجع الميزانية ثم نؤكد الخطة؟",
+        ])
+        self.assertTrue(all(message["V"]["target_language"] == "de" for message in translations))
+        self.assertEqual(len({message["V"]["sentence_id"] for message in translations}), 3)
+        translator.cancel()
 
     def test_meeting_notes_unpunctuated_cumulative_asr_commits_latest_tail_once(self):
         class FakeStreamingSession:

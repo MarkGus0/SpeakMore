@@ -67,6 +67,7 @@ class StreamingAsrRuntime:
 @dataclass(frozen=True)
 class StreamingAsrResult:
     text: str
+    segment_text: str = ""
     stable: bool = False
     is_partial: bool = True
     utterance_index: int = 0
@@ -734,7 +735,7 @@ class StreamingAsrSession:
 
     def finalize(self) -> StreamingAsrResult:
         if not self.has_audio and not self.pcm_buffer:
-            return StreamingAsrResult(text="".join(self.text_parts))
+            return StreamingAsrResult(text="".join(self.text_parts), segment_text="")
 
         if self.endpoint_detector is not None:
             for event in self.endpoint_detector.finalize():
@@ -777,6 +778,7 @@ class StreamingAsrSession:
             stable_text = self._append_streaming_text(text)
             return StreamingAsrResult(
                 text=stable_text,
+                segment_text=text,
                 stable=True,
                 is_partial=False,
                 utterance_index=event.utterance_index,
@@ -788,6 +790,7 @@ class StreamingAsrSession:
         self.partial_tail_text = text
         return StreamingAsrResult(
             text=self._compose_text(text),
+            segment_text=text,
             stable=False,
             is_partial=True,
             utterance_index=event.utterance_index,
@@ -805,14 +808,32 @@ class StreamingAsrSession:
             if text:
                 self.text_parts = [text]
             self.partial_tail_text = ""
-            return StreamingAsrResult(text="".join(self.text_parts), stable=True, is_partial=False, asr_latency_ms=latency_ms)
+            return StreamingAsrResult(
+                text="".join(self.text_parts),
+                segment_text=text,
+                stable=True,
+                is_partial=False,
+                asr_latency_ms=latency_ms,
+            )
 
         if self.runtime.accumulate_audio:
             if text:
                 self.text_parts = [text]
-            return StreamingAsrResult(text="".join(self.text_parts), stable=False, is_partial=True, asr_latency_ms=latency_ms)
+            return StreamingAsrResult(
+                text="".join(self.text_parts),
+                segment_text=text,
+                stable=False,
+                is_partial=True,
+                asr_latency_ms=latency_ms,
+            )
 
-        return StreamingAsrResult(text=self._append_streaming_text(text), stable=False, is_partial=True, asr_latency_ms=latency_ms)
+        return StreamingAsrResult(
+            text=self._append_streaming_text(text),
+            segment_text=text,
+            stable=False,
+            is_partial=True,
+            asr_latency_ms=latency_ms,
+        )
 
 
 def is_streaming_asr_model_loaded() -> bool:

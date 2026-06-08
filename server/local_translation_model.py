@@ -949,6 +949,8 @@ async def translate_with_local_model(
     target_language_name: str,
     previous_sentences: list[str] | None = None,
     previous_context_pairs: list[dict] | None = None,
+    max_tokens: int = 256,
+    timeout_seconds: float = LOCAL_TRANSLATION_TIMEOUT_SECONDS,
 ) -> str:
     if target_language_id not in LOCAL_TRANSLATION_SUPPORTED_TARGETS:
         raise RuntimeError(f"Unsupported local translation target: {target_language_id}")
@@ -966,9 +968,9 @@ async def translate_with_local_model(
         target_language_name=target_language_name,
         previous_sentences=previous_sentences,
         previous_context_pairs=previous_context_pairs,
-        max_tokens=256,
+        max_tokens=max_tokens,
     )
-    text = await call_local_translation_api_async(runtime_url, payload)
+    text = await call_local_translation_api_async(runtime_url, payload, timeout_seconds=timeout_seconds)
     if is_invalid_local_translation_output(text, raw_text):
         raise RuntimeError(f"{SELF_TEST_FAILED_DETAIL_CODE}: invalid local translation output")
     return text

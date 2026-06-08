@@ -47,6 +47,7 @@ export type VoiceError = {
 
 export type MeetingLiveSegment = {
   id: string
+  sentenceId?: string
   sourceText: string
   translationText: string
   targetLanguage: string
@@ -55,6 +56,7 @@ export type MeetingLiveSegment = {
   createdAt: string
   status: 'pending' | 'translated' | 'skipped'
   normalizedSourceText: string
+  sourceFingerprint?: string
   isDuplicate?: boolean
 }
 

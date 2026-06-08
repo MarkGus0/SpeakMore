@@ -511,6 +511,16 @@ function readMeetingLiveReplaceChunkIndex(payload: Record<string, unknown> | und
   return Number.isFinite(value) && value > 0 ? value : 0
 }
 
+function readMeetingLiveSentenceId(payload: Record<string, unknown> | undefined) {
+  const value = typeof payload?.sentence_id === 'string' ? payload.sentence_id.trim() : ''
+  return value || ''
+}
+
+function readMeetingLiveSourceFingerprint(payload: Record<string, unknown> | undefined, sourceText: string) {
+  const value = typeof payload?.source_fingerprint === 'string' ? payload.source_fingerprint.trim() : ''
+  return value || normalizeMeetingLiveCompare(sourceText)
+}
+
 function readMeetingLiveTargetLanguage(payload: Record<string, unknown> | undefined) {
   const payloadTarget = typeof payload?.target_language === 'string' ? payload.target_language.trim() : ''
   if (payloadTarget && payloadTarget !== 'off') return payloadTarget
@@ -532,10 +542,18 @@ function upsertMeetingLiveSegment(
   replaceChunkIndex = 0,
 ) {
   const targetChunkIndex = replaceChunkIndex || segment.chunkIndex
-  const existingIndex = previousSegments.findIndex((item) => item.chunkIndex === targetChunkIndex && item.targetLanguage === segment.targetLanguage)
+  const existingBySentenceId = segment.sentenceId
+    ? previousSegments.findIndex((item) => item.sentenceId === segment.sentenceId)
+    : -1
+  const existingIndex = existingBySentenceId >= 0
+    ? existingBySentenceId
+    : previousSegments.findIndex((item) => item.chunkIndex === targetChunkIndex && item.targetLanguage === segment.targetLanguage)
   const nextCompare = normalizeMeetingLiveCompare(segment.normalizedSourceText || segment.sourceText)
+  const nextFingerprint = segment.sourceFingerprint || nextCompare
   const duplicateSourceIndex = previousSegments.findIndex((item) => {
+    if (segment.sentenceId && item.sentenceId === segment.sentenceId) return true
     if (item.targetLanguage !== segment.targetLanguage) return false
+    if (nextFingerprint && item.sourceFingerprint && item.sourceFingerprint === nextFingerprint) return true
     const existingCompare = normalizeMeetingLiveCompare(item.normalizedSourceText || item.sourceText)
     return Boolean(existingCompare && nextCompare && existingCompare === nextCompare)
   })
@@ -565,6 +583,7 @@ function upsertMeetingLiveSegment(
       id: item.id,
       chunkIndex: item.chunkIndex,
       sentenceIndex: item.sentenceIndex || item.chunkIndex,
+      sentenceId: item.sentenceId || segment.sentenceId,
       createdAt: item.createdAt,
     }
     : item)
@@ -581,9 +600,12 @@ function handleMeetingTranslationPending(payload?: Record<string, unknown>) {
   const targetLanguage = readMeetingLiveTargetLanguage(payload)
   const chunkIndex = readMeetingLiveChunkIndex(payload, previousSegments.length + 1)
   const replaceChunkIndex = readMeetingLiveReplaceChunkIndex(payload)
+  const sentenceId = readMeetingLiveSentenceId(payload)
+  const sourceFingerprint = readMeetingLiveSourceFingerprint(payload, sourceText)
   const createdAt = new Date().toISOString()
   const segment: MeetingLiveSegment = {
-    id: `${replaceChunkIndex || chunkIndex}-${targetLanguage}-${createdAt}`,
+    id: sentenceId || `${replaceChunkIndex || chunkIndex}-${targetLanguage}-${createdAt}`,
+    sentenceId,
     sourceText,
     translationText: '',
     targetLanguage,
@@ -592,6 +614,7 @@ function handleMeetingTranslationPending(payload?: Record<string, unknown>) {
     createdAt,
     status: payload?.status === 'skipped' ? 'skipped' : 'pending',
     normalizedSourceText: normalizeMeetingLiveSourceText(sourceText),
+    sourceFingerprint,
     isDuplicate: Boolean(payload?.is_duplicate),
   }
   const nextSegments = upsertMeetingLiveSegment(previousSegments, segment, replaceChunkIndex)
@@ -614,9 +637,12 @@ function handleMeetingTranslation(text: string, payload?: Record<string, unknown
   const targetLanguage = readMeetingLiveTargetLanguage(payload)
   const chunkIndex = readMeetingLiveChunkIndex(payload, previousSegments.length + 1)
   const replaceChunkIndex = readMeetingLiveReplaceChunkIndex(payload)
+  const sentenceId = readMeetingLiveSentenceId(payload)
+  const sourceFingerprint = readMeetingLiveSourceFingerprint(payload, sourceText)
   const createdAt = new Date().toISOString()
   const segment: MeetingLiveSegment = {
-    id: `${replaceChunkIndex || chunkIndex}-${targetLanguage}-${createdAt}`,
+    id: sentenceId || `${replaceChunkIndex || chunkIndex}-${targetLanguage}-${createdAt}`,
+    sentenceId,
     sourceText,
     translationText: value,
     targetLanguage,
@@ -625,6 +651,7 @@ function handleMeetingTranslation(text: string, payload?: Record<string, unknown
     createdAt,
     status: payload?.status === 'skipped' ? 'skipped' : 'translated',
     normalizedSourceText: normalizeMeetingLiveSourceText(sourceText),
+    sourceFingerprint,
     isDuplicate: Boolean(payload?.is_duplicate),
   }
   const nextSegments = upsertMeetingLiveSegment(previousSegments, segment, replaceChunkIndex)

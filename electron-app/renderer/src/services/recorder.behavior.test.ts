@@ -2071,6 +2071,62 @@ test('meeting_translation 会优先按 sentence_index 原地更新实时句子',
   }
 })
 
+test('meeting_translation 会优先按 sentence_id 原地更新 pending 段落', async () => {
+  const env = createTestEnvironment({
+    audioContextSampleRate: 16000,
+  })
+  let recorder: Awaited<ReturnType<typeof loadRecorderModule>> | null = null
+
+  try {
+    recorder = await loadRecorderModule('meeting-live-sentence-id')
+    await recorder.toggleMeetingNotesRecording({
+      audioSource: 'microphone',
+      targetLanguage: 'en',
+      showOriginal: true,
+      showTranslation: true,
+    })
+
+    env.sockets[0]?.emitJson({
+      K: 'meeting_translation_pending',
+      V: {
+        audio_id: 'audio-1',
+        source_text: 'Your time is limited.',
+        source_fingerprint: 'yourtimeislimited',
+        target_language: 'en',
+        chunk_index: 1,
+        sentence_index: 1,
+        sentence_id: 'audio-1:sentence:1',
+        committed: true,
+      },
+    })
+    env.sockets[0]?.emitJson({
+      K: 'meeting_translation',
+      V: {
+        audio_id: 'audio-1',
+        source_text: 'Your time is limited.',
+        source_fingerprint: 'yourtimeislimited',
+        text: '你的时间有限。',
+        target_language: 'zh',
+        chunk_index: 1,
+        sentence_index: 1,
+        sentence_id: 'audio-1:sentence:1',
+        partial: true,
+        committed: true,
+      },
+    })
+
+    const session = recorder.getVoiceSession()
+    assert.equal(session.meetingLiveSegments?.length, 1)
+    assert.equal(session.meetingLiveSegments?.[0]?.sentenceId, 'audio-1:sentence:1')
+    assert.equal(session.meetingLiveSegments?.[0]?.targetLanguage, 'zh')
+    assert.equal(session.meetingLiveSegments?.[0]?.translationText, '你的时间有限。')
+    assert.equal(session.translationText, '你的时间有限。')
+  } finally {
+    recorder?.disposeRecorder()
+    env.restore()
+  }
+})
+
 test('meeting_translation 相同原文不会追加重复实时行', async () => {
   const env = createTestEnvironment({
     audioContextSampleRate: 16000,
