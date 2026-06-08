@@ -239,6 +239,8 @@ export function getStartAudioParameters(
     llm,
     translation_engine_preference: inputs.settings.translationEnginePreference,
     local_translation_model_enabled: inputs.settings.localTranslationModelEnabled,
+    meeting_realtime_asr_preference: inputs.settings.meetingRealtimeAsrPreference,
+    meeting_realtime_asr_model_enabled: inputs.settings.meetingRealtimeAsrModelEnabled,
     ...dictionaryParameters,
     audio_format: { type: 'pcm_s16le', sample_rate: 16000, channels: 1 },
   }

@@ -60,6 +60,11 @@ export type MeetingLiveSegment = {
   isDuplicate?: boolean
   isPreview?: boolean
   stable?: boolean
+  phase?: 'preview' | 'commit'
+  sourceStable?: boolean
+  translationEngine?: string
+  translationLatencyMs?: number
+  localModelStatus?: string
 }
 
 export type VoiceSession = {
@@ -67,6 +72,11 @@ export type VoiceSession = {
   mode: VoiceMode
   audioId: string | null
   rawText: string
+  stableTranscriptText: string
+  partialTranscriptText: string
+  transcriptRevisionId?: string
+  transcriptUtteranceId?: string
+  transcriptAsrEngine?: string
   refinedText: string
   translationText: string
   meetingStructuredResult: MeetingStructuredResult | null
@@ -94,6 +104,11 @@ export const initialVoiceSession: VoiceSession = {
   mode: 'Dictate',
   audioId: null,
   rawText: '',
+  stableTranscriptText: '',
+  partialTranscriptText: '',
+  transcriptRevisionId: '',
+  transcriptUtteranceId: '',
+  transcriptAsrEngine: '',
   refinedText: '',
   translationText: '',
   meetingStructuredResult: null,

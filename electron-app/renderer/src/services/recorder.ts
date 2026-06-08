@@ -444,13 +444,20 @@ async function completeSession(refinedText: string, payload: Record<string, unkn
   lifecycle.clearTranscribeTimeout()
   const currentSession = getVoiceSession()
   const durationMs = lifecycle.getDurationMs()
-  const resultText = refinedText || currentSession.rawText
+  const finalRawText = readOptionalString(payload.user_prompt) || currentSession.rawText
+  const resultText = refinedText || finalRawText
   const translationText = typeof payload.translation_text === 'string' ? payload.translation_text : currentSession.translationText
   const meetingStructuredResult = normalizeMeetingStructuredResult(payload.meeting_structured) || currentSession.meetingStructuredResult
   const textLength = countTextLength(resultText)
   const completedSession = {
     ...currentSession,
     status: 'completed' as const,
+    rawText: finalRawText,
+    stableTranscriptText: finalRawText,
+    partialTranscriptText: '',
+    transcriptRevisionId: readOptionalString(payload.revision_id) || currentSession.transcriptRevisionId,
+    transcriptUtteranceId: readOptionalString(payload.utterance_id) || currentSession.transcriptUtteranceId,
+    transcriptAsrEngine: readOptionalString(payload.asr_engine) || currentSession.transcriptAsrEngine,
     refinedText: resultText,
     translationText,
     meetingStructuredResult,
@@ -474,13 +481,99 @@ async function completeSession(refinedText: string, payload: Record<string, unkn
   await deliverVoiceResult(resultText, task, completedSession.mode)
 }
 
+function readOptionalString(value: unknown) {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function readOptionalNonNegativeNumber(value: unknown) {
+  const numericValue = Number(value)
+  return Number.isFinite(numericValue) && numericValue >= 0 ? numericValue : undefined
+}
+
+function shouldInsertTranscriptSeparator(left: string, right: string) {
+  if (!left || !right) return false
+  const leftChar = left[left.length - 1] || ''
+  const rightChar = right[0] || ''
+  if (!leftChar || !rightChar || /\s/.test(leftChar) || /\s/.test(rightChar)) return false
+  if (/[\u4E00-\u9FFF]/.test(leftChar) || /[\u4E00-\u9FFF]/.test(rightChar)) return false
+  return /[\p{L}\p{N}.!?]/u.test(leftChar) && /[\p{L}\p{N}]/u.test(rightChar)
+}
+
+function joinTranscriptParts(stableText: string, partialText: string) {
+  const stable = stableText.trim()
+  const partial = partialText.trim()
+  if (!stable) return partial
+  if (!partial) return stable
+  if (partial.startsWith(stable)) return partial
+  return `${stable}${shouldInsertTranscriptSeparator(stable, partial) ? ' ' : ''}${partial}`
+}
+
+function resolveLiveTranscriptUpdate(
+  session: VoiceSession,
+  text: string,
+  payload: Record<string, unknown> = {},
+) {
+  const incomingStable = readOptionalString(payload.stable_text)
+  let incomingPartial = readOptionalString(payload.partial_text)
+  const incomingText = text.trim()
+  const isStable = payload.stable === true
+  const isPartial = payload.stable === false || payload.is_partial === true || Boolean(incomingPartial)
+  let stableTranscriptText = session.stableTranscriptText || ''
+
+  if (incomingStable) {
+    if (!stableTranscriptText || incomingStable.length >= stableTranscriptText.length) {
+      stableTranscriptText = incomingStable
+    }
+  } else if (isStable && incomingText) {
+    if (!stableTranscriptText || incomingText.length >= stableTranscriptText.length) {
+      stableTranscriptText = incomingText
+    }
+  } else if (!stableTranscriptText && !isPartial && incomingText) {
+    stableTranscriptText = incomingText
+  }
+
+  if (incomingPartial && stableTranscriptText && incomingPartial.startsWith(stableTranscriptText)) {
+    incomingPartial = incomingPartial.slice(stableTranscriptText.length).trim()
+  }
+
+  const partialTranscriptText = isStable ? '' : incomingPartial
+  const rawText = joinTranscriptParts(stableTranscriptText, partialTranscriptText) || incomingText
+  return {
+    rawText,
+    stableTranscriptText,
+    partialTranscriptText,
+    transcriptRevisionId: readOptionalString(payload.revision_id) || session.transcriptRevisionId,
+    transcriptUtteranceId: readOptionalString(payload.utterance_id) || session.transcriptUtteranceId,
+    transcriptAsrEngine: readOptionalString(payload.asr_engine) || session.transcriptAsrEngine,
+  }
+}
+
 function handleRawText(text: string, payload?: Record<string, unknown>) {
   // 流式转写会多次更新 rawText，最终结果仍以后端完成消息为准。
   if (text.trim()) diagnosticsRuntime.markFirstMetric('firstTranscriptionMs', 'first_transcription')
+  if (text.trim() && payload?.is_partial === true) {
+    diagnosticsRuntime.markFirstMetric('firstPartialTranscriptionMs', 'first_partial_transcription')
+  }
   if (text.trim() && payload?.stable === true) {
     diagnosticsRuntime.markFirstMetric('firstStableTranscriptionMs', 'first_stable_transcription')
   }
-  setSession({ ...getVoiceSession(), rawText: text, textLength: countTextLength(text) })
+  diagnosticsRuntime.mergeMetrics({
+    lastAsrLatencyMs: readOptionalNonNegativeNumber(payload?.asr_latency_ms),
+    asrBacklogMs: readOptionalNonNegativeNumber(payload?.asr_backlog_ms),
+    asrRtf: readOptionalNonNegativeNumber(payload?.asr_rtf),
+  })
+  const session = getVoiceSession()
+  const transcriptUpdate = session.mode === 'MeetingNotes'
+    ? resolveLiveTranscriptUpdate(session, text, payload || {})
+    : {
+      rawText: text,
+      stableTranscriptText: payload?.stable === true ? text.trim() : '',
+      partialTranscriptText: payload?.stable === true ? '' : text.trim(),
+      transcriptRevisionId: readOptionalString(payload?.revision_id) || session.transcriptRevisionId,
+      transcriptUtteranceId: readOptionalString(payload?.utterance_id) || session.transcriptUtteranceId,
+      transcriptAsrEngine: readOptionalString(payload?.asr_engine) || session.transcriptAsrEngine,
+    }
+  setSession({ ...session, ...transcriptUpdate, textLength: countTextLength(transcriptUpdate.rawText) })
 }
 
 const MEETING_LIVE_EMOJI_RE = /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2300}-\u{23FF}\u{2B00}-\u{2BFF}\uFE0E\uFE0F]/gu
@@ -526,6 +619,15 @@ function readMeetingLiveTargetLanguage(payload: Record<string, unknown> | undefi
   if (payloadTarget && payloadTarget !== 'off') return payloadTarget
   const taskTarget = activeTask?.meetingOptions?.targetLanguage
   return taskTarget && taskTarget !== 'off' ? taskTarget : 'en'
+}
+
+function readMeetingLivePhase(payload: Record<string, unknown> | undefined) {
+  return payload?.phase === 'preview' ? 'preview' : payload?.phase === 'commit' ? 'commit' : undefined
+}
+
+function readMeetingLiveLatency(payload: Record<string, unknown> | undefined) {
+  const value = Number(payload?.translation_latency_ms)
+  return Number.isFinite(value) && value >= 0 ? value : undefined
 }
 
 function updateMeetingTranslationText(segments: MeetingLiveSegment[]) {
@@ -616,6 +718,9 @@ function handleMeetingTranslationPending(payload?: Record<string, unknown>) {
   const sourceText = normalizeMeetingLiveSourceText(payload?.source_text)
   if (!sourceText) return
   diagnosticsRuntime.markFirstMetric('firstTranslationPendingMs', 'first_translation_pending')
+  if (payload?.phase === 'preview' || payload?.provisional === true) {
+    diagnosticsRuntime.markFirstMetric('firstPreviewTranslationMs', 'first_translation_preview_pending')
+  }
   const previousSegments = session.meetingLiveSegments || []
   const targetLanguage = readMeetingLiveTargetLanguage(payload)
   const chunkIndex = readMeetingLiveChunkIndex(payload, previousSegments.length + 1)
@@ -638,6 +743,11 @@ function handleMeetingTranslationPending(payload?: Record<string, unknown>) {
     isDuplicate: Boolean(payload?.is_duplicate),
     isPreview: payload?.provisional === true,
     stable: payload?.stable === true,
+    phase: readMeetingLivePhase(payload),
+    sourceStable: payload?.source_stable === true,
+    translationEngine: readOptionalString(payload?.translation_engine),
+    translationLatencyMs: readMeetingLiveLatency(payload),
+    localModelStatus: readOptionalString(payload?.local_model_status),
   }
   const nextSegments = upsertMeetingLiveSegment(previousSegments, segment, replaceChunkIndex)
   setSession({
@@ -652,6 +762,15 @@ function handleMeetingTranslation(text: string, payload?: Record<string, unknown
   const value = normalizeMeetingLiveSourceText(text)
   if (!value) return
   diagnosticsRuntime.markFirstMetric('firstTranslationMs', 'first_translation')
+  if (payload?.phase === 'preview' || payload?.provisional === true) {
+    diagnosticsRuntime.markFirstMetric('firstPreviewTranslationMs', 'first_translation_preview')
+  }
+  if (payload?.phase === 'commit' || payload?.committed === true || payload?.stable === true) {
+    diagnosticsRuntime.markFirstMetric('firstCommitTranslationMs', 'first_translation_commit')
+  }
+  diagnosticsRuntime.mergeMetrics({
+    lastTranslationLatencyMs: readMeetingLiveLatency(payload),
+  })
   const session = getVoiceSession()
   if (session.mode !== 'MeetingNotes' || !['connecting', 'recording', 'stopping', 'transcribing'].includes(session.status)) return
   const previousSegments = session.meetingLiveSegments || []
@@ -677,6 +796,11 @@ function handleMeetingTranslation(text: string, payload?: Record<string, unknown
     isDuplicate: Boolean(payload?.is_duplicate),
     isPreview: payload?.provisional === true,
     stable: payload?.stable === true,
+    phase: readMeetingLivePhase(payload),
+    sourceStable: payload?.source_stable === true,
+    translationEngine: readOptionalString(payload?.translation_engine),
+    translationLatencyMs: readMeetingLiveLatency(payload),
+    localModelStatus: readOptionalString(payload?.local_model_status),
   }
   const nextSegments = upsertMeetingLiveSegment(previousSegments, segment, replaceChunkIndex)
   setSession({

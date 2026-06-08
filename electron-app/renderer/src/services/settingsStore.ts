@@ -17,6 +17,7 @@ export type AsrDeviceMode = 'default' | 'mps' | 'cuda' | 'cpu'
 export type MeetingLiveAudioSource = 'microphone' | 'system' | 'microphone_system'
 export type MeetingLiveTargetLanguage = 'off' | TranslationTargetLanguage
 export type TranslationEnginePreference = 'auto' | 'local' | 'llm'
+export type MeetingRealtimeAsrPreference = 'auto' | 'streaming' | 'sensevoice_fallback'
 
 export type TranslationTargetLanguageConfig = {
   id: string
@@ -47,6 +48,7 @@ const asrDeviceModes = new Set<AsrDeviceMode>(['default', 'mps', 'cuda', 'cpu'])
 const meetingLiveAudioSources = new Set<MeetingLiveAudioSource>(['microphone', 'system', 'microphone_system'])
 const meetingLiveTargetLanguageIds = new Set<MeetingLiveTargetLanguage>(['off', ...MEETING_LIVE_TARGET_LANGUAGES.map((language) => language.id)])
 const translationEnginePreferences = new Set<TranslationEnginePreference>(['auto', 'local', 'llm'])
+const meetingRealtimeAsrPreferences = new Set<MeetingRealtimeAsrPreference>(['auto', 'streaming', 'sensevoice_fallback'])
 
 export type LlmProvider = {
   id: string
@@ -109,6 +111,8 @@ export type LocalSettings = {
   meetingDetectionEnabled: boolean
   meetingLiveAudioSource: MeetingLiveAudioSource
   meetingLiveTargetLanguage: MeetingLiveTargetLanguage
+  meetingRealtimeAsrPreference: MeetingRealtimeAsrPreference
+  meetingRealtimeAsrModelEnabled: boolean
   translationEnginePreference: TranslationEnginePreference
   localTranslationModelEnabled: boolean
   translationModelCacheDir: string
@@ -131,6 +135,8 @@ export const defaultSettings: LocalSettings = {
   meetingDetectionEnabled: true,
   meetingLiveAudioSource: 'microphone',
   meetingLiveTargetLanguage: 'off',
+  meetingRealtimeAsrPreference: 'auto',
+  meetingRealtimeAsrModelEnabled: true,
   translationEnginePreference: 'auto',
   localTranslationModelEnabled: true,
   translationModelCacheDir: '',
@@ -222,6 +228,12 @@ function normalizeTranslationEnginePreference(value: unknown): TranslationEngine
     : 'auto'
 }
 
+function normalizeMeetingRealtimeAsrPreference(value: unknown): MeetingRealtimeAsrPreference {
+  return typeof value === 'string' && meetingRealtimeAsrPreferences.has(value as MeetingRealtimeAsrPreference)
+    ? value as MeetingRealtimeAsrPreference
+    : 'auto'
+}
+
 export function normalizeLlmSettings(value: unknown): LlmSettings {
   const settings = isRecord(value) ? value : {}
   const providedProviders = Array.isArray(settings.providers) ? settings.providers : []
@@ -258,6 +270,8 @@ export function normalizeSettings(settings?: Partial<LocalSettings> | null): Loc
     meetingDetectionEnabled: normalizeBoolean(settings?.meetingDetectionEnabled, true),
     meetingLiveAudioSource: normalizeMeetingLiveAudioSource(settings?.meetingLiveAudioSource),
     meetingLiveTargetLanguage: normalizeMeetingLiveTargetLanguage(settings?.meetingLiveTargetLanguage),
+    meetingRealtimeAsrPreference: normalizeMeetingRealtimeAsrPreference(settings?.meetingRealtimeAsrPreference),
+    meetingRealtimeAsrModelEnabled: normalizeBoolean(settings?.meetingRealtimeAsrModelEnabled, true),
     translationEnginePreference: normalizeTranslationEnginePreference(settings?.translationEnginePreference),
     localTranslationModelEnabled: normalizeBoolean(settings?.localTranslationModelEnabled, true),
     translationModelCacheDir: normalizeOptionalPath(settings?.translationModelCacheDir),

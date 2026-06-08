@@ -62,6 +62,7 @@ class StreamingAsrRuntime:
     pass_is_final: bool = True
     generate_options: dict[str, Any] = field(default_factory=dict)
     postprocess: str | None = None
+    asr_engine: str = "sensevoice_endpoint"
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
 
@@ -81,6 +82,9 @@ class StreamingAsrResult:
     asr_window_ms: int = 0
     asr_full_segment_ms: int = 0
     hypothesis_id: str = ""
+    revision_id: str = ""
+    utterance_id: str = ""
+    asr_engine: str = ""
     source_profile: str = ""
 
 
@@ -680,6 +684,34 @@ def join_asr_text(left: str, right: str) -> str:
     return f"{left}{separator}{right}"
 
 
+def longest_common_text_prefix(left: str, right: str) -> str:
+    max_length = min(len(left), len(right))
+    index = 0
+    while index < max_length and left[index] == right[index]:
+        index += 1
+    return left[:index]
+
+
+def trim_common_prefix_to_commit_boundary(value: str) -> str:
+    raw_text = value
+    text = raw_text.strip()
+    if not text:
+        return ""
+    if any("\u4e00" <= char <= "\u9fff" for char in text):
+        return text
+    if raw_text[-1:].isspace() or not text[-1].isalnum():
+        return text.strip()
+    boundary = -1
+    for index in range(len(text) - 1, -1, -1):
+        char = text[index]
+        if char.isspace() or char in ",.;:!?)]}":
+            boundary = index
+            break
+    if boundary <= 0:
+        return ""
+    return text[:boundary].strip()
+
+
 def generate_streaming_asr_chunk(
     runtime: StreamingAsrRuntime,
     pcm_bytes: bytes,
@@ -877,7 +909,7 @@ class AudioBackpressureQueue:
     def __init__(
         self,
         sample_rate: int = 16000,
-        max_audio_ms: int = 8000,
+        max_audio_ms: int = 2000,
     ) -> None:
         self.sample_rate = max(1, int(sample_rate or 16000))
         self.max_bytes = max(2, int(self.sample_rate * max_audio_ms / 1000) * 2)
@@ -976,6 +1008,9 @@ class MeetingRealtimePipeline:
         self.full_pcm = bytearray()
         self.closed = False
         self.sequence = 0
+        self.stable_transcript_text = ""
+        self.partial_revision = 0
+        self.last_partial_hypothesis_text = ""
 
     async def start(self) -> None:
         if self.worker_task is None:
@@ -1012,10 +1047,25 @@ class MeetingRealtimePipeline:
                 asr_window_ms=full_ms,
                 asr_full_segment_ms=full_ms,
                 hypothesis_id=f"final:{self.sequence + 1}",
+                revision_id=f"final:{self.sequence + 1}",
+                utterance_id=f"final:{self.sequence + 1}",
+                asr_engine="final_sensevoice",
                 source_profile=self.source_profile,
             )
         result = await asyncio.to_thread(self.engine.finalize)
-        return self._decorate_result(result)
+        decorated = self._decorate_result(result)
+        final_text = str(getattr(result, "text", "") or getattr(result, "segment_text", "") or decorated.text or "").strip()
+        return replace(
+            decorated,
+            text=final_text,
+            revision_id=f"final:{decorated.utterance_id or self.sequence}",
+            utterance_id=f"final:{decorated.utterance_id or self.sequence}",
+            asr_engine="final_sensevoice",
+            is_partial=False,
+            stable=True,
+            partial_text="",
+            stable_text=final_text,
+        )
 
     async def cancel(self) -> None:
         self.closed = True
@@ -1074,18 +1124,55 @@ class MeetingRealtimePipeline:
                 asr_full_segment_ms=int(getattr(result, "asr_full_segment_ms", 0) or getattr(result, "full_segment_ms", 0) or 0),
             )
         self.sequence += 1
-        stable_text, partial_text = StableTranscriptAssembler.split_result_text(result)
+        if result.stable:
+            stable_text = str(result.text or result.segment_text or "").strip()
+            if not stable_text:
+                stable_text = self.stable_transcript_text
+            elif self.stable_transcript_text and not stable_text.startswith(self.stable_transcript_text):
+                segment_text = str(result.segment_text or "").strip()
+                if self.stable_transcript_text.startswith(stable_text):
+                    stable_text = self.stable_transcript_text
+                else:
+                    stable_text = join_asr_text(self.stable_transcript_text, segment_text) if segment_text else self.stable_transcript_text
+            self.stable_transcript_text = stable_text
+            self.last_partial_hypothesis_text = stable_text
+            partial_text = ""
+        else:
+            _result_stable_text, partial_text = StableTranscriptAssembler.split_result_text(result)
+            stable_hint = str(getattr(result, "stable_text", "") or _result_stable_text or "").strip()
+            full_hypothesis = str(result.text or "").strip()
+            if not stable_hint and self.last_partial_hypothesis_text and full_hypothesis:
+                common_prefix = trim_common_prefix_to_commit_boundary(
+                    longest_common_text_prefix(self.last_partial_hypothesis_text, full_hypothesis),
+                )
+                if common_prefix and len(common_prefix) > len(self.stable_transcript_text):
+                    stable_hint = common_prefix
+            if stable_hint and (not self.stable_transcript_text or len(stable_hint) >= len(self.stable_transcript_text)):
+                self.stable_transcript_text = stable_hint
+            partial_text = str(getattr(result, "partial_text", "") or partial_text or result.segment_text or "").strip()
+            if self.stable_transcript_text and partial_text.startswith(self.stable_transcript_text):
+                partial_text = partial_text[len(self.stable_transcript_text) :].strip()
+            stable_text = self.stable_transcript_text
+            self.last_partial_hypothesis_text = full_hypothesis or join_asr_text(stable_text, partial_text)
+            self.partial_revision += 1
         window_ms = int(result.asr_window_ms or 0)
         full_segment_ms = int(result.asr_full_segment_ms or window_ms or 0)
         latency_ms = int(result.asr_latency_ms or 0)
+        utterance_id = str(result.utterance_index or self.sequence)
+        revision_id = f"{utterance_id}:{'stable' if result.stable else 'partial'}:{self.partial_revision if not result.stable else self.sequence}"
+        display_text = stable_text if result.stable or not partial_text else join_asr_text(stable_text, partial_text)
         return replace(
             result,
+            text=display_text,
             stable_text=stable_text,
             partial_text=partial_text,
             asr_backlog_ms=self.queue.backlog_ms(),
             asr_rtf=round(latency_ms / max(1, window_ms), 4),
             asr_full_segment_ms=full_segment_ms,
             hypothesis_id=f"{result.utterance_index or self.sequence}:{'stable' if result.stable else 'partial'}:{self.sequence}",
+            revision_id=revision_id,
+            utterance_id=utterance_id,
+            asr_engine=str(getattr(result, "asr_engine", "") or "sensevoice_endpoint"),
             source_profile=self.source_profile,
         )
 

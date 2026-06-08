@@ -75,6 +75,8 @@ test('loadSettings 会补齐默认大模型 provider 配置', async () => {
   assert.equal(settings.meetingDetectionEnabled, true)
   assert.equal(settings.meetingLiveAudioSource, 'microphone')
   assert.equal(settings.meetingLiveTargetLanguage, 'off')
+  assert.equal(settings.meetingRealtimeAsrPreference, 'auto')
+  assert.equal(settings.meetingRealtimeAsrModelEnabled, true)
   assert.equal(settings.translationEnginePreference, 'auto')
   assert.equal(settings.localTranslationModelEnabled, true)
   assert.equal(settings.translationModelCacheDir, '')
@@ -91,6 +93,8 @@ test('loadSettings 会保留音频和应用行为开关', async () => {
     meetingDetectionEnabled: false,
     meetingLiveAudioSource: 'microphone_system',
     meetingLiveTargetLanguage: 'ja',
+    meetingRealtimeAsrPreference: 'streaming',
+    meetingRealtimeAsrModelEnabled: false,
     translationEnginePreference: 'local',
     localTranslationModelEnabled: false,
     translationModelCacheDir: '  D:\\Models\\HyMT  ',
@@ -108,6 +112,8 @@ test('loadSettings 会保留音频和应用行为开关', async () => {
   assert.equal(settings.meetingDetectionEnabled, false)
   assert.equal(settings.meetingLiveAudioSource, 'microphone_system')
   assert.equal(settings.meetingLiveTargetLanguage, 'ja')
+  assert.equal(settings.meetingRealtimeAsrPreference, 'streaming')
+  assert.equal(settings.meetingRealtimeAsrModelEnabled, false)
   assert.equal(settings.translationEnginePreference, 'local')
   assert.equal(settings.localTranslationModelEnabled, false)
   assert.equal(settings.translationModelCacheDir, 'D:\\Models\\HyMT')
@@ -315,6 +321,8 @@ test('loadSettings 遇到未知翻译目标语言会回退默认英文', async (
 test('loadSettings normalizes local translation engine settings', async () => {
   installSettingsResponse({
     translationEnginePreference: 'bad',
+    meetingRealtimeAsrPreference: 'bad',
+    meetingRealtimeAsrModelEnabled: 0,
     localTranslationModelEnabled: 0,
     translationModelCacheDir: '  E:\\HyMT  ',
   })
@@ -323,6 +331,8 @@ test('loadSettings normalizes local translation engine settings', async () => {
   const settings = await settingsStore.loadSettings()
 
   assert.equal(settings.translationEnginePreference, 'auto')
+  assert.equal(settings.meetingRealtimeAsrPreference, 'auto')
+  assert.equal(settings.meetingRealtimeAsrModelEnabled, false)
   assert.equal(settings.localTranslationModelEnabled, false)
   assert.equal(settings.translationModelCacheDir, 'E:\\HyMT')
 })

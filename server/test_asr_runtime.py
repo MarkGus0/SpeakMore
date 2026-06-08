@@ -200,6 +200,75 @@ class AsrRuntimeTest(unittest.TestCase):
         self.assertEqual(asr.join_asr_text("hello", "world"), "hello world")
         self.assertEqual(asr.join_asr_text("会议", "开始"), "会议开始")
 
+    def test_meeting_realtime_pipeline_keeps_stable_prefix_and_replaces_partial_tail(self):
+        pipeline = asr.MeetingRealtimePipeline(
+            sample_rate=1000,
+            session_factory=lambda sample_rate: object(),
+        )
+
+        first = pipeline._decorate_result(asr.StreamingAsrResult(
+            text="We need confirm",
+            segment_text="confirm",
+            stable_text="We need",
+            partial_text="confirm",
+            stable=False,
+            is_partial=True,
+            utterance_index=1,
+        ))
+        second = pipeline._decorate_result(asr.StreamingAsrResult(
+            text="We need confirm budget",
+            segment_text="confirm budget",
+            stable_text="We need",
+            partial_text="confirm budget",
+            stable=False,
+            is_partial=True,
+            utterance_index=1,
+        ))
+        rollback = pipeline._decorate_result(asr.StreamingAsrResult(
+            text="We",
+            segment_text="",
+            stable=True,
+            is_partial=False,
+            utterance_index=1,
+        ))
+
+        self.assertEqual(first.stable_text, "We need")
+        self.assertEqual(first.partial_text, "confirm")
+        self.assertEqual(first.text, "We need confirm")
+        self.assertEqual(second.stable_text, "We need")
+        self.assertEqual(second.partial_text, "confirm budget")
+        self.assertEqual(second.text, "We need confirm budget")
+        self.assertEqual(rollback.stable_text, "We need")
+        self.assertEqual(rollback.partial_text, "")
+        self.assertEqual(rollback.text, "We need")
+
+    def test_meeting_realtime_pipeline_promotes_local_agreement_prefix(self):
+        pipeline = asr.MeetingRealtimePipeline(
+            sample_rate=1000,
+            session_factory=lambda sample_rate: object(),
+        )
+
+        first = pipeline._decorate_result(asr.StreamingAsrResult(
+            text="We need confirm budget",
+            segment_text="",
+            stable=False,
+            is_partial=True,
+            utterance_index=1,
+        ))
+        second = pipeline._decorate_result(asr.StreamingAsrResult(
+            text="We need confirm timeline",
+            segment_text="",
+            stable=False,
+            is_partial=True,
+            utterance_index=1,
+        ))
+
+        self.assertEqual(first.stable_text, "")
+        self.assertEqual(first.text, "We need confirm budget")
+        self.assertEqual(second.stable_text, "We need confirm")
+        self.assertEqual(second.partial_text, "timeline")
+        self.assertEqual(second.text, "We need confirm timeline")
+
     def test_transcribe_audio_uses_pcm16_streaming_session(self):
         fake_runtime = asr.StreamingAsrRuntime(
             model=object(),

@@ -50,7 +50,7 @@ test('normalizeDiagnosticSession strips speech text fields and arbitrary event p
     translationText: 'translation body',
     transcript: 'transcript body',
     summary: 'summary body',
-    metrics: { startupMs: 20, rawText: 'nope' },
+    metrics: { startupMs: 20, firstPartialTranscriptionMs: 35, asrBacklogMs: 120, asrRtf: 0.42, lastTranslationLatencyMs: 380, rawText: 'nope' },
     events: [{
       name: 'first_transcription',
       at: '2026-01-01T00:00:00.000Z',
@@ -69,6 +69,10 @@ test('normalizeDiagnosticSession strips speech text fields and arbitrary event p
   assert.equal(session.mode, 'MeetingNotes');
   assert.equal(session.status, 'error');
   assert.equal(session.metrics.startupMs, 20);
+  assert.equal(session.metrics.firstPartialTranscriptionMs, 35);
+  assert.equal(session.metrics.asrBacklogMs, 120);
+  assert.equal(session.metrics.asrRtf, 0.42);
+  assert.equal(session.metrics.lastTranslationLatencyMs, 380);
   assert.deepEqual(session.events[0], {
     name: 'first_transcription',
     at: '2026-01-01T00:00:00.000Z',

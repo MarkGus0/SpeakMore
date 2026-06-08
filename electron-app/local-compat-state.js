@@ -22,6 +22,8 @@ function createDefaultLocalStores({
       translationTargetLanguage: defaultTranslationTargetLanguage,
       translationEnginePreference: 'auto',
       localTranslationModelEnabled: true,
+      meetingRealtimeAsrPreference: 'auto',
+      meetingRealtimeAsrModelEnabled: true,
       translationModelCacheDir: '',
       selectedLanguages: [],
       autoSelectLanguages: false,
@@ -92,6 +94,8 @@ function createLocalCompatState({
     localStores['app-settings'].translationTargetLanguage = settings.translationTargetLanguage;
     localStores['app-settings'].translationEnginePreference = settings.translationEnginePreference;
     localStores['app-settings'].localTranslationModelEnabled = settings.localTranslationModelEnabled !== false;
+    localStores['app-settings'].meetingRealtimeAsrPreference = settings.meetingRealtimeAsrPreference || 'auto';
+    localStores['app-settings'].meetingRealtimeAsrModelEnabled = settings.meetingRealtimeAsrModelEnabled !== false;
     localStores['app-settings'].translationModelCacheDir = settings.translationModelCacheDir || '';
     localStores['app-settings'].selectedMicrophoneDevice = settings.selectedAudioDeviceId === 'default'
       ? null

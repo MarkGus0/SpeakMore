@@ -51,9 +51,16 @@ function normalizeMetrics(value = {}) {
     'microphoneMs',
     'parametersMs',
     'firstTranscriptionMs',
+    'firstPartialTranscriptionMs',
     'firstStableTranscriptionMs',
     'firstTranslationPendingMs',
+    'firstPreviewTranslationMs',
+    'firstCommitTranslationMs',
     'firstTranslationMs',
+    'lastAsrLatencyMs',
+    'asrBacklogMs',
+    'asrRtf',
+    'lastTranslationLatencyMs',
     'finalRefineMs',
   ];
   return metricKeys.reduce((next, key) => {

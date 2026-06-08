@@ -35,6 +35,8 @@ function withPcm16AudioFormat(parameters: Record<string, unknown>) {
     ...parameters,
     translation_engine_preference: 'auto',
     local_translation_model_enabled: true,
+    meeting_realtime_asr_preference: 'auto',
+    meeting_realtime_asr_model_enabled: true,
     audio_format: pcm16AudioFormat,
   }
 }
@@ -45,6 +47,8 @@ function createSettingsWithEmptyApiKey(overrides: Record<string, unknown> = {}) 
     translationTargetLanguage: 'en',
     translationEnginePreference: 'auto',
     localTranslationModelEnabled: true,
+    meetingRealtimeAsrPreference: 'auto',
+    meetingRealtimeAsrModelEnabled: true,
     translationModelCacheDir: '',
     launchAtSystemStartup: false,
     llm: {
@@ -322,6 +326,8 @@ function createTestEnvironment(options: {
           translationTargetLanguage: options.translationTargetLanguage ?? 'en',
           translationEnginePreference: 'auto',
           localTranslationModelEnabled: true,
+          meetingRealtimeAsrPreference: 'auto',
+          meetingRealtimeAsrModelEnabled: true,
           translationModelCacheDir: '',
           meetingLiveAudioSource: 'microphone',
           meetingLiveTargetLanguage: 'off',
@@ -1933,6 +1939,156 @@ test('录音成功完成后会丢弃临时重试音频', async () => {
 
     assert.equal(recorder.getVoiceSession().status, 'completed')
     assert.equal(recorder.getVoiceSession().retryAudioWavBase64, '')
+  } finally {
+    recorder?.disposeRecorder()
+    env.restore()
+  }
+})
+
+test('meeting_notes transcription keeps stable text and only replaces partial tail', async () => {
+  const env = createTestEnvironment({
+    audioContextSampleRate: 16000,
+  })
+  let recorder: Awaited<ReturnType<typeof loadRecorderModule>> | null = null
+
+  try {
+    recorder = await loadRecorderModule('meeting-transcript-stable-partial')
+    await recorder.toggleMeetingNotesRecording({
+      audioSource: 'microphone',
+      targetLanguage: 'off',
+      showOriginal: true,
+      showTranslation: false,
+    })
+
+    env.sockets[0]?.emitJson({
+      K: 'transcription',
+      V: {
+        audio_id: 'audio-1',
+        text: 'We need confirm',
+        stable_text: 'We need',
+        partial_text: 'confirm',
+        stable: false,
+        is_partial: true,
+        revision_id: '1:partial:1',
+        utterance_id: '1',
+        asr_engine: 'sensevoice_endpoint',
+      },
+    })
+    env.sockets[0]?.emitJson({
+      K: 'transcription',
+      V: {
+        audio_id: 'audio-1',
+        text: 'We need confirm budget',
+        stable_text: 'We need',
+        partial_text: 'confirm budget',
+        stable: false,
+        is_partial: true,
+        revision_id: '1:partial:2',
+        utterance_id: '1',
+        asr_engine: 'sensevoice_endpoint',
+      },
+    })
+    env.sockets[0]?.emitJson({
+      K: 'transcription',
+      V: {
+        audio_id: 'audio-1',
+        text: 'We',
+        stable_text: 'We',
+        partial_text: '',
+        stable: true,
+        is_partial: false,
+        revision_id: '1:stable:3',
+        utterance_id: '1',
+      },
+    })
+
+    const session = recorder.getVoiceSession()
+    assert.equal(session.stableTranscriptText, 'We need')
+    assert.equal(session.partialTranscriptText, '')
+    assert.equal(session.rawText, 'We need')
+    assert.equal(session.transcriptRevisionId, '1:stable:3')
+    assert.equal(session.transcriptUtteranceId, '1')
+  } finally {
+    recorder?.disposeRecorder()
+    env.restore()
+  }
+})
+
+test('meeting_translation preview and commit keep one sentence row with phase metadata', async () => {
+  const env = createTestEnvironment({
+    audioContextSampleRate: 16000,
+  })
+  let recorder: Awaited<ReturnType<typeof loadRecorderModule>> | null = null
+
+  try {
+    recorder = await loadRecorderModule('meeting-live-preview-commit-phase')
+    await recorder.toggleMeetingNotesRecording({
+      audioSource: 'microphone',
+      targetLanguage: 'zh',
+      showOriginal: true,
+      showTranslation: true,
+      module: 'live_translation',
+    })
+
+    env.sockets[0]?.emitJson({
+      K: 'meeting_translation_pending',
+      V: {
+        audio_id: 'audio-1',
+        source_text: 'Your time is limited',
+        target_language: 'zh',
+        chunk_index: 1,
+        sentence_index: 1,
+        sentence_id: 'audio-1:sentence:1',
+        phase: 'preview',
+        source_stable: false,
+        provisional: true,
+      },
+    })
+    env.sockets[0]?.emitJson({
+      K: 'meeting_translation',
+      V: {
+        audio_id: 'audio-1',
+        source_text: 'Your time is limited',
+        text: 'preview translation',
+        target_language: 'zh',
+        chunk_index: 1,
+        sentence_index: 1,
+        sentence_id: 'audio-1:sentence:1',
+        phase: 'preview',
+        source_stable: false,
+        provisional: true,
+        translation_engine: 'local_hy_mt',
+        translation_latency_ms: 320,
+        local_model_status: 'ready',
+      },
+    })
+    env.sockets[0]?.emitJson({
+      K: 'meeting_translation',
+      V: {
+        audio_id: 'audio-1',
+        source_text: 'Your time is limited.',
+        text: 'committed translation',
+        target_language: 'zh',
+        chunk_index: 1,
+        sentence_index: 1,
+        sentence_id: 'audio-1:sentence:1',
+        phase: 'commit',
+        source_stable: true,
+        committed: true,
+        stable: true,
+        translation_engine: 'llm',
+        translation_latency_ms: 880,
+      },
+    })
+
+    const session = recorder.getVoiceSession()
+    assert.equal(session.meetingLiveSegments?.length, 1)
+    assert.equal(session.meetingLiveSegments?.[0]?.sourceText, 'Your time is limited.')
+    assert.equal(session.meetingLiveSegments?.[0]?.translationText, 'committed translation')
+    assert.equal(session.meetingLiveSegments?.[0]?.phase, 'commit')
+    assert.equal(session.meetingLiveSegments?.[0]?.sourceStable, true)
+    assert.equal(session.meetingLiveSegments?.[0]?.translationEngine, 'llm')
+    assert.equal(session.meetingLiveSegments?.[0]?.translationLatencyMs, 880)
   } finally {
     recorder?.disposeRecorder()
     env.restore()

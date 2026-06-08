@@ -6,6 +6,7 @@ const {
   DEFAULT_LLM_PROVIDERS,
   DEFAULT_MEETING_LIVE_AUDIO_SOURCE,
   DEFAULT_MEETING_LIVE_TARGET_LANGUAGE,
+  DEFAULT_MEETING_REALTIME_ASR_PREFERENCE,
   DEFAULT_TRANSLATION_ENGINE_PREFERENCE,
   DEFAULT_TRANSLATION_TARGET_LANGUAGE,
   INTERFACE_LANGUAGES,
@@ -72,6 +73,8 @@ test('normalizeLocalSettings 会回退不支持的翻译目标语言和空设备
     modelCacheDir: 123,
     asrDeviceMode: 'gpu',
     translationEnginePreference: 'bad',
+    meetingRealtimeAsrPreference: 'bad',
+    meetingRealtimeAsrModelEnabled: 0,
     translationModelCacheDir: 123,
   });
 
@@ -86,6 +89,8 @@ test('normalizeLocalSettings 会回退不支持的翻译目标语言和空设备
     assert.equal(settings.meetingDetectionEnabled, true);
     assert.equal(settings.meetingLiveAudioSource, DEFAULT_MEETING_LIVE_AUDIO_SOURCE);
     assert.equal(settings.meetingLiveTargetLanguage, DEFAULT_MEETING_LIVE_TARGET_LANGUAGE);
+    assert.equal(settings.meetingRealtimeAsrPreference, DEFAULT_MEETING_REALTIME_ASR_PREFERENCE);
+    assert.equal(settings.meetingRealtimeAsrModelEnabled, false);
     assert.equal(settings.translationEnginePreference, DEFAULT_TRANSLATION_ENGINE_PREFERENCE);
     assert.equal(settings.localTranslationModelEnabled, true);
     assert.equal(settings.translationModelCacheDir, '');
@@ -104,6 +109,8 @@ test('normalizeLocalSettings 会保留音频和应用行为开关', () => {
     meetingDetectionEnabled: false,
     meetingLiveAudioSource: 'system',
     meetingLiveTargetLanguage: 'ko',
+    meetingRealtimeAsrPreference: 'streaming',
+    meetingRealtimeAsrModelEnabled: false,
     translationEnginePreference: 'local',
     localTranslationModelEnabled: false,
     translationModelCacheDir: '  D:\\Models\\HyMT  ',
@@ -118,6 +125,8 @@ test('normalizeLocalSettings 会保留音频和应用行为开关', () => {
   assert.equal(settings.meetingDetectionEnabled, false);
   assert.equal(settings.meetingLiveAudioSource, 'system');
   assert.equal(settings.meetingLiveTargetLanguage, 'ko');
+  assert.equal(settings.meetingRealtimeAsrPreference, 'streaming');
+  assert.equal(settings.meetingRealtimeAsrModelEnabled, false);
   assert.equal(settings.translationEnginePreference, 'local');
   assert.equal(settings.localTranslationModelEnabled, false);
   assert.equal(settings.translationModelCacheDir, 'D:\\Models\\HyMT');
@@ -198,6 +207,8 @@ test('createSettingsStore 读取和写入时都会同步 legacy store', () => {
       launchAtSystemStartup: true,
       meetingLiveAudioSource: 'microphone_system',
       meetingLiveTargetLanguage: 'es',
+      meetingRealtimeAsrPreference: 'sensevoice_fallback',
+      meetingRealtimeAsrModelEnabled: false,
       translationEnginePreference: 'llm',
       localTranslationModelEnabled: false,
       translationModelCacheDir: 'D:\\Models\\HyMT',
@@ -226,6 +237,8 @@ test('createSettingsStore 读取和写入时都会同步 legacy store', () => {
   assert.equal(settings.asrDeviceMode, 'mps');
   assert.equal(settings.meetingLiveAudioSource, 'microphone_system');
   assert.equal(settings.meetingLiveTargetLanguage, 'es');
+  assert.equal(settings.meetingRealtimeAsrPreference, 'sensevoice_fallback');
+  assert.equal(settings.meetingRealtimeAsrModelEnabled, false);
   assert.equal(settings.translationEnginePreference, 'llm');
   assert.equal(settings.localTranslationModelEnabled, false);
   assert.equal(settings.translationModelCacheDir, 'D:\\Models\\HyMT');
@@ -245,6 +258,8 @@ test('createSettingsStore 读取和写入时都会同步 legacy store', () => {
     meetingDetectionEnabled: false,
     meetingLiveAudioSource: 'system',
     meetingLiveTargetLanguage: 'de',
+    meetingRealtimeAsrPreference: 'streaming',
+    meetingRealtimeAsrModelEnabled: true,
     translationEnginePreference: 'local',
     localTranslationModelEnabled: true,
     translationModelCacheDir: 'E:\\HyMT',
@@ -260,6 +275,8 @@ test('createSettingsStore 读取和写入时都会同步 legacy store', () => {
   assert.equal(written.meetingDetectionEnabled, false);
   assert.equal(written.meetingLiveAudioSource, 'system');
   assert.equal(written.meetingLiveTargetLanguage, 'de');
+  assert.equal(written.meetingRealtimeAsrPreference, 'streaming');
+  assert.equal(written.meetingRealtimeAsrModelEnabled, true);
   assert.equal(written.translationEnginePreference, 'local');
   assert.equal(written.localTranslationModelEnabled, true);
   assert.equal(written.translationModelCacheDir, 'E:\\HyMT');

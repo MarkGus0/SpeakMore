@@ -31,6 +31,8 @@ test('createLocalCompatState 初始化旧兼容 store 和本地用户默认值',
   });
   assert.equal(state.localStores['app-settings'].preferredLanguage, 'zh-CN');
   assert.equal(state.localStores['app-settings'].translationTargetLanguage, 'ja');
+  assert.equal(state.localStores['app-settings'].meetingRealtimeAsrPreference, 'auto');
+  assert.equal(state.localStores['app-settings'].meetingRealtimeAsrModelEnabled, true);
   assert.equal(state.localStores['app-settings'].enableInteractionSoundEffects, true);
   assert.equal(state.localStores['app-settings'].enabledMuteBackgroundAudio, true);
   assert.equal(state.localStores['app-settings'].showFloatingBar, true);
@@ -55,6 +57,8 @@ test('syncLocalSettingsToLegacyStore 同步设置到旧 app-settings store', () 
   state.syncLocalSettingsToLegacyStore({
     launchAtSystemStartup: true,
     translationTargetLanguage: 'en',
+    meetingRealtimeAsrPreference: 'streaming',
+    meetingRealtimeAsrModelEnabled: false,
     selectedAudioDeviceId: 'mic-1',
     interactionSoundsEnabled: false,
     muteBackgroundAudioDuringRecording: false,
@@ -64,6 +68,8 @@ test('syncLocalSettingsToLegacyStore 同步设置到旧 app-settings store', () 
 
   assert.equal(state.localStores['app-settings'].launchAtSystemStartup, true);
   assert.equal(state.localStores['app-settings'].translationTargetLanguage, 'en');
+  assert.equal(state.localStores['app-settings'].meetingRealtimeAsrPreference, 'streaming');
+  assert.equal(state.localStores['app-settings'].meetingRealtimeAsrModelEnabled, false);
   assert.equal(state.localStores['app-settings'].selectedMicrophoneDevice, 'mic-1');
   assert.equal(state.localStores['app-settings'].enableInteractionSoundEffects, false);
   assert.equal(state.localStores['app-settings'].enabledMuteBackgroundAudio, false);
