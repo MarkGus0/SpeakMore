@@ -276,7 +276,10 @@ def resolve_llama_server_path() -> str:
 
 
 def has_llama_cpp_python_server() -> bool:
-    return importlib.util.find_spec("llama_cpp.server") is not None
+    try:
+        return importlib.util.find_spec("llama_cpp.server") is not None
+    except ModuleNotFoundError:
+        return False
 
 
 def resolve_llama_server_port() -> int:

@@ -49,6 +49,15 @@ def test_translation_model_load_reports_runtime_missing_for_cached_model(tmp_pat
     assert "llama-cpp-python" in status["detail"]
 
 
+def test_llama_cpp_python_server_probe_handles_missing_parent_package(monkeypatch):
+    def fake_find_spec(_name):
+        raise ModuleNotFoundError("No module named 'llama_cpp'")
+
+    monkeypatch.setattr(local_translation_model.importlib.util, "find_spec", fake_find_spec)
+
+    assert local_translation_model.has_llama_cpp_python_server() is False
+
+
 def test_translation_model_load_can_use_llama_cpp_python_server(tmp_path, monkeypatch):
     monkeypatch.setenv(local_translation_model.TRANSLATION_MODEL_CACHE_DIR_ENV, str(tmp_path))
     monkeypatch.delenv("SPEAKMORE_LLAMA_SERVER_PATH", raising=False)
