@@ -2127,117 +2127,6 @@ test('meeting_translation 会优先按 sentence_id 原地更新 pending 段落',
   }
 })
 
-test('meeting_translation 预览译文不会覆盖稳定译文', async () => {
-  const env = createTestEnvironment({
-    audioContextSampleRate: 16000,
-  })
-  let recorder: Awaited<ReturnType<typeof loadRecorderModule>> | null = null
-
-  try {
-    recorder = await loadRecorderModule('meeting-live-preview-does-not-overwrite-stable')
-    await recorder.toggleMeetingNotesRecording({
-      audioSource: 'microphone',
-      targetLanguage: 'zh',
-      showOriginal: true,
-      showTranslation: true,
-    })
-
-    env.sockets[0]?.emitJson({
-      K: 'meeting_translation',
-      V: {
-        audio_id: 'audio-1',
-        source_text: 'Your time is limited.',
-        text: '你的时间有限。',
-        target_language: 'zh',
-        chunk_index: 1,
-        sentence_index: 1,
-        sentence_id: 'audio-1:sentence:1',
-        committed: true,
-        stable: true,
-      },
-    })
-    env.sockets[0]?.emitJson({
-      K: 'meeting_translation',
-      V: {
-        audio_id: 'audio-1',
-        source_text: 'Your time',
-        text: '你的时间',
-        target_language: 'zh',
-        chunk_index: 1,
-        sentence_index: 1,
-        sentence_id: 'audio-1:sentence:1',
-        committed: false,
-        stable: false,
-        provisional: true,
-      },
-    })
-
-    const session = recorder.getVoiceSession()
-    assert.equal(session.meetingLiveSegments?.length, 1)
-    assert.equal(session.meetingLiveSegments?.[0]?.translationText, '你的时间有限。')
-    assert.equal(session.meetingLiveSegments?.[0]?.stable, true)
-    assert.equal(session.meetingLiveSegments?.[0]?.isPreview, false)
-  } finally {
-    recorder?.disposeRecorder()
-    env.restore()
-  }
-})
-
-test('meeting_translation_pending 不会清空已有预览译文', async () => {
-  const env = createTestEnvironment({
-    audioContextSampleRate: 16000,
-  })
-  let recorder: Awaited<ReturnType<typeof loadRecorderModule>> | null = null
-
-  try {
-    recorder = await loadRecorderModule('meeting-live-pending-keeps-preview')
-    await recorder.toggleMeetingNotesRecording({
-      audioSource: 'microphone',
-      targetLanguage: 'zh',
-      showOriginal: true,
-      showTranslation: true,
-    })
-
-    env.sockets[0]?.emitJson({
-      K: 'meeting_translation',
-      V: {
-        audio_id: 'audio-1',
-        source_text: 'Your time',
-        text: '你的时间',
-        target_language: 'zh',
-        chunk_index: 1,
-        sentence_index: 1,
-        sentence_id: 'audio-1:sentence:1',
-        committed: false,
-        stable: false,
-        provisional: true,
-      },
-    })
-    env.sockets[0]?.emitJson({
-      K: 'meeting_translation_pending',
-      V: {
-        audio_id: 'audio-1',
-        source_text: 'Your time is limited.',
-        target_language: 'zh',
-        chunk_index: 1,
-        sentence_index: 1,
-        sentence_id: 'audio-1:sentence:1',
-        committed: true,
-        stable: true,
-      },
-    })
-
-    const session = recorder.getVoiceSession()
-    assert.equal(session.meetingLiveSegments?.length, 1)
-    assert.equal(session.meetingLiveSegments?.[0]?.sourceText, 'Your time is limited.')
-    assert.equal(session.meetingLiveSegments?.[0]?.translationText, '你的时间')
-    assert.equal(session.meetingLiveSegments?.[0]?.isPreview, true)
-  } finally {
-    recorder?.disposeRecorder()
-    env.restore()
-  }
-})
-
 test('meeting_translation 相同原文不会追加重复实时行', async () => {
   const env = createTestEnvironment({
     audioContextSampleRate: 16000,
@@ -2318,6 +2207,117 @@ test('meeting_translation 会清理实时原文和译文里的 emoji', async () 
     assert.equal(session.meetingLiveSegments?.[0]?.sourceText, '你好。')
     assert.equal(session.meetingLiveSegments?.[0]?.translationText, 'Hello')
     assert.equal(session.translationText, 'Hello')
+  } finally {
+    recorder?.disposeRecorder()
+    env.restore()
+  }
+})
+
+test('meeting_translation preview does not overwrite committed translation', async () => {
+  const env = createTestEnvironment({
+    audioContextSampleRate: 16000,
+  })
+  let recorder: Awaited<ReturnType<typeof loadRecorderModule>> | null = null
+
+  try {
+    recorder = await loadRecorderModule('meeting-live-preview-does-not-overwrite-stable')
+    await recorder.toggleMeetingNotesRecording({
+      audioSource: 'microphone',
+      targetLanguage: 'zh',
+      showOriginal: true,
+      showTranslation: true,
+    })
+
+    env.sockets[0]?.emitJson({
+      K: 'meeting_translation',
+      V: {
+        audio_id: 'audio-1',
+        source_text: 'Your time is limited.',
+        text: '你的时间有限。',
+        target_language: 'zh',
+        chunk_index: 1,
+        sentence_index: 1,
+        sentence_id: 'audio-1:sentence:1',
+        committed: true,
+        stable: true,
+      },
+    })
+    env.sockets[0]?.emitJson({
+      K: 'meeting_translation',
+      V: {
+        audio_id: 'audio-1',
+        source_text: 'Your time',
+        text: '你的时间',
+        target_language: 'zh',
+        chunk_index: 1,
+        sentence_index: 1,
+        sentence_id: 'audio-1:sentence:1',
+        committed: false,
+        stable: false,
+        provisional: true,
+      },
+    })
+
+    const session = recorder.getVoiceSession()
+    assert.equal(session.meetingLiveSegments?.length, 1)
+    assert.equal(session.meetingLiveSegments?.[0]?.translationText, '你的时间有限。')
+    assert.equal(session.meetingLiveSegments?.[0]?.stable, true)
+    assert.equal(session.meetingLiveSegments?.[0]?.isPreview, false)
+  } finally {
+    recorder?.disposeRecorder()
+    env.restore()
+  }
+})
+
+test('meeting_translation_pending keeps existing preview translation', async () => {
+  const env = createTestEnvironment({
+    audioContextSampleRate: 16000,
+  })
+  let recorder: Awaited<ReturnType<typeof loadRecorderModule>> | null = null
+
+  try {
+    recorder = await loadRecorderModule('meeting-live-pending-keeps-preview')
+    await recorder.toggleMeetingNotesRecording({
+      audioSource: 'microphone',
+      targetLanguage: 'zh',
+      showOriginal: true,
+      showTranslation: true,
+    })
+
+    env.sockets[0]?.emitJson({
+      K: 'meeting_translation',
+      V: {
+        audio_id: 'audio-1',
+        source_text: 'Your time',
+        text: '你的时间',
+        target_language: 'zh',
+        chunk_index: 1,
+        sentence_index: 1,
+        sentence_id: 'audio-1:sentence:1',
+        committed: false,
+        stable: false,
+        provisional: true,
+      },
+    })
+    env.sockets[0]?.emitJson({
+      K: 'meeting_translation_pending',
+      V: {
+        audio_id: 'audio-1',
+        source_text: 'Your time is limited.',
+        target_language: 'zh',
+        chunk_index: 1,
+        sentence_index: 1,
+        sentence_id: 'audio-1:sentence:1',
+        committed: true,
+        stable: true,
+      },
+    })
+
+    const session = recorder.getVoiceSession()
+    assert.equal(session.meetingLiveSegments?.length, 1)
+    assert.equal(session.meetingLiveSegments?.[0]?.sourceText, 'Your time is limited.')
+    assert.equal(session.meetingLiveSegments?.[0]?.translationText, '你的时间')
+    assert.equal(session.meetingLiveSegments?.[0]?.isPreview, true)
   } finally {
     recorder?.disposeRecorder()
     env.restore()

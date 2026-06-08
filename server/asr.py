@@ -1,6 +1,7 @@
 """ASR 模块 - 负责加载当前后端启用的 FunASR 语音模型。"""
 
 import asyncio
+import inspect
 import os
 import re
 import subprocess
@@ -8,7 +9,7 @@ import sys
 import threading
 import time
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable
 
@@ -68,12 +69,19 @@ class StreamingAsrRuntime:
 class StreamingAsrResult:
     text: str
     segment_text: str = ""
+    stable_text: str = ""
+    partial_text: str = ""
     stable: bool = False
     is_partial: bool = True
     utterance_index: int = 0
     asr_latency_ms: int = 0
+    asr_backlog_ms: int = 0
+    asr_rtf: float = 0.0
     endpoint_reason: str = ""
     asr_window_ms: int = 0
+    asr_full_segment_ms: int = 0
+    hypothesis_id: str = ""
+    source_profile: str = ""
 
 
 @dataclass(frozen=True)
@@ -863,6 +871,223 @@ def transcribe_pcm16_bytes(pcm_bytes: bytes) -> str:
     for offset in range(0, len(pcm_bytes), chunk_size):
         session.append_pcm16(pcm_bytes[offset : offset + chunk_size])
     return session.finalize().text
+
+
+class AudioBackpressureQueue:
+    def __init__(
+        self,
+        sample_rate: int = 16000,
+        max_audio_ms: int = 8000,
+    ) -> None:
+        self.sample_rate = max(1, int(sample_rate or 16000))
+        self.max_bytes = max(2, int(self.sample_rate * max_audio_ms / 1000) * 2)
+        self.pending: deque[bytes] = deque()
+        self.pending_bytes = 0
+        self.dropped_bytes = 0
+        self.closed = False
+        self.condition = asyncio.Condition()
+
+    async def put(self, chunk: bytes) -> None:
+        if not chunk:
+            return
+        async with self.condition:
+            if self.closed:
+                return
+            if len(chunk) > self.max_bytes:
+                self.dropped_bytes += len(chunk) - self.max_bytes
+                normalized = bytes(chunk[-self.max_bytes :])
+            else:
+                normalized = bytes(chunk)
+            while self.pending and self.pending_bytes + len(normalized) > self.max_bytes:
+                dropped = self.pending.popleft()
+                self.pending_bytes -= len(dropped)
+                self.dropped_bytes += len(dropped)
+            self.pending.append(normalized)
+            self.pending_bytes += len(normalized)
+            self.condition.notify()
+
+    async def get(self) -> bytes | None:
+        async with self.condition:
+            while not self.pending and not self.closed:
+                await self.condition.wait()
+            if not self.pending:
+                return None
+            chunk = self.pending.popleft()
+            self.pending_bytes -= len(chunk)
+            return chunk
+
+    async def close(self) -> None:
+        async with self.condition:
+            self.closed = True
+            self.condition.notify_all()
+
+    def backlog_ms(self) -> int:
+        return int(self.pending_bytes / max(1, self.sample_rate * 2) * 1000)
+
+
+class RealtimeAsrEngine:
+    def __init__(
+        self,
+        sample_rate: int = 16000,
+        session_factory: Callable[..., Any] | None = None,
+    ) -> None:
+        self.sample_rate = max(1, int(sample_rate or 16000))
+        factory = session_factory or create_streaming_asr_session
+        self.session = factory(sample_rate=self.sample_rate)
+
+    def append_pcm16(self, chunk: bytes) -> list[StreamingAsrResult]:
+        return self.session.append_pcm16(chunk)
+
+    def finalize(self) -> StreamingAsrResult:
+        return self.session.finalize()
+
+
+class StableTranscriptAssembler:
+    @staticmethod
+    def split_result_text(result: StreamingAsrResult) -> tuple[str, str]:
+        text = str(result.text or "")
+        segment = str(result.segment_text or "")
+        if result.stable:
+            return text, ""
+        if not segment:
+            return "", text
+        if text.endswith(segment):
+            stable_prefix = text[: -len(segment)]
+            return stable_prefix.strip(), segment
+        return "", segment or text
+
+
+class MeetingRealtimePipeline:
+    def __init__(
+        self,
+        sample_rate: int = 16000,
+        source_profile: str = "",
+        session_factory: Callable[..., Any] | None = None,
+        on_result: Callable[[StreamingAsrResult], Any] | None = None,
+        on_error: Callable[[Exception], Any] | None = None,
+    ) -> None:
+        self.sample_rate = max(1, int(sample_rate or 16000))
+        self.source_profile = str(source_profile or "")
+        self.on_result = on_result
+        self.on_error = on_error
+        self.queue = AudioBackpressureQueue(sample_rate=self.sample_rate)
+        self.engine = RealtimeAsrEngine(sample_rate=self.sample_rate, session_factory=session_factory)
+        self.worker_task: asyncio.Task | None = None
+        self.full_pcm = bytearray()
+        self.closed = False
+        self.sequence = 0
+
+    async def start(self) -> None:
+        if self.worker_task is None:
+            self.worker_task = asyncio.create_task(self._run())
+
+    async def append_pcm16(self, chunk: bytes) -> None:
+        if self.closed:
+            return
+        if chunk:
+            self.full_pcm.extend(chunk)
+        await self.queue.put(chunk)
+
+    async def finish(self) -> StreamingAsrResult:
+        self.closed = True
+        await self.queue.close()
+        await self._wait_worker()
+        if self.queue.dropped_bytes > 0 and self.full_pcm:
+            started_at = time.monotonic()
+            final_text = await asyncio.to_thread(transcribe_pcm16_bytes, bytes(self.full_pcm))
+            latency_ms = int((time.monotonic() - started_at) * 1000)
+            full_ms = int(len(self.full_pcm) / max(1, self.sample_rate * 2) * 1000)
+            return StreamingAsrResult(
+                text=final_text,
+                segment_text=final_text,
+                stable_text=final_text,
+                partial_text="",
+                stable=True,
+                is_partial=False,
+                utterance_index=self.sequence + 1,
+                asr_latency_ms=latency_ms,
+                asr_backlog_ms=0,
+                asr_rtf=round(latency_ms / max(1, full_ms), 4),
+                endpoint_reason="final_full_rescore",
+                asr_window_ms=full_ms,
+                asr_full_segment_ms=full_ms,
+                hypothesis_id=f"final:{self.sequence + 1}",
+                source_profile=self.source_profile,
+            )
+        result = await asyncio.to_thread(self.engine.finalize)
+        return self._decorate_result(result)
+
+    async def cancel(self) -> None:
+        self.closed = True
+        await self.queue.close()
+        if self.worker_task and not self.worker_task.done():
+            self.worker_task.cancel()
+        await self._wait_worker()
+
+    async def drain_live(self) -> None:
+        self.closed = True
+        await self.queue.close()
+        await self._wait_worker()
+
+    async def _wait_worker(self) -> None:
+        if not self.worker_task:
+            return
+        try:
+            await self.worker_task
+        except asyncio.CancelledError:
+            pass
+        finally:
+            self.worker_task = None
+
+    async def _run(self) -> None:
+        try:
+            while True:
+                chunk = await self.queue.get()
+                if chunk is None:
+                    return
+                results = await asyncio.to_thread(self.engine.append_pcm16, chunk)
+                for result in results:
+                    decorated = self._decorate_result(result)
+                    if self.on_result:
+                        maybe_awaitable = self.on_result(decorated)
+                        if inspect.isawaitable(maybe_awaitable):
+                            await maybe_awaitable
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            if self.on_error:
+                maybe_awaitable = self.on_error(error)
+                if inspect.isawaitable(maybe_awaitable):
+                    await maybe_awaitable
+
+    def _decorate_result(self, result: StreamingAsrResult) -> StreamingAsrResult:
+        if not isinstance(result, StreamingAsrResult):
+            result = StreamingAsrResult(
+                text=str(getattr(result, "text", "") or ""),
+                segment_text=str(getattr(result, "segment_text", "") or ""),
+                stable=bool(getattr(result, "stable", True)),
+                is_partial=bool(getattr(result, "is_partial", not bool(getattr(result, "stable", True)))),
+                utterance_index=int(getattr(result, "utterance_index", 0) or 0),
+                asr_latency_ms=int(getattr(result, "asr_latency_ms", 0) or 0),
+                endpoint_reason=str(getattr(result, "endpoint_reason", "") or ""),
+                asr_window_ms=int(getattr(result, "asr_window_ms", 0) or 0),
+                asr_full_segment_ms=int(getattr(result, "asr_full_segment_ms", 0) or getattr(result, "full_segment_ms", 0) or 0),
+            )
+        self.sequence += 1
+        stable_text, partial_text = StableTranscriptAssembler.split_result_text(result)
+        window_ms = int(result.asr_window_ms or 0)
+        full_segment_ms = int(result.asr_full_segment_ms or window_ms or 0)
+        latency_ms = int(result.asr_latency_ms or 0)
+        return replace(
+            result,
+            stable_text=stable_text,
+            partial_text=partial_text,
+            asr_backlog_ms=self.queue.backlog_ms(),
+            asr_rtf=round(latency_ms / max(1, window_ms), 4),
+            asr_full_segment_ms=full_segment_ms,
+            hypothesis_id=f"{result.utterance_index or self.sequence}:{'stable' if result.stable else 'partial'}:{self.sequence}",
+            source_profile=self.source_profile,
+        )
 
 
 async def transcribe_audio(audio_path: str, language: str | None = None) -> str:

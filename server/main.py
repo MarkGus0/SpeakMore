@@ -19,6 +19,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from asr import (
     DOWNLOAD_SOURCE,
+    MeetingRealtimePipeline,
     create_streaming_asr_session,
     get_asr_runtime_device_status,
     join_asr_text,
@@ -1419,13 +1420,15 @@ async def translate_text_with_engine(
 
     if should_try_local and local_status.get("ready"):
         try:
+            local_previous_sentences = (previous_sentences or [])[-1:] if realtime else previous_sentences
+            local_previous_context_pairs = (previous_context_pairs or [])[-1:] if realtime else previous_context_pairs
             translated = await translate_with_local_model(
                 raw_text=raw_text,
                 target_language_id=target_language_id,
                 target_language_name=target_language_name,
-                previous_sentences=previous_sentences,
-                previous_context_pairs=previous_context_pairs,
-                max_tokens=get_realtime_translation_token_budget(raw_text) if realtime else 256,
+                previous_sentences=local_previous_sentences,
+                previous_context_pairs=local_previous_context_pairs,
+                max_tokens=min(160, get_realtime_translation_token_budget(raw_text)) if realtime else 256,
                 timeout_seconds=MEETING_REALTIME_LOCAL_TRANSLATION_TIMEOUT_SECONDS if realtime else 8.0,
             )
             if translated:
@@ -1512,9 +1515,9 @@ async def translate_realtime_preview(
             raw_text=raw_text,
             target_language_id=target_language_id,
             target_language_name=format_target_language_for_prompt(target_language_id),
-            previous_sentences=previous_sentences[-1:],
-            previous_context_pairs=(previous_context_pairs or [])[-1:],
-            max_tokens=min(96, get_realtime_translation_token_budget(raw_text)),
+            previous_sentences=[],
+            previous_context_pairs=[],
+            max_tokens=min(48, get_realtime_translation_token_budget(raw_text)),
             timeout_seconds=MEETING_REALTIME_PREVIEW_TRANSLATION_TIMEOUT_SECONDS,
         )
     except Exception:
@@ -2342,9 +2345,68 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
     context = {}
     parameters = {}
     audio_chunks: list[bytes] = []
-    streaming_session = None
+    realtime_pipeline: MeetingRealtimePipeline | None = None
     streaming_chunk_index = 0
     realtime_translator = MeetingRealtimeTranslator(websocket)
+
+    async def emit_streaming_transcription(result, observe_translation: bool = True) -> None:
+        nonlocal streaming_chunk_index
+        streaming_chunk_index += 1
+        result_text = normalize_meeting_transcription_text(result.text, mode)
+        result_segment_text = normalize_meeting_transcription_text(
+            str(getattr(result, "segment_text", "") or ""),
+            mode,
+        )
+        if not result_text:
+            return
+
+        result_stable = bool(getattr(result, "stable", True))
+        result_utterance_index = int(getattr(result, "utterance_index", 0) or streaming_chunk_index)
+        stable_text = normalize_meeting_transcription_text(str(getattr(result, "stable_text", "") or ""), mode)
+        partial_text = normalize_meeting_transcription_text(str(getattr(result, "partial_text", "") or ""), mode)
+        configured_source_profile = parameters.get("meeting_audio_source") if isinstance(parameters, dict) else ""
+        source_profile = str(getattr(result, "source_profile", "") or configured_source_profile or "")
+        await send_ws_message(
+            websocket,
+            "transcription",
+            {
+                "text": result_text,
+                "segment_text": result_segment_text,
+                "stable_segment_text": result_segment_text if result_stable else "",
+                "stable_text": stable_text if not result_stable else result_text,
+                "partial_text": "" if result_stable else (partial_text or result_segment_text),
+                "audio_id": audio_id,
+                "chunk_index": streaming_chunk_index,
+                "utterance_index": result_utterance_index,
+                "stable": result_stable,
+                "is_partial": bool(getattr(result, "is_partial", not result_stable)),
+                "asr_latency_ms": int(getattr(result, "asr_latency_ms", 0) or 0),
+                "asr_backlog_ms": int(getattr(result, "asr_backlog_ms", 0) or 0),
+                "asr_rtf": float(getattr(result, "asr_rtf", 0.0) or 0.0),
+                "endpoint_reason": str(getattr(result, "endpoint_reason", "") or ""),
+                "asr_window_ms": int(getattr(result, "asr_window_ms", 0) or 0),
+                "asr_full_segment_ms": int(getattr(result, "asr_full_segment_ms", 0) or getattr(result, "asr_window_ms", 0) or 0),
+                "hypothesis_id": str(getattr(result, "hypothesis_id", "") or ""),
+                "source_profile": source_profile,
+                "audio_source_profile": str(configured_source_profile or ""),
+            },
+        )
+        if observe_translation:
+            await realtime_translator.observe_transcription(
+                result_text,
+                streaming_chunk_index,
+                stable=result_stable,
+                segment_text=result_segment_text,
+            )
+
+    async def emit_streaming_error(error: Exception) -> None:
+        await send_ws_error_message(
+            websocket,
+            "transcription_error",
+            audio_id,
+            str(error),
+            "transcription_failed",
+        )
 
     try:
         while True:
@@ -2354,56 +2416,8 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
                 continue
 
             if "bytes" in message and message["bytes"]:
-                if streaming_session is not None:
-                    try:
-                        results = await asyncio.to_thread(streaming_session.append_pcm16, message["bytes"])
-                    except Exception as error:
-                        streaming_session = None
-                        audio_chunks = []
-                        await send_ws_error_message(
-                            websocket,
-                            "transcription_error",
-                            audio_id,
-                            str(error),
-                            "transcription_failed",
-                        )
-                        continue
-
-                    for result in results:
-                        streaming_chunk_index += 1
-                        result_text = normalize_meeting_transcription_text(result.text, mode)
-                        result_segment_text = normalize_meeting_transcription_text(
-                            str(getattr(result, "segment_text", "") or ""),
-                            mode,
-                        )
-                        if result_text:
-                            result_stable = bool(getattr(result, "stable", True))
-                            result_utterance_index = int(getattr(result, "utterance_index", 0) or streaming_chunk_index)
-                            await send_ws_message(
-                                websocket,
-                                "transcription",
-                                {
-                                    "text": result_text,
-                                    "segment_text": result_segment_text,
-                                    "stable_segment_text": result_segment_text if result_stable else "",
-                                    "audio_id": audio_id,
-                                    "chunk_index": streaming_chunk_index,
-                                    "utterance_index": result_utterance_index,
-                                    "stable": result_stable,
-                                    "is_partial": bool(getattr(result, "is_partial", not result_stable)),
-                                    "asr_latency_ms": int(getattr(result, "asr_latency_ms", 0) or 0),
-                                    "endpoint_reason": str(getattr(result, "endpoint_reason", "") or ""),
-                                    "asr_window_ms": int(getattr(result, "asr_window_ms", 0) or 0),
-                                    "asr_full_segment_ms": int(getattr(result, "full_segment_ms", 0) or getattr(result, "asr_window_ms", 0) or 0),
-                                    "audio_source_profile": parameters.get("meeting_audio_source") if isinstance(parameters, dict) else "",
-                                },
-                            )
-                            await realtime_translator.observe_transcription(
-                                result_text,
-                                streaming_chunk_index,
-                                stable=result_stable,
-                                segment_text=result_segment_text if result_stable else "",
-                            )
+                if realtime_pipeline is not None:
+                    await realtime_pipeline.append_pcm16(message["bytes"])
                 else:
                     audio_chunks.append(message["bytes"])
                     await websocket.send_json({
@@ -2436,15 +2450,24 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
                 context = normalize_ws_object(data.get("audio_context", {}))
                 parameters = normalize_ws_object(data.get("parameters", {}))
                 audio_chunks = []
-                streaming_session = None
+                if realtime_pipeline is not None:
+                    await realtime_pipeline.cancel()
+                realtime_pipeline = None
                 streaming_chunk_index = 0
                 realtime_translator.reset(audio_id, mode, context, parameters)
                 sample_rate = get_pcm_streaming_sample_rate(parameters)
                 if sample_rate:
                     try:
-                        streaming_session = create_streaming_asr_session(sample_rate=sample_rate)
+                        realtime_pipeline = MeetingRealtimePipeline(
+                            sample_rate=sample_rate,
+                            source_profile=str(parameters.get("meeting_audio_source") or ""),
+                            session_factory=create_streaming_asr_session,
+                            on_result=emit_streaming_transcription,
+                            on_error=emit_streaming_error,
+                        )
+                        await realtime_pipeline.start()
                     except RuntimeError:
-                        streaming_session = None
+                        realtime_pipeline = None
 
                 await send_ws_message(websocket, "session_started", {"audio_id": audio_id})
                 await send_ws_message(
@@ -2457,14 +2480,11 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
 
             if msg_type == "end_audio":
                 parameters = merge_ws_end_audio_parameters(parameters, data)
-                await realtime_translator.drain()
-                realtime_translator.cancel()
-                await send_ws_message(websocket, "audio_session_ending", {"audio_id": audio_id})
-                if streaming_session is not None:
-                    current_streaming_session = streaming_session
-                    streaming_session = None
+                if realtime_pipeline is not None:
+                    current_realtime_pipeline = realtime_pipeline
+                    realtime_pipeline = None
                     try:
-                        final_result = await asyncio.to_thread(current_streaming_session.finalize)
+                        final_result = await current_realtime_pipeline.finish()
                         raw_text = normalize_meeting_transcription_text(final_result.text, mode)
                     except Exception as error:
                         await send_ws_error_message(
@@ -2476,29 +2496,11 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
                         )
                         continue
 
+                    await realtime_translator.drain()
+                    realtime_translator.cancel()
+                    await send_ws_message(websocket, "audio_session_ending", {"audio_id": audio_id})
                     if raw_text:
-                        streaming_chunk_index += 1
-                        await send_ws_message(
-                            websocket,
-                            "transcription",
-                            {
-                                "text": raw_text,
-                                "segment_text": normalize_meeting_transcription_text(
-                                    str(getattr(final_result, "segment_text", "") or raw_text),
-                                    mode,
-                                ),
-                                "stable_segment_text": normalize_meeting_transcription_text(
-                                    str(getattr(final_result, "segment_text", "") or raw_text),
-                                    mode,
-                                ),
-                                "audio_id": audio_id,
-                                "chunk_index": streaming_chunk_index,
-                                "utterance_index": streaming_chunk_index,
-                                "stable": True,
-                                "is_partial": False,
-                                "audio_source_profile": parameters.get("meeting_audio_source") if isinstance(parameters, dict) else "",
-                            },
-                        )
+                        await emit_streaming_transcription(final_result, observe_translation=False)
                         try:
                             refined, extra_data = await refine_voice_flow_text(
                                 raw_text=raw_text,
@@ -2568,6 +2570,10 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
                             },
                         )
                     continue
+
+                await realtime_translator.drain()
+                realtime_translator.cancel()
+                await send_ws_message(websocket, "audio_session_ending", {"audio_id": audio_id})
 
                 if not audio_chunks:
                     continue
@@ -2713,9 +2719,14 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
                 continue
 
     except WebSocketDisconnect:
-        pass
+        if realtime_pipeline is not None:
+            with suppress(Exception):
+                await realtime_pipeline.drain_live()
+            realtime_pipeline = None
     finally:
         try:
+            if realtime_pipeline is not None:
+                await realtime_pipeline.cancel()
             await realtime_translator.drain()
         finally:
             realtime_translator.cancel()

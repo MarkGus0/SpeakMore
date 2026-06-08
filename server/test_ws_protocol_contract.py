@@ -356,7 +356,7 @@ class WsProtocolContractTest(unittest.TestCase):
         self.assertNotIn("meeting_translation", [message["K"] for message in websocket.sent_messages])
         refine.assert_not_called()
 
-    def test_meeting_notes_partial_transcription_without_sentence_end_only_creates_preview_pending(self):
+    def test_meeting_notes_partial_transcription_without_sentence_end_creates_preview_pending(self):
         websocket = FakeWebSocket([])
         translator = MeetingRealtimeTranslator(websocket)
         translator.reset(
