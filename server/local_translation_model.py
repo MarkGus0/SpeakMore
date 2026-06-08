@@ -4,7 +4,9 @@ import os
 import shutil
 import socket
 import subprocess
+import sys
 import time
+import importlib.util
 from pathlib import Path
 from threading import Lock
 from typing import Callable
@@ -24,6 +26,10 @@ LLAMA_SERVER_PATH_ENVS = ("SPEAKMORE_LLAMA_SERVER_PATH", "LLAMA_SERVER_PATH")
 LLAMA_SERVER_URL_ENV = "SPEAKMORE_LOCAL_TRANSLATION_SERVER_URL"
 LLAMA_SERVER_PORT_ENV = "SPEAKMORE_LLAMA_SERVER_PORT"
 DEFAULT_LLAMA_SERVER_PORT = 8105
+RUNTIME_MISSING_DETAIL = (
+    "未找到本地翻译运行时。请安装 llama.cpp 的 llama-server，"
+    "或在当前后端 Python 环境安装 llama-cpp-python。"
+)
 LOCAL_TRANSLATION_TIMEOUT_SECONDS = 8.0
 LOCAL_TRANSLATION_SUPPORTED_TARGETS = {
     "zh",
@@ -72,6 +78,7 @@ LOCAL_TRANSLATION_SUPPORTED_TARGETS = {
 _state_lock = Lock()
 _runtime_process: subprocess.Popen | None = None
 _runtime_url = ""
+_runtime_kind = ""
 _translation_model_state: dict = {
     "status": "idle",
     "detail": "",
@@ -229,6 +236,7 @@ def get_translation_model_status() -> dict:
         "model_path": str(cached_file) if cached_file else "",
         "ready": status == "ready",
         "runtime_url": runtime_url,
+        "runtime_kind": _runtime_kind if runtime_url else "",
         "runtime_pid": _runtime_process.pid if is_runtime_process_alive() else None,
         "runtime_missing": status == "runtime_missing",
         "started_at": started_at,
@@ -267,6 +275,10 @@ def resolve_llama_server_path() -> str:
     return shutil.which("llama-server") or ""
 
 
+def has_llama_cpp_python_server() -> bool:
+    return importlib.util.find_spec("llama_cpp.server") is not None
+
+
 def resolve_llama_server_port() -> int:
     try:
         port = int(str(os.environ.get(LLAMA_SERVER_PORT_ENV, "") or "").strip())
@@ -290,10 +302,11 @@ def wait_for_local_server(url: str, timeout_seconds: float = 20.0) -> None:
 
 
 def unload_translation_model() -> dict:
-    global _runtime_process, _runtime_url
+    global _runtime_process, _runtime_url, _runtime_kind
     process = _runtime_process
     _runtime_process = None
     _runtime_url = ""
+    _runtime_kind = ""
     if process and process.poll() is None:
         process.terminate()
         try:
@@ -305,10 +318,11 @@ def unload_translation_model() -> dict:
 
 
 def load_translation_model() -> dict:
-    global _runtime_process, _runtime_url
+    global _runtime_process, _runtime_url, _runtime_kind
     external_url = str(os.environ.get(LLAMA_SERVER_URL_ENV, "") or "").strip().rstrip("/")
     if external_url:
         _runtime_url = external_url
+        _runtime_kind = "external"
         wait_for_local_server(external_url, timeout_seconds=5.0)
         set_translation_model_state("ready", "Using external local translation runtime")
         return get_translation_model_status()
@@ -323,26 +337,47 @@ def load_translation_model() -> dict:
         return get_translation_model_status()
 
     llama_server_path = resolve_llama_server_path()
-    if not llama_server_path:
-        set_translation_model_state("runtime_missing", "llama-server runtime is missing")
-        return get_translation_model_status()
-
     port = resolve_llama_server_port()
     url = f"http://127.0.0.1:{port}"
-    args = [
-        llama_server_path,
-        "--model",
-        str(model_file),
-        "--host",
-        "127.0.0.1",
-        "--port",
-        str(port),
-        "--ctx-size",
-        "4096",
-        "--threads",
-        str(max(2, min(8, os.cpu_count() or 4))),
-        "--no-webui",
-    ]
+    thread_count = str(max(2, min(8, os.cpu_count() or 4)))
+    runtime_kind = ""
+    if llama_server_path:
+        runtime_kind = "llama-server"
+        args = [
+            llama_server_path,
+            "--model",
+            str(model_file),
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+            "--ctx-size",
+            "4096",
+            "--threads",
+            thread_count,
+            "--no-webui",
+        ]
+    elif has_llama_cpp_python_server():
+        runtime_kind = "llama-cpp-python"
+        args = [
+            sys.executable,
+            "-m",
+            "llama_cpp.server",
+            "--model",
+            str(model_file),
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+            "--n_ctx",
+            "4096",
+            "--n_threads",
+            thread_count,
+        ]
+    else:
+        set_translation_model_state("runtime_missing", RUNTIME_MISSING_DETAIL)
+        return get_translation_model_status()
+
     try:
         with socket.create_connection(("127.0.0.1", port), timeout=0.25):
             raise RuntimeError(f"Port {port} is already in use")
@@ -356,13 +391,14 @@ def load_translation_model() -> dict:
         env=os.environ.copy(),
     )
     _runtime_url = url
+    _runtime_kind = runtime_kind
     try:
         wait_for_local_server(url)
     except Exception:
         unload_translation_model()
         set_translation_model_state("failed", "Local translation runtime failed to start")
         raise
-    set_translation_model_state("ready", "Local translation model loaded")
+    set_translation_model_state("ready", f"Local translation model loaded with {runtime_kind}")
     return get_translation_model_status()
 
 

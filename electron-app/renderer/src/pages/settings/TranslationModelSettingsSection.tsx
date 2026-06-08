@@ -25,7 +25,7 @@ type TranslationModelSettingsSectionProps = {
 const sectionTitle = { ...sectionTitleSx, mt: 3, mb: 1 }
 
 const panelSx = {
-  bgcolor: 'rgba(59,130,246,0.06)',
+  bgcolor: 'rgba(119,119,119,0.06)',
   borderRadius: '8px',
   p: 2,
 }
@@ -121,6 +121,9 @@ export default function TranslationModelSettingsSection({
     && typeof modelStatus.file_progress_percent === 'number'
     && (modelStatus.total_files ?? 0) > 0
   const statusText = t(getStatusKey(modelStatus))
+  const detailText = modelStatus?.status === 'runtime_missing'
+    ? t('settings.translationModel.runtimeMissingDetail')
+    : modelStatus?.detail
 
   return (
     <>
@@ -196,9 +199,9 @@ export default function TranslationModelSettingsSection({
             </Typography>
           </Box>
         ) : null}
-        {modelStatus?.detail ? (
-          <Typography sx={{ ...helperTextSx, color: modelStatus.status === 'failed' || modelStatus.status === 'runtime_missing' ? 'error.main' : 'text.secondary', mt: 1 }}>
-            {modelStatus.detail}
+        {detailText ? (
+          <Typography sx={{ ...helperTextSx, color: modelStatus?.status === 'failed' || modelStatus?.status === 'runtime_missing' ? 'error.main' : 'text.secondary', mt: 1 }}>
+            {detailText}
           </Typography>
         ) : null}
         {busy ? (

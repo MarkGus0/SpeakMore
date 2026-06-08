@@ -21,6 +21,7 @@ export type TranslationModelStatus = {
   cached?: boolean
   ready?: boolean
   runtime_url?: string
+  runtime_kind?: string
   runtime_pid?: number | null
   runtime_missing?: boolean
   elapsed_ms?: number
@@ -68,6 +69,7 @@ export function normalizeTranslationModelStatus(value: unknown): TranslationMode
     cached: Boolean(status.cached),
     ready: Boolean(status.ready || normalizedStatus === 'ready'),
     runtime_url: typeof status.runtime_url === 'string' ? status.runtime_url : '',
+    runtime_kind: typeof status.runtime_kind === 'string' ? status.runtime_kind : '',
     runtime_pid: typeof status.runtime_pid === 'number' ? status.runtime_pid : null,
     runtime_missing: Boolean(status.runtime_missing || normalizedStatus === 'runtime_missing'),
     elapsed_ms: normalizeNumber(status.elapsed_ms),
