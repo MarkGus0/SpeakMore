@@ -428,7 +428,9 @@ test('旧模型管理能力已删除，语音模型初始化并入设置页', as
   assert.match(translationModelSection, /getTranslationModelStatus/);
   assert.match(translationModelSection, /startTranslationModelDownload/);
   assert.match(translationModelSection, /loadTranslationModel/);
-  assert.match(translationModelSection, /unloadTranslationModel/);
+  assert.match(translationModelSection, /chooseModelCacheDirectory/);
+  assert.doesNotMatch(translationModelSection, /unloadTranslationModel/);
+  assert.doesNotMatch(translationModelSection, /translationEnginePreference|localTranslationModelEnabled/);
   assert.match(translationModelStore, /translation-model:get-status/);
   assert.match(translationModelStore, /translation-model:start-download/);
   assert.match(translationModelStore, /translation-model:load/);
@@ -1343,10 +1345,13 @@ test('P1 设置页与设置 store 统一走主进程 JSON 数据源', async () =
   assert.match(translationModelSection, /getTranslationModelStatus/);
   assert.match(translationModelSection, /startTranslationModelDownload/);
   assert.match(translationModelSection, /loadTranslationModel/);
-  assert.match(translationModelSection, /unloadTranslationModel/);
+  assert.match(translationModelSection, /chooseModelCacheDirectory/);
   assert.match(translationModelSection, /settings\.translationModel\.title/);
-  assert.match(translationModelSection, /translationEnginePreference/);
-  assert.match(translationModelSection, /localTranslationModelEnabled/);
+  assert.match(translationModelSection, /settings\.translationModel\.cacheDir/);
+  assert.match(translationModelSection, /settings\.translationModel\.modelReady/);
+  assert.match(translationModelSection, /settings\.translationModel\.modelFilesProgress/);
+  assert.doesNotMatch(translationModelSection, /unloadTranslationModel/);
+  assert.doesNotMatch(translationModelSection, /translationEnginePreference|localTranslationModelEnabled/);
   assert.match(translationModelStore, /translation-model:get-status/);
   assert.match(translationModelStore, /translation-model:start-download/);
   assert.match(translationModelStore, /translation-model:load/);

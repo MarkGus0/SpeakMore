@@ -1,9 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Box, Button, Chip, LinearProgress, MenuItem, Select, Switch, Typography } from '@mui/material'
+import { Box, Button, Chip, LinearProgress, Typography } from '@mui/material'
 import CloudDownloadIcon from '@mui/icons-material/CloudDownload'
 import FolderOpenIcon from '@mui/icons-material/FolderOpen'
-import PlayArrowIcon from '@mui/icons-material/PlayArrow'
-import PowerSettingsNewIcon from '@mui/icons-material/PowerSettingsNew'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import { useI18n, type TranslationKey } from '../../i18n'
 import { chooseModelCacheDirectory } from '../../services/modelSetupStore'
@@ -11,10 +9,9 @@ import {
   getTranslationModelStatus,
   loadTranslationModel,
   startTranslationModelDownload,
-  unloadTranslationModel,
   type TranslationModelStatus,
 } from '../../services/translationModelStore'
-import { type LocalSettings, type TranslationEnginePreference } from '../../services/settingsStore'
+import { type LocalSettings } from '../../services/settingsStore'
 import { bodyTextSx, captionTextSx, helperTextSx, sectionTitleSx } from '../../uiTokens'
 
 type TranslationModelSettingsSectionProps = {
@@ -58,14 +55,6 @@ function getStatusKey(status: TranslationModelStatus | null): TranslationKey {
   if (status?.status === 'unavailable') return 'settings.translationModel.modelStatus.unavailable'
   if (status?.cached) return 'settings.translationModel.modelStatus.cached'
   return 'settings.translationModel.modelStatus.idle'
-}
-
-function getRuntimeSourceKey(source = ''): TranslationKey | null {
-  if (source === 'bundled') return 'settings.translationModel.runtimeSource.bundled'
-  if (source === 'configured') return 'settings.translationModel.runtimeSource.configured'
-  if (source === 'path') return 'settings.translationModel.runtimeSource.path'
-  if (source === 'python') return 'settings.translationModel.runtimeSource.python'
-  return null
 }
 
 export default function TranslationModelSettingsSection({
@@ -121,7 +110,7 @@ export default function TranslationModelSettingsSection({
   const busy = isBusy(modelStatus) || isStartingAction
   const isReady = Boolean(modelStatus?.ready || modelStatus?.status === 'ready')
   const isCached = Boolean(modelStatus?.cached)
-  const canChooseCacheDir = !busy && !isReady
+  const canChooseCacheDir = !isCached && !isReady && !busy
   const hasDownloadProgress = modelStatus?.status === 'downloading'
     && typeof modelStatus.progress_percent === 'number'
     && (modelStatus.total_bytes ?? 0) > 0
@@ -132,63 +121,30 @@ export default function TranslationModelSettingsSection({
   const detailText = modelStatus?.status === 'runtime_missing'
     ? t('settings.translationModel.runtimeMissingDetail')
     : modelStatus?.detail
-  const runtimeSourceKey = getRuntimeSourceKey(modelStatus?.runtime_source)
-  const runtimePathText = modelStatus?.runtime_url || modelStatus?.runtime_path || ''
-  const runtimeKindText = modelStatus?.runtime_kind || modelStatus?.runtime_kind_available || ''
-  const runtimeStatusText = modelStatus?.runtime_available || modelStatus?.runtime_url
-    ? [
-        t('settings.translationModel.runtimeReady'),
-        runtimeKindText,
-        runtimeSourceKey ? t(runtimeSourceKey) : '',
-      ].filter(Boolean).join(' · ')
-    : t('settings.translationModel.runtimeUnavailable')
+  const modelActionText = isReady
+    ? t('settings.translationModel.modelReady')
+    : isCached
+      ? t('settings.translationModel.loadModel')
+      : t('settings.translationModel.startDownload')
+
+  const handlePrimaryAction = async () => {
+    if (isReady) return
+    await runAction(isCached ? loadTranslationModel : startTranslationModelDownload)
+  }
 
   return (
     <>
       <Typography sx={sectionTitle}>{t('settings.translationModel.title')}</Typography>
       <Box sx={panelSx}>
-        <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 1.5, mb: 1.25 }}>
-          <Box sx={{ minWidth: 0 }}>
-            <Typography sx={{ ...helperTextSx, color: 'text.secondary' }}>
-              {t('settings.translationModel.description')}
-            </Typography>
-            <Typography sx={{ ...captionTextSx, color: 'text.secondary', mt: 0.5 }}>
-              {t('settings.translationModel.fallbackHint')}
-            </Typography>
-          </Box>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1.5, mb: 1 }}>
+          <Typography sx={{ ...helperTextSx, color: 'text.secondary' }}>
+            {t('settings.translationModel.description')}
+          </Typography>
           <Chip
             size="small"
             label={statusText}
             color={isReady ? 'success' : modelStatus?.status === 'failed' ? 'error' : 'default'}
           />
-        </Box>
-
-        <Box sx={rowSx}>
-          <Box>
-            <Typography sx={bodyTextSx}>{t('settings.translationModel.enableLocal')}</Typography>
-            <Typography sx={{ ...captionTextSx, color: 'text.secondary' }}>{t('settings.translationModel.enableLocalHint')}</Typography>
-          </Box>
-          <Switch
-            checked={settings.localTranslationModelEnabled}
-            onChange={(event) => void updateSettings({ ...settings, localTranslationModelEnabled: event.target.checked })}
-          />
-        </Box>
-
-        <Box sx={rowSx}>
-          <Typography sx={bodyTextSx}>{t('settings.translationModel.enginePreference')}</Typography>
-          <Select
-            size="small"
-            value={settings.translationEnginePreference}
-            onChange={(event) => void updateSettings({
-              ...settings,
-              translationEnginePreference: String(event.target.value) as TranslationEnginePreference,
-            })}
-            sx={{ minWidth: { xs: '100%', sm: 220 }, width: { xs: '100%', sm: 'auto' } }}
-          >
-            <MenuItem value="auto">{t('settings.translationModel.engine.auto')}</MenuItem>
-            <MenuItem value="local">{t('settings.translationModel.engine.local')}</MenuItem>
-            <MenuItem value="llm">{t('settings.translationModel.engine.llm')}</MenuItem>
-          </Select>
         </Box>
 
         <Box sx={rowSx}>
@@ -198,30 +154,13 @@ export default function TranslationModelSettingsSection({
           </Typography>
         </Box>
         <Box sx={rowSx}>
-          <Typography sx={{ ...bodyTextSx, color: 'text.secondary' }}>{t('settings.translationModel.ggufModel')}</Typography>
-          <Typography sx={{ ...bodyTextSx, textAlign: { xs: 'left', sm: 'right' } }}>
-            {modelStatus?.gguf_repo_id || 'AngelSlim/Hy-MT1.5-1.8B-2bit-GGUF'}
-          </Typography>
-        </Box>
-        <Box sx={rowSx}>
           <Typography sx={{ ...bodyTextSx, color: 'text.secondary' }}>{t('settings.translationModel.cacheDir')}</Typography>
           <Typography sx={{ ...bodyTextSx, textAlign: { xs: 'left', sm: 'right' }, wordBreak: 'break-all' }}>
             {effectiveCacheDir || '-'}
           </Typography>
         </Box>
-        <Box sx={rowSx}>
-          <Typography sx={{ ...bodyTextSx, color: 'text.secondary' }}>{t('settings.translationModel.runtime')}</Typography>
-          <Box sx={{ minWidth: 0, textAlign: { xs: 'left', sm: 'right' } }}>
-            <Typography sx={{ ...bodyTextSx }}>{runtimeStatusText}</Typography>
-            {runtimePathText ? (
-              <Typography sx={{ ...captionTextSx, color: 'text.secondary', wordBreak: 'break-all', mt: 0.3 }}>
-                {runtimePathText}
-              </Typography>
-            ) : null}
-          </Box>
-        </Box>
         {detailText ? (
-          <Typography sx={{ ...helperTextSx, color: modelStatus?.status === 'failed' || modelStatus?.status === 'runtime_missing' ? 'error.main' : 'text.secondary', mt: 1 }}>
+          <Typography sx={{ ...helperTextSx, color: modelStatus?.status === 'failed' ? 'error.main' : 'text.secondary', mt: 1 }}>
             {detailText}
           </Typography>
         ) : null}
@@ -257,33 +196,12 @@ export default function TranslationModelSettingsSection({
           <Button
             variant="contained"
             startIcon={<CloudDownloadIcon />}
-            onClick={() => void runAction(startTranslationModelDownload)}
+            onClick={() => void handlePrimaryAction()}
             disabled={busy || isReady}
             sx={{ borderRadius: '8px' }}
           >
-            {isCached ? t('settings.translationModel.redownload') : t('settings.translationModel.startDownload')}
+            {modelActionText}
           </Button>
-          <Button
-            variant="outlined"
-            startIcon={<PlayArrowIcon />}
-            onClick={() => void runAction(loadTranslationModel)}
-            disabled={busy || !isCached || isReady}
-            sx={{ borderRadius: '8px' }}
-          >
-            {t('settings.translationModel.loadModel')}
-          </Button>
-          {isReady ? (
-            <Button
-              variant="outlined"
-              color="inherit"
-              startIcon={<PowerSettingsNewIcon />}
-              onClick={() => void runAction(unloadTranslationModel)}
-              disabled={busy}
-              sx={{ borderRadius: '8px' }}
-            >
-              {t('settings.translationModel.unloadModel')}
-            </Button>
-          ) : null}
           <Button
             variant="outlined"
             startIcon={<RefreshIcon />}
