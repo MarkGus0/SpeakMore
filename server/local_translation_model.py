@@ -385,7 +385,14 @@ def get_translation_model_status() -> dict:
     cached_profiles = get_cached_translation_profiles()
     status = str(current.get("status") or "idle")
     runtime_url = get_runtime_url()
-    runtime_ready = bool(runtime_url and (str(os.environ.get(LLAMA_SERVER_URL_ENV, "")).strip() or is_runtime_process_alive()))
+    runtime_ready = bool(
+        runtime_url
+        and (
+            str(os.environ.get(LLAMA_SERVER_URL_ENV, "")).strip()
+            or is_runtime_process_alive()
+            or _runtime_kind == "llama-server-existing"
+        )
+    )
     if status == "ready" and not runtime_ready:
         status = "runtime_missing"
 
@@ -578,6 +585,38 @@ def wait_for_local_server(
     raise RuntimeError(build_runtime_failure_detail(last_error or "timeout", log_tail))
 
 
+def get_runtime_model_identifiers(url: str, timeout_seconds: float = 1.2) -> set[str]:
+    try:
+        response = httpx.get(f"{url.rstrip('/')}/v1/models", timeout=timeout_seconds)
+        response.raise_for_status()
+        data = response.json()
+    except Exception:
+        return set()
+
+    identifiers: set[str] = set()
+    for key in ("data", "models"):
+        values = data.get(key) if isinstance(data, dict) else []
+        if not isinstance(values, list):
+            continue
+        for item in values:
+            if not isinstance(item, dict):
+                continue
+            for field in ("id", "name", "model"):
+                value = str(item.get(field) or "").strip()
+                if value:
+                    identifiers.add(value)
+    return identifiers
+
+
+def is_runtime_serving_translation_model(url: str, model_file: Path) -> bool:
+    expected_names = {model_file.name, model_file.stem}
+    identifiers = get_runtime_model_identifiers(url)
+    return any(
+        identifier in expected_names or any(expected in identifier for expected in expected_names)
+        for identifier in identifiers
+    )
+
+
 def unload_translation_model() -> dict:
     global _runtime_process, _runtime_url, _runtime_kind, _runtime_profile
     process = _runtime_process
@@ -674,6 +713,13 @@ def start_translation_runtime(profile_id: str, model_file: Path) -> dict:
 
     try:
         with socket.create_connection(("127.0.0.1", port), timeout=0.25):
+            if is_runtime_serving_translation_model(url, model_file):
+                _runtime_process = None
+                _runtime_url = url
+                _runtime_kind = "llama-server-existing"
+                _runtime_profile = normalize_translation_profile(profile_id)
+                set_translation_model_state("ready", "Local translation model attached to existing llama-server")
+                return get_translation_model_status()
             raise RuntimeError(f"Port {port} is already in use")
     except OSError:
         pass
@@ -755,20 +801,22 @@ def build_local_translation_messages(
         if isinstance(item, dict)
     )
     context_lines = "\n".join(str(item or "").strip() for item in previous_sentences[-2:] if str(item or "").strip())
-    system_prompt = (
-        "You are a low-latency machine translation engine. Translate only the current input into the target language. "
-        "Use previous context only for terminology and pronouns. Never output source text, labels, explanations, markdown, timestamps, or emoji."
-    )
+    context_block = ""
+    if context_lines or pair_lines:
+        context_block = (
+            "Use the following context only for terminology, names, and pronouns. "
+            "Do not translate or repeat this context:\n"
+            f"{context_lines or '(no previous sentence context)'}\n"
+            f"{pair_lines or '(no previous translation context)'}\n\n"
+        )
     user_prompt = (
-        f"Target language: {target_language_name} ({target_language_id})\n"
-        f"Previous sentences for context only:\n{context_lines or '(none)'}\n\n"
-        f"Previous source/translation pairs for context only:\n{pair_lines or '(none)'}\n\n"
-        f"Current input:\n{raw_text}"
+        f"{context_block}"
+        f"Translate the following text into {target_language_name} ({target_language_id}). "
+        "Note that you should only output the translated result without any additional explanation, "
+        "labels, markdown, emoji, or repeated historical sentences:\n\n"
+        f"{raw_text}"
     )
-    return [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt},
-    ]
+    return [{"role": "user", "content": user_prompt}]
 
 
 def normalize_local_translation_output(value: object) -> str:

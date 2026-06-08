@@ -432,6 +432,7 @@ test('旧模型管理能力已删除，语音模型初始化并入设置页', as
   assert.match(translationModelSection, /chooseModelCacheDirectory/);
   assert.match(translationModelSection, /runtime_profile/);
   assert.match(translationModelSection, /Hy-MT2/);
+  assert.match(translationModelSection, /readyDetail/);
   assert.match(translationModelSection, /downloadInterruptedDetail/);
   assert.match(translationModelSection, /translation_model_download_failed/);
   assert.doesNotMatch(translationModelSection, /AngelSlim|Hy-MT1\.5/);
@@ -439,6 +440,7 @@ test('旧模型管理能力已删除，语音模型初始化并入设置页', as
   assert.doesNotMatch(translationModelSection, /translationEnginePreference|localTranslationModelEnabled/);
   assert.match(i18n, /settings\.translationModel\.downloadInterruptedDetail/);
   assert.match(i18n, /settings\.translationModel\.downloadFailedDetail/);
+  assert.match(i18n, /settings\.translationModel\.readyDetail/);
   assert.match(translationModelStore, /translation-model:get-status/);
   assert.match(translationModelStore, /translation-model:start-download/);
   assert.match(translationModelStore, /translation-model:load/);

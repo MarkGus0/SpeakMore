@@ -59,6 +59,9 @@ function getStatusKey(status: TranslationModelStatus | null): TranslationKey {
 
 function getDetailText(status: TranslationModelStatus | null, t: (key: TranslationKey) => string) {
   if (!status?.detail) return ''
+  if (status.status === 'ready') {
+    return t('settings.translationModel.readyDetail')
+  }
   if (status.status === 'runtime_missing') return t('settings.translationModel.runtimeMissingDetail')
 
   const detail = status.detail.toLowerCase()

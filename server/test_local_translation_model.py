@@ -371,6 +371,50 @@ def test_translation_model_download_failure_detail_does_not_double_prefix():
     assert local_translation_model.build_translation_model_download_failure_detail(RuntimeError(detail)) == detail
 
 
+def test_local_translation_prompt_uses_single_user_message():
+    messages = local_translation_model.build_local_translation_messages(
+        raw_text="今天确认发布计划。",
+        target_language_name="English",
+        target_language_id="en",
+        previous_sentences=["昨天讨论了客户演示。"],
+        previous_context_pairs=[{"source": "发布计划", "translation": "launch plan"}],
+    )
+
+    assert len(messages) == 1
+    assert messages[0]["role"] == "user"
+    assert "Translate the following text into English (en)" in messages[0]["content"]
+    assert "Do not translate or repeat this context" in messages[0]["content"]
+    assert "launch plan" in messages[0]["content"]
+
+
+def test_translation_model_load_attaches_existing_llama_server_on_same_port(tmp_path, monkeypatch):
+    monkeypatch.setenv(local_translation_model.TRANSLATION_MODEL_CACHE_DIR_ENV, str(tmp_path))
+    model_file = create_cached_translation_model(tmp_path)
+    runtime = tmp_path / "llama-server.exe"
+    runtime.write_bytes(b"runtime")
+    monkeypatch.setenv(local_translation_model.BUNDLED_LLAMA_SERVER_PATH_ENV, str(runtime))
+    monkeypatch.delenv("SPEAKMORE_LOCAL_TRANSLATION_SERVER_URL", raising=False)
+    monkeypatch.setattr(local_translation_model.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(local_translation_model, "has_llama_cpp_python_server", lambda: False)
+    monkeypatch.setattr(local_translation_model, "is_runtime_serving_translation_model", lambda url, path: url == "http://127.0.0.1:8105" and path == model_file)
+
+    class ExistingSocket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(local_translation_model.socket, "create_connection", lambda *_args, **_kwargs: ExistingSocket())
+
+    status = local_translation_model.load_translation_model()
+
+    assert status["ready"] is True
+    assert status["runtime_kind"] == "llama-server-existing"
+    assert status["runtime_url"] == "http://127.0.0.1:8105"
+    assert status["runtime_pid"] is None
+
+
 def test_translation_model_download_cleans_legacy_lock_without_removing_hymt2_partial(tmp_path, monkeypatch):
     monkeypatch.setenv(local_translation_model.TRANSLATION_MODEL_CACHE_DIR_ENV, str(tmp_path))
     legacy_lock = tmp_path / ".locks" / local_translation_model.repo_cache_dir_name(local_translation_model.LEGACY_TRANSLATION_MODEL_GGUF_REPO_ID)
