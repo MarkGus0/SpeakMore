@@ -35,6 +35,7 @@ import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined'
 import StopCircleIcon from '@mui/icons-material/StopCircle'
 import { useI18n, type TranslationKey } from '../i18n'
 import { ipcClient } from '../services/ipc'
+import { generateMeetingNoteTitle } from '../services/meetingNoteTitle'
 import type { MeetingStructuredItem, MeetingTopicSegment, MeetingTranscriptSegment } from '../services/meetingStructuredResult'
 import {
   createDraftMeetingNote,
@@ -548,6 +549,31 @@ export default function MeetingNotes({
     ? structuredActionLines
     : summaryLines.filter((line) => /行动|待办|action|todo|负责|deadline|截止/i.test(line))
 
+  const weakMeetingTitleHints = useMemo(() => [
+    t('meeting.newNote'),
+    t('meeting.liveNote'),
+    t('meeting.titlePlaceholder'),
+    t('meeting.title'),
+  ], [t])
+
+  const meetingFallbackTitle = useCallback((note: Partial<MeetingNote>) => {
+    const timestamp = note.updatedAt || note.createdAt || new Date().toISOString()
+    const formatted = formatNoteDate(timestamp, language, t('meeting.today'))
+    return `${t('meeting.title')} ${formatted}`.trim()
+  }, [language, t])
+
+  const getGeneratedMeetingTitle = useCallback((note: Partial<MeetingNote>, extraWeakTitleHints: string[] = []) => {
+    return generateMeetingNoteTitle(note, {
+      weakTitleHints: [...weakMeetingTitleHints, ...extraWeakTitleHints],
+      fallbackTitle: meetingFallbackTitle(note),
+    })
+  }, [meetingFallbackTitle, weakMeetingTitleHints])
+
+  const withGeneratedMeetingTitle = useCallback((note: Partial<MeetingNote>, extraWeakTitleHints: string[] = []) => {
+    const title = getGeneratedMeetingTitle(note, extraWeakTitleHints)
+    return title && title !== note.title ? { ...note, title } : note
+  }, [getGeneratedMeetingTitle])
+
   const openLiveSetup = useCallback(() => {
     if (isMeetingVoiceActive) {
       setExitConfirmOpen(true)
@@ -612,7 +638,7 @@ export default function MeetingNotes({
       }
 
       if (session.status === 'completed') {
-        const nextNote = {
+        const nextNote = withGeneratedMeetingTitle({
           ...note,
           source: 'recording' as const,
           status: 'completed' as const,
@@ -621,7 +647,7 @@ export default function MeetingNotes({
           summary: session.refinedText,
           structuredResult: session.meetingStructuredResult || note.structuredResult || null,
           durationMs: session.durationMs || elapsedMs,
-        }
+        })
         activeNoteRef.current = nextNote
         setActiveNote(nextNote)
         sendSubtitleUpdate(nextNote)
@@ -640,7 +666,7 @@ export default function MeetingNotes({
       }
 
       if (session.status === 'error') {
-        const nextNote = {
+        const nextNote = withGeneratedMeetingTitle({
           ...note,
           source: 'recording' as const,
           status: 'error' as const,
@@ -650,7 +676,7 @@ export default function MeetingNotes({
           structuredResult: session.meetingStructuredResult || note.structuredResult || null,
           error: session.error?.message || session.error?.detail || '',
           durationMs: session.durationMs || elapsedMs,
-        }
+        })
         activeNoteRef.current = nextNote
         setActiveNote(nextNote)
         void saveMeetingNote(nextNote).then((saved) => {
@@ -660,7 +686,7 @@ export default function MeetingNotes({
         })
       }
     })
-  }, [elapsedMs, refreshNotes, sendSubtitleUpdate])
+  }, [elapsedMs, refreshNotes, sendSubtitleUpdate, withGeneratedMeetingTitle])
 
   useEffect(() => {
     if (subtitlesOpen) sendSubtitleUpdate()
@@ -900,7 +926,7 @@ export default function MeetingNotes({
       const hasUsableTranscript = Boolean(result.transcript.trim())
       const isUsableResult = result.success || hasUsableTranscript
       const errorText = result.partialSuccess ? t('meeting.importSummaryFailed') : (result.success ? '' : importErrorText(result.detail, t))
-      const nextNote = {
+      const nextNote = withGeneratedMeetingTitle({
         ...(saved || activeNote || createDraftMeetingNote()),
         title: saved?.title || file.name,
         source: 'import' as const,
@@ -911,7 +937,7 @@ export default function MeetingNotes({
         structuredResult: result.structuredResult,
         error: errorText,
         importFile: { name: file.name, size: file.size, type: file.type },
-      }
+      }, [file.name])
       const finalNote = await saveMeetingNote(nextNote)
       if (finalNote) setActiveNote(finalNote)
       setImportItem({ name: file.name, size: file.size, status: isUsableResult ? 'completed' : 'error', error: errorText })
@@ -968,7 +994,10 @@ export default function MeetingNotes({
               component="button"
               type="button"
               onClick={() => {
-                setActiveNote(note)
+                const generatedTitle = getGeneratedMeetingTitle(note)
+                const nextNote = generatedTitle && generatedTitle !== note.title ? { ...note, title: generatedTitle } : note
+                setActiveNote(nextNote)
+                if (nextNote !== note) void saveMeetingNote(nextNote).then(refreshNotes)
                 setDetailTab('note')
                 setView('detail')
               }}
@@ -991,7 +1020,7 @@ export default function MeetingNotes({
               </Box>
               <Box sx={{ minWidth: 0 }}>
                 <Typography sx={{ ...itemTitleSx, color: BLUE_COLOR, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {note.title || t('meeting.newNote')}
+                  {getGeneratedMeetingTitle(note) || note.title || t('meeting.newNote')}
                 </Typography>
                 <Typography sx={{ ...helperTextSx, color: MUTED_COLOR, mt: 0.25 }}>
                   {formatNoteDate(note.updatedAt, language, t('meeting.today'))}
