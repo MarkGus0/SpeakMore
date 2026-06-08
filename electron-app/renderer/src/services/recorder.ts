@@ -474,9 +474,12 @@ async function completeSession(refinedText: string, payload: Record<string, unkn
   await deliverVoiceResult(resultText, task, completedSession.mode)
 }
 
-function handleRawText(text: string) {
+function handleRawText(text: string, payload?: Record<string, unknown>) {
   // 流式转写会多次更新 rawText，最终结果仍以后端完成消息为准。
   if (text.trim()) diagnosticsRuntime.markFirstMetric('firstTranscriptionMs', 'first_transcription')
+  if (text.trim() && payload?.stable === true) {
+    diagnosticsRuntime.markFirstMetric('firstStableTranscriptionMs', 'first_stable_transcription')
+  }
   setSession({ ...getVoiceSession(), rawText: text, textLength: countTextLength(text) })
 }
 

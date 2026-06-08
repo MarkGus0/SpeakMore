@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   checkServerPythonPackages,
+  checkDevServerPortOwnership,
   resolveDevHyMtLlamaServerPath,
   resolveDevLlamaServerPath,
   resolveServerPython,
@@ -35,6 +36,18 @@ const dependencyResult = checkServerPythonPackages({
 
 if (!dependencyResult.ok) {
   console.error(dependencyResult.message);
+  process.exit(1);
+}
+
+const portOwnership = checkDevServerPortOwnership({
+  port: Number(process.env.PORT || process.env.VOICE_SERVER_PORT || 8000),
+  pythonBin: pythonResult.pythonBin,
+  spawnSync,
+  platform: process.platform,
+});
+
+if (!portOwnership.ok) {
+  console.error(portOwnership.message);
   process.exit(1);
 }
 

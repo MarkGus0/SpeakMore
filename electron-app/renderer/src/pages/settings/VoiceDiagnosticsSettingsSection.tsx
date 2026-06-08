@@ -145,6 +145,7 @@ export default function VoiceDiagnosticsSettingsSection() {
                       <Metric label={t('settings.voiceDiagnostics.ready')} value={formatMs(session.metrics.readyMs)} />
                       <Metric label={t('settings.voiceDiagnostics.microphone')} value={formatMs(session.metrics.microphoneMs)} />
                       <Metric label={t('settings.voiceDiagnostics.firstText')} value={formatMs(session.metrics.firstTranscriptionMs)} />
+                      <Metric label={t('settings.voiceDiagnostics.firstStableText')} value={formatMs(session.metrics.firstStableTranscriptionMs)} />
                       <Metric label={t('settings.voiceDiagnostics.firstTranslation')} value={formatMs(session.metrics.firstTranslationMs)} />
                       <Metric label={t('settings.voiceDiagnostics.finalRefine')} value={formatMs(session.metrics.finalRefineMs)} />
                       {hints.length ? (

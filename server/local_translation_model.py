@@ -52,12 +52,20 @@ TRANSLATION_MODEL_DOWNLOAD_ATTEMPTS = 3
 TRANSLATION_MODEL_DOWNLOAD_RETRY_DELAY_SECONDS = 1.5
 DOWNLOAD_INTERRUPTED_DETAIL_CODE = "translation_model_download_interrupted"
 DOWNLOAD_FAILED_DETAIL_CODE = "translation_model_download_failed"
+SELF_TEST_FAILED_DETAIL_CODE = "translation_model_self_test_failed"
 RUNTIME_MISSING_DETAIL = (
     "Local translation runtime is missing. Bundle llama-server with the app, set "
     "SPEAKMORE_BUNDLED_LLAMA_SERVER_PATH / SPEAKMORE_LLAMA_SERVER_PATH / LLAMA_SERVER_PATH, "
     "install llama-server on PATH, or install llama-cpp-python in the backend Python environment."
 )
 LOCAL_TRANSLATION_TIMEOUT_SECONDS = 8.0
+LOCAL_TRANSLATION_SELF_TEST_TIMEOUT_SECONDS = 12.0
+LOCAL_TRANSLATION_RECOMMENDED_SAMPLING = {
+    "temperature": 0.7,
+    "top_p": 0.6,
+    "top_k": 20,
+    "repeat_penalty": 1.05,
+}
 LOCAL_TRANSLATION_SUPPORTED_TARGETS = {
     "zh",
     "zh-CN",
@@ -112,6 +120,10 @@ _translation_model_state: dict = {
     "detail": "",
     "started_at": None,
 }
+
+
+class TranslationModelSelfTestError(RuntimeError):
+    pass
 
 
 def normalize_optional_path(value: str | None) -> str:
@@ -324,6 +336,8 @@ def read_runtime_log_tail(log_path: Path | None = None, max_chars: int = 2400) -
 
 def build_runtime_failure_detail(error: Exception | str, log_tail: str = "") -> str:
     error_text = str(error or "").strip()
+    if SELF_TEST_FAILED_DETAIL_CODE in error_text:
+        return error_text
     log_lower = log_tail.lower()
     if "gguf_init_from_reader" in log_lower or "failed to load model" in log_lower:
         return (
@@ -426,6 +440,7 @@ def get_translation_model_status() -> dict:
         "runtime_pid": _runtime_process.pid if is_runtime_process_alive() else None,
         "runtime_log_path": str(get_runtime_log_path()),
         "runtime_missing": status == "runtime_missing",
+        "self_test_passed": status == "ready",
         "started_at": started_at,
         "updated_at": now,
         "elapsed_ms": int((now - started_at) * 1000) if isinstance(started_at, (float, int)) else 0,
@@ -667,6 +682,8 @@ def create_runtime_args(profile_id: str, model_file: Path) -> tuple[list[str], s
             "4096",
             "--threads",
             thread_count,
+            "--jinja",
+            "--cache-prompt",
             "--no-webui",
         ], "llama-server-stq", runtime["path"])
 
@@ -684,6 +701,8 @@ def create_runtime_args(profile_id: str, model_file: Path) -> tuple[list[str], s
             "4096",
             "--threads",
             thread_count,
+            "--jinja",
+            "--cache-prompt",
             "--no-webui",
         ], "llama-server", runtime["path"])
     if has_llama_cpp_python_server():
@@ -714,6 +733,7 @@ def start_translation_runtime(profile_id: str, model_file: Path) -> dict:
     try:
         with socket.create_connection(("127.0.0.1", port), timeout=0.25):
             if is_runtime_serving_translation_model(url, model_file):
+                run_translation_model_self_test(url, get_translation_profile(profile_id)["model_id"])
                 _runtime_process = None
                 _runtime_url = url
                 _runtime_kind = "llama-server-existing"
@@ -741,6 +761,7 @@ def start_translation_runtime(profile_id: str, model_file: Path) -> dict:
     _runtime_kind = runtime_kind
     _runtime_profile = normalize_translation_profile(profile_id)
     wait_for_local_server(url, process=_runtime_process, log_path=log_path)
+    run_translation_model_self_test(url, get_translation_profile(profile_id)["model_id"])
     set_translation_model_state("ready", f"Local translation model loaded with {runtime_kind}")
     return get_translation_model_status()
 
@@ -753,6 +774,7 @@ def load_translation_model() -> dict:
         _runtime_kind = "external"
         _runtime_profile = STANDARD_TRANSLATION_PROFILE
         wait_for_local_server(external_url, timeout_seconds=5.0)
+        run_translation_model_self_test(external_url, get_translation_profile(STANDARD_TRANSLATION_PROFILE)["model_id"])
         set_translation_model_state("ready", "Using external local translation runtime")
         return get_translation_model_status()
 
@@ -779,6 +801,9 @@ def load_translation_model() -> dict:
             if profile_id == STQ_TRANSLATION_PROFILE and len(candidates) > 1:
                 set_translation_model_state("idle", f"STQ runtime failed, falling back to stable model: {detail}")
                 continue
+            if isinstance(error, TranslationModelSelfTestError):
+                set_translation_model_state("failed_self_test", str(error))
+                raise RuntimeError(str(error)) from error
             set_translation_model_state("failed", detail)
             raise RuntimeError(detail) from error
     detail = build_runtime_failure_detail(last_error or "unknown error", read_runtime_log_tail(get_runtime_log_path()))
@@ -825,6 +850,99 @@ def normalize_local_translation_output(value: object) -> str:
     return text
 
 
+def is_invalid_local_translation_output(text: str, source_text: str = "") -> bool:
+    normalized = normalize_local_translation_output(text)
+    if not normalized:
+        return True
+    compact = normalized.replace(" ", "")
+    if compact and compact.count("?") / max(1, len(compact)) >= 0.35:
+        return True
+    if len(compact) >= 16:
+        repeated_question_groups = compact.count("???")
+        if repeated_question_groups >= 2:
+            return True
+    source_compact = str(source_text or "").strip().replace(" ", "")
+    if source_compact and compact == source_compact:
+        return True
+    return False
+
+
+def extract_chat_completion_text(data: dict) -> str:
+    choices = data.get("choices", []) if isinstance(data, dict) else []
+    if not choices or not isinstance(choices, list):
+        return ""
+    message = choices[0].get("message") if isinstance(choices[0], dict) else {}
+    return normalize_local_translation_output(message.get("content") if isinstance(message, dict) else "")
+
+
+def build_local_translation_payload(
+    *,
+    model_id: str,
+    raw_text: str,
+    target_language_id: str,
+    target_language_name: str,
+    previous_sentences: list[str] | None = None,
+    previous_context_pairs: list[dict] | None = None,
+    max_tokens: int = 256,
+) -> dict:
+    return {
+        "model": model_id,
+        "messages": build_local_translation_messages(
+            raw_text=raw_text,
+            target_language_name=target_language_name,
+            target_language_id=target_language_id,
+            previous_sentences=previous_sentences,
+            previous_context_pairs=previous_context_pairs,
+        ),
+        **LOCAL_TRANSLATION_RECOMMENDED_SAMPLING,
+        "max_tokens": max_tokens,
+        "stream": False,
+    }
+
+
+def call_local_translation_api_sync(
+    runtime_url: str,
+    payload: dict,
+    timeout_seconds: float = LOCAL_TRANSLATION_TIMEOUT_SECONDS,
+) -> str:
+    with httpx.Client(timeout=timeout_seconds) as client:
+        response = client.post(f"{runtime_url.rstrip('/')}/v1/chat/completions", json=payload)
+        response.raise_for_status()
+        data = response.json()
+    return extract_chat_completion_text(data)
+
+
+async def call_local_translation_api_async(
+    runtime_url: str,
+    payload: dict,
+    timeout_seconds: float = LOCAL_TRANSLATION_TIMEOUT_SECONDS,
+) -> str:
+    async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+        response = await client.post(f"{runtime_url.rstrip('/')}/v1/chat/completions", json=payload)
+        response.raise_for_status()
+        data = response.json()
+    return extract_chat_completion_text(data)
+
+
+def run_translation_model_self_test(runtime_url: str, model_id: str) -> None:
+    source_text = "今天天气很好。"
+    payload = build_local_translation_payload(
+        model_id=model_id,
+        raw_text=source_text,
+        target_language_id="en",
+        target_language_name="English",
+        max_tokens=64,
+    )
+    text = call_local_translation_api_sync(
+        runtime_url,
+        payload,
+        timeout_seconds=LOCAL_TRANSLATION_SELF_TEST_TIMEOUT_SECONDS,
+    )
+    lower = text.lower()
+    if is_invalid_local_translation_output(text, source_text) or not any(token in lower for token in ("weather", "nice", "good", "fine")):
+        raise TranslationModelSelfTestError(f"{SELF_TEST_FAILED_DETAIL_CODE}: {text[:120] or 'empty output'}")
+
+
 async def translate_with_local_model(
     raw_text: str,
     target_language_id: str,
@@ -841,26 +959,16 @@ async def translate_with_local_model(
     if not runtime_url:
         raise RuntimeError("Local translation runtime URL is empty")
 
-    payload = {
-        "model": str(status.get("model_id") or TRANSLATION_MODEL_ID),
-        "messages": build_local_translation_messages(
-            raw_text=raw_text,
-            target_language_name=target_language_name,
-            target_language_id=target_language_id,
-            previous_sentences=previous_sentences,
-            previous_context_pairs=previous_context_pairs,
-        ),
-        "temperature": 0.0,
-        "max_tokens": 256,
-        "stream": False,
-    }
-    async with httpx.AsyncClient(timeout=LOCAL_TRANSLATION_TIMEOUT_SECONDS) as client:
-        response = await client.post(f"{runtime_url}/v1/chat/completions", json=payload)
-        response.raise_for_status()
-        data = response.json()
-
-    choices = data.get("choices", [])
-    if not choices or not isinstance(choices, list):
-        return ""
-    message = choices[0].get("message") if isinstance(choices[0], dict) else {}
-    return normalize_local_translation_output(message.get("content") if isinstance(message, dict) else "")
+    payload = build_local_translation_payload(
+        model_id=str(status.get("model_id") or TRANSLATION_MODEL_ID),
+        raw_text=raw_text,
+        target_language_id=target_language_id,
+        target_language_name=target_language_name,
+        previous_sentences=previous_sentences,
+        previous_context_pairs=previous_context_pairs,
+        max_tokens=256,
+    )
+    text = await call_local_translation_api_async(runtime_url, payload)
+    if is_invalid_local_translation_output(text, raw_text):
+        raise RuntimeError(f"{SELF_TEST_FAILED_DETAIL_CODE}: invalid local translation output")
+    return text

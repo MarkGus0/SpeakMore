@@ -44,6 +44,7 @@ const QUALITY_LOW_VOLUME_RMS = 0.018
 const QUALITY_SPEECH_RMS = 0.025
 const QUALITY_CLIPPING_SAMPLE = 0.98
 const QUALITY_LIKELY_NOISE_FLOOR = 0.018
+const MAX_SOCKET_BUFFERED_BYTES = 512 * 1024
 const streamCleanupHandlers = new WeakMap<MediaStream, () => void>()
 
 function createAudioConstraints(selectedAudioDeviceId: string, relaxed = false): MediaStreamConstraints {
@@ -159,6 +160,7 @@ async function getSystemAudioStream() {
     stopStreamTracks(stream)
     throw createVoiceError('microphone_unavailable', '没有捕获到系统音频')
   }
+  stream.getVideoTracks().forEach((track) => track.stop())
   return stream
 }
 
@@ -171,14 +173,29 @@ async function mixAudioStreams(streams: MediaStream[]) {
 
   const audioContext = new AudioContextConstructor()
   const destination = audioContext.createMediaStreamDestination()
-  const sources = streams.map((stream) => {
+  const compressor = audioContext.createDynamicsCompressor()
+  compressor.threshold.value = -18
+  compressor.knee.value = 18
+  compressor.ratio.value = 3
+  compressor.attack.value = 0.003
+  compressor.release.value = 0.18
+  compressor.connect(destination)
+  const nodes: Array<MediaStreamAudioSourceNode | GainNode | BiquadFilterNode | DynamicsCompressorNode> = [compressor]
+  streams.forEach((stream, index) => {
     const source = audioContext.createMediaStreamSource(stream)
-    source.connect(destination)
-    return source
+    const highpass = audioContext.createBiquadFilter()
+    highpass.type = 'highpass'
+    highpass.frequency.value = index === 0 && streams.length > 1 ? 80 : 40
+    const gain = audioContext.createGain()
+    gain.gain.value = streams.length > 1 && index > 0 ? 0.62 : 1
+    source.connect(highpass)
+    highpass.connect(gain)
+    gain.connect(compressor)
+    nodes.push(source, highpass, gain)
   })
   const mixedStream = destination.stream
   streamCleanupHandlers.set(mixedStream, () => {
-    sources.forEach((source) => source.disconnect())
+    nodes.forEach((node) => node.disconnect())
     streams.forEach(stopStreamTracks)
     void audioContext.close().catch(() => undefined)
   })
@@ -455,6 +472,7 @@ export function conditionAudioForAsr(samples: Float32Array) {
 export function sendPcm16Chunk(socket: WebSocket, samples: Float32Array, inputSampleRate: number) {
   // PCM 发送路径只负责实时推 chunk，不缓存整段音频。
   if (socket.readyState !== WebSocket.OPEN) return
+  if (socket.bufferedAmount > MAX_SOCKET_BUFFERED_BYTES) return
 
   const buffer = createPcm16Chunk(samples, inputSampleRate)
   if (!buffer) return
@@ -462,7 +480,7 @@ export function sendPcm16Chunk(socket: WebSocket, samples: Float32Array, inputSa
   return buffer
 }
 
-export function createPcm16AudioSender(
+function createScriptProcessorPcm16AudioSender(
   stream: MediaStream,
   socket: WebSocket,
   qualityTracker?: AudioQualityTracker | null,
@@ -509,4 +527,136 @@ export function createPcm16AudioSender(
       void audioContext.close().catch(() => undefined)
     },
   }
+}
+
+function createMeetingAudioWorkletModuleUrl() {
+  const source = `
+class SpeakMorePcmProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.buffer = [];
+    this.frameCount = 0;
+    this.batchFrames = Math.max(256, Math.round(sampleRate * 0.04));
+    this.paused = false;
+    this.port.onmessage = (event) => {
+      if (event.data && event.data.type === 'paused') this.paused = Boolean(event.data.value);
+    };
+  }
+  process(inputs, outputs) {
+    const output = outputs[0] || [];
+    for (let channel = 0; channel < output.length; channel += 1) output[channel].fill(0);
+    if (this.paused) return true;
+    const input = inputs[0] || [];
+    if (!input.length || !input[0]) return true;
+    const length = input[0].length;
+    for (let index = 0; index < length; index += 1) {
+      let sum = 0;
+      let active = 0;
+      for (let channel = 0; channel < input.length; channel += 1) {
+        const value = input[channel]?.[index] || 0;
+        if (Math.abs(value) >= 0.00001) active += 1;
+        sum += value;
+      }
+      this.buffer.push(active > 0 ? sum / Math.max(1, input.length) : 0);
+      this.frameCount += 1;
+      if (this.frameCount >= this.batchFrames) {
+        const samples = new Float32Array(this.buffer);
+        this.port.postMessage(samples, [samples.buffer]);
+        this.buffer = [];
+        this.frameCount = 0;
+      }
+    }
+    return true;
+  }
+}
+registerProcessor('speakmore-pcm-processor', SpeakMorePcmProcessor);
+`
+  return URL.createObjectURL(new Blob([source], { type: 'text/javascript' }))
+}
+
+function createAudioWorkletPcm16AudioSender(
+  stream: MediaStream,
+  socket: WebSocket,
+  qualityTracker?: AudioQualityTracker | null,
+  options: Pcm16AudioSenderOptions = {},
+): AudioSender {
+  const AudioContextConstructor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+  if (!AudioContextConstructor) {
+    return createScriptProcessorPcm16AudioSender(stream, socket, qualityTracker, options)
+  }
+
+  const audioContext = new AudioContextConstructor()
+  const inputSampleRate = audioContext.sampleRate || 16000
+  let source: MediaStreamAudioSourceNode | null = null
+  let node: AudioWorkletNode | null = null
+  let fallbackSender: AudioSender | null = null
+  let stopped = false
+  let paused = false
+  let moduleUrl = ''
+
+  const setupFallback = () => {
+    if (stopped || fallbackSender) return
+    void audioContext.close().catch(() => undefined)
+    fallbackSender = createScriptProcessorPcm16AudioSender(stream, socket, qualityTracker, options)
+    fallbackSender.setPaused?.(paused)
+  }
+
+  const setup = async () => {
+    if (!audioContext.audioWorklet) {
+      setupFallback()
+      return
+    }
+    moduleUrl = createMeetingAudioWorkletModuleUrl()
+    await audioContext.audioWorklet.addModule(moduleUrl)
+    if (stopped) return
+    source = audioContext.createMediaStreamSource(stream)
+    node = new AudioWorkletNode(audioContext, 'speakmore-pcm-processor', {
+      numberOfInputs: 1,
+      numberOfOutputs: 1,
+      outputChannelCount: [1],
+    })
+    node.port.onmessage = (event) => {
+      if (stopped || paused) return
+      const samples = event.data instanceof Float32Array ? event.data : null
+      if (!samples || !samples.length) return
+      qualityTracker?.observe(samples)
+      const input = conditionAudioForAsr(samples)
+      const chunk = sendPcm16Chunk(socket, input, inputSampleRate)
+      if (chunk) options.onPcm16Chunk?.(chunk)
+    }
+    node.port.postMessage({ type: 'paused', value: paused })
+    source.connect(node)
+    node.connect(audioContext.destination)
+    await audioContext.resume().catch(() => undefined)
+  }
+
+  void setup().catch(setupFallback).finally(() => {
+    if (moduleUrl) URL.revokeObjectURL(moduleUrl)
+  })
+
+  return {
+    setPaused: (nextPaused) => {
+      paused = nextPaused
+      node?.port.postMessage({ type: 'paused', value: nextPaused })
+      fallbackSender?.setPaused?.(nextPaused)
+    },
+    stop: () => {
+      stopped = true
+      fallbackSender?.stop()
+      fallbackSender = null
+      node?.port.close()
+      node?.disconnect()
+      source?.disconnect()
+      void audioContext.close().catch(() => undefined)
+    },
+  }
+}
+
+export function createPcm16AudioSender(
+  stream: MediaStream,
+  socket: WebSocket,
+  qualityTracker?: AudioQualityTracker | null,
+  options: Pcm16AudioSenderOptions = {},
+): AudioSender {
+  return createAudioWorkletPcm16AudioSender(stream, socket, qualityTracker, options)
 }

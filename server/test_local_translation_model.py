@@ -11,8 +11,9 @@ import main
 
 
 @pytest.fixture(autouse=True)
-def reset_translation_model_runtime():
+def reset_translation_model_runtime(monkeypatch):
     local_translation_model.unload_translation_model()
+    monkeypatch.setattr(local_translation_model, "run_translation_model_self_test", lambda *_args, **_kwargs: None)
     yield
     local_translation_model.unload_translation_model()
 
@@ -413,6 +414,60 @@ def test_translation_model_load_attaches_existing_llama_server_on_same_port(tmp_
     assert status["runtime_kind"] == "llama-server-existing"
     assert status["runtime_url"] == "http://127.0.0.1:8105"
     assert status["runtime_pid"] is None
+
+
+def test_translation_model_load_marks_failed_when_self_test_outputs_question_marks(tmp_path, monkeypatch):
+    monkeypatch.setenv(local_translation_model.TRANSLATION_MODEL_CACHE_DIR_ENV, str(tmp_path))
+    create_cached_translation_model(tmp_path)
+    runtime = tmp_path / "llama-server.exe"
+    runtime.write_bytes(b"runtime")
+    monkeypatch.setenv(local_translation_model.BUNDLED_LLAMA_SERVER_PATH_ENV, str(runtime))
+    monkeypatch.delenv("SPEAKMORE_LOCAL_TRANSLATION_SERVER_URL", raising=False)
+    monkeypatch.setattr(local_translation_model.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(local_translation_model, "has_llama_cpp_python_server", lambda: False)
+    monkeypatch.setattr(local_translation_model, "wait_for_local_server", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        local_translation_model.socket,
+        "create_connection",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError()),
+    )
+
+    class FakeProcess:
+        pid = 12345
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            pass
+
+        def wait(self, timeout=None):
+            del timeout
+            return 0
+
+    monkeypatch.setattr(local_translation_model.subprocess, "Popen", lambda *_args, **_kwargs: FakeProcess())
+    monkeypatch.setattr(
+        local_translation_model,
+        "run_translation_model_self_test",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            local_translation_model.TranslationModelSelfTestError(
+                f"{local_translation_model.SELF_TEST_FAILED_DETAIL_CODE}: ???????"
+            )
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match=local_translation_model.SELF_TEST_FAILED_DETAIL_CODE):
+        local_translation_model.load_translation_model()
+
+    status = local_translation_model.get_translation_model_status()
+    assert status["status"] == "failed_self_test"
+    assert status["ready"] is False
+    assert status["self_test_passed"] is False
+
+
+def test_local_translation_rejects_question_mark_output():
+    assert local_translation_model.is_invalid_local_translation_output("????????", "今天天气很好。") is True
+    assert local_translation_model.is_invalid_local_translation_output("The weather is nice today.", "今天天气很好。") is False
 
 
 def test_translation_model_download_cleans_legacy_lock_without_removing_hymt2_partial(tmp_path, monkeypatch):

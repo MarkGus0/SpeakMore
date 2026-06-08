@@ -51,6 +51,7 @@ function normalizeMetrics(value = {}) {
     'microphoneMs',
     'parametersMs',
     'firstTranscriptionMs',
+    'firstStableTranscriptionMs',
     'firstTranslationPendingMs',
     'firstTranslationMs',
     'finalRefineMs',

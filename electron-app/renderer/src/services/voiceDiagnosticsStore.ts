@@ -18,6 +18,7 @@ export type VoiceDiagnosticMetrics = {
   microphoneMs?: number
   parametersMs?: number
   firstTranscriptionMs?: number
+  firstStableTranscriptionMs?: number
   firstTranslationPendingMs?: number
   firstTranslationMs?: number
   finalRefineMs?: number

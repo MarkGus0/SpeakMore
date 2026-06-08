@@ -33,6 +33,7 @@ from model_manager import (
     get_managed_model_cache_root,
 )
 from local_translation_model import (
+    SELF_TEST_FAILED_DETAIL_CODE,
     build_translation_model_download_failure_detail,
     configure_translation_model_cache_dir,
     download_translation_model,
@@ -483,6 +484,9 @@ async def run_translation_model_load_task(app: FastAPI) -> None:
     try:
         await asyncio.to_thread(load_translation_model)
     except Exception as error:
+        if SELF_TEST_FAILED_DETAIL_CODE in str(error):
+            set_translation_model_task_state("failed_self_test", str(error))
+            return
         set_translation_model_task_state("failed", str(error))
 
 
@@ -624,6 +628,7 @@ MEETING_REALTIME_TRANSLATION_IMMEDIATE_OTHER_CHARS = 16
 MEETING_REALTIME_TRANSLATION_MAX_WAIT_SECONDS = 0.9
 MEETING_REALTIME_TRANSLATION_SHORT_WAIT_SECONDS = 0.65
 MEETING_REALTIME_TRANSLATION_MAX_CONCURRENCY = 2
+MEETING_REALTIME_TRANSLATION_MAX_QUEUE = 6
 MEETING_REALTIME_TRANSLATION_COMPLETE_CJK_CHARS = 6
 MEETING_REALTIME_TRANSLATION_COMPLETE_OTHER_WORDS = 3
 MEETING_REALTIME_TRANSLATION_FAST_CJK_CHARS = 14
@@ -1447,7 +1452,7 @@ class MeetingRealtimeTranslator:
             with suppress(asyncio.TimeoutError, asyncio.CancelledError, Exception):
                 await asyncio.wait_for(asyncio.gather(*(asyncio.shield(task) for task in active)), timeout=remaining)
 
-    async def observe_transcription(self, text: str, chunk_index: int) -> None:
+    async def observe_transcription(self, text: str, chunk_index: int, stable: bool = False) -> None:
         del chunk_index
         if self.closed or self.mode != "meeting_notes":
             return
@@ -1475,7 +1480,9 @@ class MeetingRealtimeTranslator:
                 buffered_parts = []
 
         pending_tail = join_meeting_realtime_parts([*buffered_parts, tail])
-        self._set_pending_tail(pending_tail)
+        self._set_pending_tail(pending_tail, allow_timer=stable)
+        if stable:
+            await self._commit_pending_tail(force=False)
         await asyncio.sleep(0)
 
     def _extract_uncommitted_suffix(self, normalized_text: str) -> str:
@@ -1513,7 +1520,7 @@ class MeetingRealtimeTranslator:
             return sentence
         return normalize_meeting_realtime_source(strip_meeting_realtime_leading_separators(sentence[boundary:]))
 
-    def _set_pending_tail(self, tail: str) -> None:
+    def _set_pending_tail(self, tail: str, allow_timer: bool = True) -> None:
         normalized_tail = normalize_meeting_realtime_source(tail)
         if not normalized_tail or is_meaningless_meeting_realtime_segment(normalized_tail):
             self.pending_tail_text = ""
@@ -1536,6 +1543,8 @@ class MeetingRealtimeTranslator:
         if tail_key == self.pending_tail_compare_key:
             self.pending_tail_stable_count += 1
             if (
+                allow_timer
+                and
                 self.pending_tail_stable_count >= MEETING_REALTIME_STABLE_COMMIT_OBSERVATIONS
                 and self.pending_tail_wait_seconds > 0
                 and is_likely_complete_meeting_realtime_clause(normalized_tail)
@@ -1552,7 +1561,7 @@ class MeetingRealtimeTranslator:
         self.pending_tail_wait_seconds = get_meeting_realtime_pause_wait_seconds(normalized_tail)
         self.pending_tail_stable_count = 1
         self._cancel_flush_timer()
-        if self.pending_tail_wait_seconds > 0:
+        if allow_timer and self.pending_tail_wait_seconds > 0:
             self.flush_timer_task = asyncio.create_task(self._flush_pending_after_delay())
 
     def _cancel_flush_timer(self) -> None:
@@ -1617,6 +1626,8 @@ class MeetingRealtimeTranslator:
         self.committed_compare_key += compare_key
 
         await self._notify_pending_sentence(normalized, sentence_index)
+        if len(self.translation_queue) >= MEETING_REALTIME_TRANSLATION_MAX_QUEUE:
+            self.translation_queue = self.translation_queue[-(MEETING_REALTIME_TRANSLATION_MAX_QUEUE - 1) :]
         self.translation_queue.append({
             "segment": normalized,
             "target_language": target_language,
@@ -1915,6 +1926,8 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
                         streaming_chunk_index += 1
                         result_text = normalize_meeting_transcription_text(result.text, mode)
                         if result_text:
+                            result_stable = bool(getattr(result, "stable", True))
+                            result_utterance_index = int(getattr(result, "utterance_index", 0) or streaming_chunk_index)
                             await send_ws_message(
                                 websocket,
                                 "transcription",
@@ -1922,9 +1935,20 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
                                     "text": result_text,
                                     "audio_id": audio_id,
                                     "chunk_index": streaming_chunk_index,
+                                    "utterance_index": result_utterance_index,
+                                    "stable": result_stable,
+                                    "is_partial": bool(getattr(result, "is_partial", not result_stable)),
+                                    "asr_latency_ms": int(getattr(result, "asr_latency_ms", 0) or 0),
+                                    "endpoint_reason": str(getattr(result, "endpoint_reason", "") or ""),
+                                    "asr_window_ms": int(getattr(result, "asr_window_ms", 0) or 0),
+                                    "audio_source_profile": parameters.get("meeting_audio_source") if isinstance(parameters, dict) else "",
                                 },
                             )
-                            await realtime_translator.observe_transcription(result_text, streaming_chunk_index)
+                            await realtime_translator.observe_transcription(
+                                result_text,
+                                streaming_chunk_index,
+                                stable=result_stable,
+                            )
                 else:
                     audio_chunks.append(message["bytes"])
                     await websocket.send_json({
@@ -2002,7 +2026,15 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
                         await send_ws_message(
                             websocket,
                             "transcription",
-                            {"text": raw_text, "audio_id": audio_id, "chunk_index": streaming_chunk_index},
+                            {
+                                "text": raw_text,
+                                "audio_id": audio_id,
+                                "chunk_index": streaming_chunk_index,
+                                "utterance_index": streaming_chunk_index,
+                                "stable": True,
+                                "is_partial": False,
+                                "audio_source_profile": parameters.get("meeting_audio_source") if isinstance(parameters, dict) else "",
+                            },
                         )
                         try:
                             refined, extra_data = await refine_voice_flow_text(
@@ -2105,7 +2137,15 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
                         await send_ws_message(
                             websocket,
                             "transcription",
-                            {"text": raw_text, "audio_id": audio_id, "chunk_index": 0},
+                            {
+                                "text": raw_text,
+                                "audio_id": audio_id,
+                                "chunk_index": 0,
+                                "utterance_index": 0,
+                                "stable": True,
+                                "is_partial": False,
+                                "audio_source_profile": parameters.get("meeting_audio_source") if isinstance(parameters, dict) else "",
+                            },
                         )
                         try:
                             refined, extra_data = await refine_voice_flow_text(

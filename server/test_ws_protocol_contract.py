@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import WebSocketDisconnect
 
-from main import ws_voice_flow
+from main import MeetingRealtimeTranslator, ws_voice_flow
 
 
 class FakeWebSocket:
@@ -350,6 +350,75 @@ class WsProtocolContractTest(unittest.TestCase):
 
         self.assertNotIn("meeting_translation", [message["K"] for message in websocket.sent_messages])
         refine.assert_not_called()
+
+    def test_meeting_notes_partial_transcription_without_sentence_end_does_not_translate(self):
+        websocket = FakeWebSocket([])
+        translator = MeetingRealtimeTranslator(websocket)
+        translator.reset(
+            "audio-1",
+            "meeting_notes",
+            {},
+            {"meeting_translation_target_language": "en"},
+        )
+
+        with patch("main.refine_text", new_callable=AsyncMock) as refine:
+            asyncio.run(translator.observe_transcription("we need confirm budget plan", 1, stable=False))
+
+        self.assertEqual(websocket.sent_messages, [])
+        refine.assert_not_called()
+        translator.cancel()
+
+    def test_meeting_notes_stable_transcription_commits_phrase_translation(self):
+        class FakeStreamingSession:
+            def append_pcm16(self, _chunk):
+                return [
+                    type(
+                        "StreamingResult",
+                        (),
+                        {
+                            "text": "we need confirm budget plan",
+                            "stable": True,
+                            "is_partial": False,
+                            "utterance_index": 1,
+                            "asr_latency_ms": 24,
+                            "endpoint_reason": "silence",
+                            "asr_window_ms": 2100,
+                        },
+                    )()
+                ]
+
+        websocket = FakeWebSocket([
+            {
+                "type": "websocket.receive",
+                "text": json.dumps({
+                    "type": "start_audio",
+                    "audio_id": "audio-1",
+                    "mode": "meeting_notes",
+                    "audio_context": {},
+                    "parameters": {
+                        "audio_format": {"type": "pcm_s16le", "sample_rate": 16000, "channels": 1},
+                        "meeting_translation_target_language": "en",
+                    },
+                }),
+            },
+            {"type": "websocket.receive", "bytes": b"\x01\x00\x02\x00"},
+        ])
+
+        with patch("main.create_streaming_asr_session", return_value=FakeStreamingSession()), patch(
+            "main.refine_text",
+            new_callable=AsyncMock,
+        ) as refine:
+            refine.return_value = "We need to confirm the budget plan."
+            asyncio.run(ws_voice_flow(websocket))
+
+        transcription = next(message for message in websocket.sent_messages if message["K"] == "transcription")
+        self.assertTrue(transcription["V"]["stable"])
+        self.assertFalse(transcription["V"]["is_partial"])
+        self.assertEqual(transcription["V"]["endpoint_reason"], "silence")
+        translation = next(message for message in websocket.sent_messages if message["K"] == "meeting_translation")
+        self.assertEqual(translation["V"]["source_text"], "we need confirm budget plan")
+        self.assertEqual(translation["V"]["sentence_index"], 1)
+        refine.assert_called_once()
 
     def test_meeting_notes_realtime_translation_failure_does_not_interrupt_transcription(self):
         class FakeStreamingSession:

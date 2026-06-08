@@ -6,6 +6,8 @@ import re
 import subprocess
 import sys
 import threading
+import time
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -53,6 +55,8 @@ class StreamingAsrRuntime:
     decoder_chunk_look_back: int | None = None
     chunk_ms: int = 600
     accumulate_audio: bool = False
+    keep_full_audio_for_final: bool = True
+    realtime_endpointing: bool = False
     pass_cache: bool = True
     pass_is_final: bool = True
     generate_options: dict[str, Any] = field(default_factory=dict)
@@ -63,6 +67,21 @@ class StreamingAsrRuntime:
 @dataclass(frozen=True)
 class StreamingAsrResult:
     text: str
+    stable: bool = False
+    is_partial: bool = True
+    utterance_index: int = 0
+    asr_latency_ms: int = 0
+    endpoint_reason: str = ""
+    asr_window_ms: int = 0
+
+
+@dataclass(frozen=True)
+class MeetingEndpointEvent:
+    pcm: bytes
+    stable: bool
+    utterance_index: int
+    reason: str
+    asr_window_ms: int
 
 
 @dataclass(frozen=True)
@@ -76,6 +95,14 @@ class FunasrDeviceSelection:
 _model: StreamingAsrRuntime | None = None
 _model_lock = threading.Lock()
 PCM16_STREAM_CHUNK_BYTES = 64 * 1024
+MEETING_ENDPOINT_FRAME_MS = 30
+MEETING_ENDPOINT_PREROLL_MS = 180
+MEETING_ENDPOINT_MIN_SPEECH_MS = 240
+MEETING_ENDPOINT_END_SILENCE_MS = 720
+MEETING_ENDPOINT_PARTIAL_MS = 1200
+MEETING_ENDPOINT_MAX_SEGMENT_MS = 10000
+MEETING_ENDPOINT_MIN_RMS = 0.008
+MEETING_ENDPOINT_PEAK_TRIGGER = 0.075
 
 
 def get_hf_cache_root() -> Path:
@@ -284,8 +311,10 @@ def create_streaming_runtime(
         device_source=selection.source,
         device_fallback_reason=selection.fallback_reason,
         chunk_ms=1200,
-        accumulate_audio=True,
-        pass_cache=True,
+        accumulate_audio=False,
+        keep_full_audio_for_final=True,
+        realtime_endpointing=True,
+        pass_cache=False,
         pass_is_final=False,
         generate_options={
             "language": "auto",
@@ -453,6 +482,141 @@ def pcm16_bytes_to_float32(pcm_bytes: bytes):
     return np.frombuffer(pcm_bytes, dtype="<i2").astype("float32") / 32768.0
 
 
+def calculate_pcm16_frame_level(pcm_bytes: bytes) -> tuple[float, float]:
+    if len(pcm_bytes) < 2:
+        return 0.0, 0.0
+    sample_count = len(pcm_bytes) // 2
+    total = 0.0
+    peak = 0.0
+    for offset in range(0, sample_count * 2, 2):
+        sample = int.from_bytes(pcm_bytes[offset : offset + 2], byteorder="little", signed=True) / 32768.0
+        absolute = abs(sample)
+        peak = max(peak, absolute)
+        total += sample * sample
+    return (total / max(1, sample_count)) ** 0.5, peak
+
+
+class MeetingEndpointDetector:
+    def __init__(
+        self,
+        sample_rate: int = 16000,
+        frame_ms: int = MEETING_ENDPOINT_FRAME_MS,
+        preroll_ms: int = MEETING_ENDPOINT_PREROLL_MS,
+        min_speech_ms: int = MEETING_ENDPOINT_MIN_SPEECH_MS,
+        end_silence_ms: int = MEETING_ENDPOINT_END_SILENCE_MS,
+        partial_ms: int = MEETING_ENDPOINT_PARTIAL_MS,
+        max_segment_ms: int = MEETING_ENDPOINT_MAX_SEGMENT_MS,
+    ) -> None:
+        self.sample_rate = max(1, int(sample_rate or 16000))
+        self.frame_ms = max(10, int(frame_ms))
+        self.frame_bytes = max(2, int(self.sample_rate * self.frame_ms / 1000) * 2)
+        self.preroll_frames = max(1, int(preroll_ms / self.frame_ms))
+        self.min_speech_ms = max(self.frame_ms, int(min_speech_ms))
+        self.end_silence_ms = max(self.frame_ms, int(end_silence_ms))
+        self.partial_ms = max(self.frame_ms, int(partial_ms))
+        self.max_segment_ms = max(self.partial_ms, int(max_segment_ms))
+        self.pending = bytearray()
+        self.preroll: deque[bytes] = deque(maxlen=self.preroll_frames)
+        self.segment = bytearray()
+        self.in_speech = False
+        self.segment_ms = 0
+        self.voiced_ms = 0
+        self.silence_ms = 0
+        self.next_partial_ms = self.partial_ms
+        self.next_utterance_index = 1
+        self.noise_floor = 0.003
+
+    def append_pcm16(self, chunk: bytes) -> list[MeetingEndpointEvent]:
+        if not chunk:
+            return []
+        self.pending.extend(chunk)
+        events: list[MeetingEndpointEvent] = []
+        while len(self.pending) >= self.frame_bytes:
+            frame = bytes(self.pending[: self.frame_bytes])
+            del self.pending[: self.frame_bytes]
+            event = self._observe_frame(frame)
+            if event:
+                events.append(event)
+        return events
+
+    def finalize(self) -> list[MeetingEndpointEvent]:
+        if self.pending:
+            remainder = bytes(self.pending)
+            self.pending.clear()
+            if len(remainder) >= 2:
+                event = self._observe_frame(remainder)
+                if event:
+                    return [event]
+        if self.in_speech and self.voiced_ms >= self.min_speech_ms and self.segment:
+            return [self._create_event(stable=True, reason="finalize")]
+        self.reset_segment()
+        return []
+
+    def reset_segment(self) -> None:
+        self.segment.clear()
+        self.in_speech = False
+        self.segment_ms = 0
+        self.voiced_ms = 0
+        self.silence_ms = 0
+        self.next_partial_ms = self.partial_ms
+
+    def _observe_frame(self, frame: bytes) -> MeetingEndpointEvent | None:
+        rms, peak = calculate_pcm16_frame_level(frame)
+        threshold = max(MEETING_ENDPOINT_MIN_RMS, min(0.04, self.noise_floor * 3.2 + 0.003))
+        is_speech = rms >= threshold or peak >= MEETING_ENDPOINT_PEAK_TRIGGER
+
+        if not self.in_speech:
+            if not is_speech:
+                self.noise_floor = (self.noise_floor * 0.95) + (rms * 0.05)
+                self.preroll.append(frame)
+                return None
+            self.in_speech = True
+            self.segment = bytearray(b"".join(self.preroll))
+            self.preroll.clear()
+            self.segment_ms = max(0, len(self.segment) // max(1, self.frame_bytes)) * self.frame_ms
+            self.voiced_ms = 0
+            self.silence_ms = 0
+            self.next_partial_ms = self.partial_ms
+
+        self.segment.extend(frame)
+        self.segment_ms += self.frame_ms
+        if is_speech:
+            self.voiced_ms += self.frame_ms
+            self.silence_ms = 0
+        else:
+            self.silence_ms += self.frame_ms
+
+        if self.voiced_ms < self.min_speech_ms:
+            return None
+        if self.segment_ms >= self.max_segment_ms:
+            return self._create_event(stable=True, reason="max_segment")
+        if self.silence_ms >= self.end_silence_ms:
+            return self._create_event(stable=True, reason="silence")
+        if self.segment_ms >= self.next_partial_ms:
+            self.next_partial_ms += self.partial_ms
+            return MeetingEndpointEvent(
+                pcm=bytes(self.segment),
+                stable=False,
+                utterance_index=self.next_utterance_index,
+                reason="partial",
+                asr_window_ms=self.segment_ms,
+            )
+        return None
+
+    def _create_event(self, stable: bool, reason: str) -> MeetingEndpointEvent:
+        event = MeetingEndpointEvent(
+            pcm=bytes(self.segment),
+            stable=stable,
+            utterance_index=self.next_utterance_index,
+            reason=reason,
+            asr_window_ms=self.segment_ms,
+        )
+        if stable:
+            self.next_utterance_index += 1
+            self.reset_segment()
+        return event
+
+
 def extract_funasr_text(result: Any) -> str:
     item = result
     if isinstance(item, tuple) and item:
@@ -477,6 +641,27 @@ def postprocess_asr_text(text: str, postprocess: str | None) -> str:
     if postprocess == "rich_transcription":
         return normalize_rich_transcription_text(text)
     return text
+
+
+def should_insert_asr_text_separator(left: str, right: str) -> bool:
+    if not left or not right:
+        return False
+    left_char = left[-1]
+    right_char = right[0]
+    if left_char.isspace() or right_char.isspace():
+        return False
+    if "\u4e00" <= left_char <= "\u9fff" or "\u4e00" <= right_char <= "\u9fff":
+        return False
+    return left_char.isalnum() and right_char.isalnum() or left_char in ".!?"
+
+
+def join_asr_text(left: str, right: str) -> str:
+    if not left:
+        return right
+    if not right:
+        return left
+    separator = " " if should_insert_asr_text_separator(left, right) else ""
+    return f"{left}{separator}{right}"
 
 
 def generate_streaming_asr_chunk(
@@ -520,15 +705,24 @@ class StreamingAsrSession:
         self.chunk_bytes = max(1, int(self.sample_rate * self.chunk_ms / 1000) * 2)
         self.text_parts: list[str] = []
         self.has_audio = False
+        self.partial_tail_text = ""
+        self.endpoint_detector = MeetingEndpointDetector(sample_rate=self.sample_rate) if runtime.realtime_endpointing else None
 
     def append_pcm16(self, chunk: bytes) -> list[StreamingAsrResult]:
         if not chunk:
             return []
 
         self.has_audio = True
-        self.pcm_buffer.extend(chunk)
-        if self.runtime.accumulate_audio:
+        if self.runtime.accumulate_audio or self.runtime.keep_full_audio_for_final:
             self.full_pcm.extend(chunk)
+
+        if self.endpoint_detector is not None:
+            return [
+                self._generate_endpoint_event(event)
+                for event in self.endpoint_detector.append_pcm16(chunk)
+            ]
+
+        self.pcm_buffer.extend(chunk)
         results: list[StreamingAsrResult] = []
 
         while len(self.pcm_buffer) >= self.chunk_bytes:
@@ -542,21 +736,83 @@ class StreamingAsrSession:
         if not self.has_audio and not self.pcm_buffer:
             return StreamingAsrResult(text="".join(self.text_parts))
 
-        final_chunk = bytes(self.full_pcm if self.runtime.accumulate_audio else self.pcm_buffer)
+        if self.endpoint_detector is not None:
+            for event in self.endpoint_detector.finalize():
+                self._generate_endpoint_event(event)
+
+        final_chunk = bytes(self.full_pcm if self.runtime.keep_full_audio_for_final else self.pcm_buffer)
         self.pcm_buffer.clear()
         return self._generate(final_chunk, True)
 
+    def _compose_text(self, tail_text: str = "") -> str:
+        stable = "".join(self.text_parts)
+        if not stable:
+            return tail_text
+        if not tail_text:
+            return stable
+        if tail_text.startswith(stable):
+            return tail_text
+        return join_asr_text(stable, tail_text)
+
+    def _append_streaming_text(self, text: str) -> str:
+        if not text:
+            return "".join(self.text_parts)
+        current = "".join(self.text_parts)
+        if current and text.startswith(current):
+            suffix = text[len(current) :]
+            if suffix:
+                self.text_parts.append((" " if should_insert_asr_text_separator(current, suffix) else "") + suffix)
+            return "".join(self.text_parts)
+        if current and current.endswith(text):
+            return current
+        self.text_parts.append((" " if should_insert_asr_text_separator(current, text) else "") + text)
+        return "".join(self.text_parts)
+
+    def _generate_endpoint_event(self, event: MeetingEndpointEvent) -> StreamingAsrResult:
+        started_at = time.monotonic()
+        text = generate_streaming_asr_chunk(self.runtime, event.pcm, {}, event.stable)
+        latency_ms = int((time.monotonic() - started_at) * 1000)
+        if event.stable:
+            self.partial_tail_text = ""
+            stable_text = self._append_streaming_text(text)
+            return StreamingAsrResult(
+                text=stable_text,
+                stable=True,
+                is_partial=False,
+                utterance_index=event.utterance_index,
+                asr_latency_ms=latency_ms,
+                endpoint_reason=event.reason,
+                asr_window_ms=event.asr_window_ms,
+            )
+
+        self.partial_tail_text = text
+        return StreamingAsrResult(
+            text=self._compose_text(text),
+            stable=False,
+            is_partial=True,
+            utterance_index=event.utterance_index,
+            asr_latency_ms=latency_ms,
+            endpoint_reason=event.reason,
+            asr_window_ms=event.asr_window_ms,
+        )
+
     def _generate(self, pcm_chunk: bytes, is_final: bool) -> StreamingAsrResult:
         source_pcm = bytes(self.full_pcm) if self.runtime.accumulate_audio else pcm_chunk
+        started_at = time.monotonic()
         text = generate_streaming_asr_chunk(self.runtime, source_pcm, self.cache, is_final)
+        latency_ms = int((time.monotonic() - started_at) * 1000)
+        if is_final and self.runtime.keep_full_audio_for_final:
+            if text:
+                self.text_parts = [text]
+            self.partial_tail_text = ""
+            return StreamingAsrResult(text="".join(self.text_parts), stable=True, is_partial=False, asr_latency_ms=latency_ms)
+
         if self.runtime.accumulate_audio:
             if text:
                 self.text_parts = [text]
-            return StreamingAsrResult(text="".join(self.text_parts))
+            return StreamingAsrResult(text="".join(self.text_parts), stable=False, is_partial=True, asr_latency_ms=latency_ms)
 
-        if text:
-            self.text_parts.append(text)
-        return StreamingAsrResult(text="".join(self.text_parts))
+        return StreamingAsrResult(text=self._append_streaming_text(text), stable=False, is_partial=True, asr_latency_ms=latency_ms)
 
 
 def is_streaming_asr_model_loaded() -> bool:

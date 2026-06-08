@@ -4,6 +4,7 @@ import test from 'node:test';
 
 import {
   checkElectronDevPrereqs,
+  checkDevServerPortOwnership,
   checkServerPythonPackages,
   getBundledHyMtLlamaServerPath,
   getBundledLlamaServerPath,
@@ -143,4 +144,45 @@ test('development backend keeps explicit Hy-MT STQ runtime override', () => {
   });
 
   assert.equal(result, 'E:\\hymt\\llama-server.exe');
+});
+
+test('development backend fails when port is owned by non-venv Python', () => {
+  const result = checkDevServerPortOwnership({
+    port: 8000,
+    pythonBin: 'D:\\CodeWorkSpace\\SpeakMore\\server\\.venv\\Scripts\\python.exe',
+    platform: 'win32',
+    spawnSync: () => ({
+      status: 0,
+      stdout: JSON.stringify({
+        ProcessId: 1234,
+        ExecutablePath: 'C:\\Python312\\python.exe',
+        CommandLine: '"C:\\Python312\\python.exe" main.py',
+      }),
+    }),
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'server_port_owned_by_unexpected_process');
+  assert.match(result.message, /非当前项目 server\/.venv/);
+  assert.match(result.message, /C:\\Python312\\python.exe/);
+});
+
+test('development backend refuses to spawn a duplicate venv backend on the same port', () => {
+  const result = checkDevServerPortOwnership({
+    port: 8000,
+    pythonBin: 'D:\\CodeWorkSpace\\SpeakMore\\server\\.venv\\Scripts\\python.exe',
+    platform: 'win32',
+    spawnSync: () => ({
+      status: 0,
+      stdout: JSON.stringify({
+        ProcessId: 5678,
+        ExecutablePath: 'D:\\CodeWorkSpace\\SpeakMore\\server\\.venv\\Scripts\\python.exe',
+        CommandLine: '"D:\\CodeWorkSpace\\SpeakMore\\server\\.venv\\Scripts\\python.exe" main.py',
+      }),
+    }),
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'server_port_already_running');
+  assert.match(result.message, /已经被当前项目 server\/.venv 后端占用/);
 });

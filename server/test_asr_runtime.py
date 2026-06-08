@@ -142,7 +142,7 @@ class AsrRuntimeTest(unittest.TestCase):
             self.assertEqual(observed["cache_dir"], temp_dir)
             self.assertTrue(callable(observed["tqdm_class"]))
 
-    def test_sensevoice_runtime_generates_from_accumulated_audio(self):
+    def test_sensevoice_runtime_generates_incremental_audio_and_final_full_audio(self):
         calls = []
 
         class FakeModel:
@@ -154,7 +154,8 @@ class AsrRuntimeTest(unittest.TestCase):
             model=FakeModel(),
             model_id=asr.SENSEVOICE_SMALL_MODEL_ID,
             chunk_ms=2,
-            accumulate_audio=True,
+            accumulate_audio=False,
+            keep_full_audio_for_final=True,
             generate_options={"language": "auto", "use_itn": True, "ban_emo_unk": False},
             postprocess="rich_transcription",
         )
@@ -165,9 +166,39 @@ class AsrRuntimeTest(unittest.TestCase):
         final = session.finalize()
 
         self.assertEqual(first[-1].text, "累计2")
-        self.assertEqual(second[-1].text, "累计4")
+        self.assertEqual(second[-1].text, first[-1].text)
         self.assertEqual(final.text, "累计4")
-        self.assertEqual([len(call["input"]) for call in calls], [2, 4, 4])
+        self.assertEqual([len(call["input"]) for call in calls], [2, 2, 4])
+
+    def test_meeting_endpoint_detector_skips_silence_and_flushes_on_pause(self):
+        detector = asr.MeetingEndpointDetector(
+            sample_rate=1000,
+            frame_ms=20,
+            preroll_ms=20,
+            min_speech_ms=40,
+            end_silence_ms=40,
+            partial_ms=60,
+            max_segment_ms=200,
+        )
+
+        def frame(level):
+            sample = int(max(-1, min(1, level)) * 32767)
+            return sample.to_bytes(2, byteorder="little", signed=True) * 20
+
+        events = []
+        events.extend(detector.append_pcm16(frame(0) * 2))
+        events.extend(detector.append_pcm16(frame(0.18) * 3))
+        events.extend(detector.append_pcm16(frame(0) * 2))
+
+        self.assertTrue(any(not event.stable and event.reason == "partial" for event in events))
+        stable_events = [event for event in events if event.stable]
+        self.assertEqual(len(stable_events), 1)
+        self.assertEqual(stable_events[0].reason, "silence")
+        self.assertEqual(stable_events[0].utterance_index, 1)
+
+    def test_join_asr_text_preserves_cjk_and_spaces_english_words(self):
+        self.assertEqual(asr.join_asr_text("hello", "world"), "hello world")
+        self.assertEqual(asr.join_asr_text("会议", "开始"), "会议开始")
 
     def test_transcribe_audio_uses_pcm16_streaming_session(self):
         fake_runtime = asr.StreamingAsrRuntime(
