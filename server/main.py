@@ -32,8 +32,20 @@ from model_manager import (
     find_cached_model_snapshot,
     get_managed_model_cache_root,
 )
+from local_translation_model import (
+    TRANSLATION_MODEL_GGUF_REPO_ID,
+    configure_translation_model_cache_dir,
+    download_translation_model,
+    get_translation_model_cache_root,
+    get_translation_model_status,
+    is_translation_model_ready,
+    load_translation_model,
+    translate_with_local_model,
+    unload_translation_model,
+)
 from refiner import (
     detect_meeting_note_scenarios,
+    format_target_language_for_prompt,
     refine_text,
     reload_refiner_runtime_config,
     resolve_translation_target_language_id,
@@ -267,7 +279,22 @@ def apply_model_cache_dir(cache_dir: str | None) -> str:
     return str(configure_model_cache_dir(cache_dir))
 
 
+def apply_translation_model_cache_dir(cache_dir: str | None) -> str:
+    return str(configure_translation_model_cache_dir(cache_dir))
+
+
 async def read_model_cache_dir_from_request(request: Request) -> str:
+    try:
+        payload = await request.json()
+    except Exception:
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    value = payload.get("cache_dir")
+    return value.strip() if isinstance(value, str) else ""
+
+
+async def read_translation_model_cache_dir_from_request(request: Request) -> str:
     try:
         payload = await request.json()
     except Exception:
@@ -419,6 +446,54 @@ def get_voice_model_status(app: FastAPI) -> dict:
 def is_voice_model_task_running(app: FastAPI) -> bool:
     task = getattr(app.state, "voice_preload_task", None)
     return bool(task and not task.done())
+
+
+def is_translation_model_task_running(app: FastAPI) -> bool:
+    task = getattr(app.state, "translation_model_task", None)
+    return bool(task and not task.done())
+
+
+async def run_translation_model_download_task(app: FastAPI) -> None:
+    del app
+    set_translation_model_task_state("downloading", f"Downloading {TRANSLATION_MODEL_GGUF_REPO_ID}", time.time())
+    try:
+        await asyncio.to_thread(download_translation_model, update_translation_model_task_progress)
+        set_translation_model_task_state("idle", "Local translation model downloaded")
+    except Exception as error:
+        set_translation_model_task_state("failed", str(error))
+
+
+async def run_translation_model_load_task(app: FastAPI) -> None:
+    del app
+    set_translation_model_task_state("loading", "Loading local translation model", time.time())
+    try:
+        await asyncio.to_thread(load_translation_model)
+    except Exception as error:
+        set_translation_model_task_state("failed", str(error))
+
+
+def set_translation_model_task_state(status: str, detail: str = "", started_at: float | None = None) -> None:
+    from local_translation_model import set_translation_model_state
+
+    set_translation_model_state(status, detail, started_at)
+
+
+def update_translation_model_task_progress(progress: dict) -> None:
+    from local_translation_model import update_translation_model_progress
+
+    update_translation_model_progress(progress)
+
+
+def start_translation_model_download_task(app: FastAPI) -> None:
+    if is_translation_model_task_running(app):
+        return
+    app.state.translation_model_task = asyncio.create_task(run_translation_model_download_task(app))
+
+
+def start_translation_model_load_task(app: FastAPI) -> None:
+    if is_translation_model_ready() or is_translation_model_task_running(app):
+        return
+    app.state.translation_model_task = asyncio.create_task(run_translation_model_load_task(app))
 
 
 async def preload_voice_service(
@@ -1158,6 +1233,88 @@ def get_realtime_translation_token_budget(value: str) -> int:
     return 220
 
 
+def get_translation_engine_preference(parameters: dict | None) -> str:
+    if not isinstance(parameters, dict):
+        return "auto"
+    preference = str(parameters.get("translation_engine_preference") or "auto").strip().lower()
+    return preference if preference in {"auto", "local", "llm"} else "auto"
+
+
+def is_local_translation_model_enabled(parameters: dict | None) -> bool:
+    if not isinstance(parameters, dict):
+        return True
+    return parameters.get("local_translation_model_enabled") is not False
+
+
+async def translate_text_with_engine(
+    raw_text: str,
+    target_language: str,
+    context: dict,
+    parameters: dict,
+    previous_sentences: list[str] | None = None,
+    previous_context_pairs: list[dict] | None = None,
+    realtime: bool = False,
+) -> dict:
+    target_language_id = resolve_translation_target_language_id(target_language) or str(target_language or "").strip()
+    target_language_name = format_target_language_for_prompt(target_language_id)
+    preference = get_translation_engine_preference(parameters)
+    local_enabled = is_local_translation_model_enabled(parameters)
+    local_status = get_translation_model_status()
+    should_try_local = local_enabled and preference != "llm"
+    started_at = time.monotonic()
+
+    if should_try_local and local_status.get("ready"):
+        try:
+            translated = await translate_with_local_model(
+                raw_text=raw_text,
+                target_language_id=target_language_id,
+                target_language_name=target_language_name,
+                previous_sentences=previous_sentences,
+                previous_context_pairs=previous_context_pairs,
+            )
+            if translated:
+                return {
+                    "text": normalize_meeting_realtime_translation_output(translated),
+                    "translation_engine": "local_hy_mt",
+                    "translation_latency_ms": int((time.monotonic() - started_at) * 1000),
+                    "local_model_status": "ready",
+                }
+        except Exception as error:
+            if preference == "local":
+                raise
+            local_status = {
+                **local_status,
+                "status": "failed",
+                "detail": str(error),
+            }
+    elif preference == "local":
+        raise RuntimeError(str(local_status.get("detail") or local_status.get("status") or "local translation model is not ready"))
+
+    llm_parameters = {
+        **parameters,
+        "output_language": target_language_id,
+    }
+    if realtime:
+        llm_parameters.update({
+            "realtime_sentence_translation": True,
+            "realtime_context_sentences": (previous_sentences or [])[-2:],
+            "realtime_context_pairs": (previous_context_pairs or [])[-2:],
+            "realtime_max_tokens": get_realtime_translation_token_budget(raw_text),
+        })
+    translated = await refine_text(
+        raw_text=raw_text,
+        mode="translation",
+        context=context,
+        parameters=llm_parameters,
+    )
+    return {
+        "text": normalize_meeting_realtime_translation_output(translated),
+        "translation_engine": "llm",
+        "translation_latency_ms": int((time.monotonic() - started_at) * 1000),
+        "local_model_status": str(local_status.get("status") or "missing"),
+    }
+
+
 async def translate_realtime_sentence(
     raw_text: str,
     target_language: str,
@@ -1165,22 +1322,16 @@ async def translate_realtime_sentence(
     parameters: dict,
     previous_sentences: list[str],
     previous_context_pairs: list[dict] | None = None,
-) -> str:
-    translation_parameters = {
-        **parameters,
-        "output_language": target_language,
-        "realtime_sentence_translation": True,
-        "realtime_context_sentences": previous_sentences[-2:],
-        "realtime_context_pairs": previous_context_pairs[-2:] if isinstance(previous_context_pairs, list) else [],
-        "realtime_max_tokens": get_realtime_translation_token_budget(raw_text),
-    }
-    translated = await refine_text(
+) -> dict:
+    return await translate_text_with_engine(
         raw_text=raw_text,
-        mode="translation",
+        target_language=target_language,
         context=context,
-        parameters=translation_parameters,
+        parameters=parameters,
+        previous_sentences=previous_sentences,
+        previous_context_pairs=previous_context_pairs if isinstance(previous_context_pairs, list) else [],
+        realtime=True,
     )
-    return normalize_meeting_realtime_translation_output(translated)
 
 
 class MeetingRealtimeTranslator:
@@ -1491,9 +1642,11 @@ class MeetingRealtimeTranslator:
     ) -> None:
         try:
             cache_key = (normalize_meeting_realtime_compare(segment), target_language)
-            translation_text = self.translation_cache.get(cache_key, "")
+            cached_translation = self.translation_cache.get(cache_key)
+            translation_text = str(cached_translation.get("text") or "") if isinstance(cached_translation, dict) else ""
+            translation_meta = cached_translation if isinstance(cached_translation, dict) else {}
             if not translation_text:
-                translation_text = await translate_realtime_sentence(
+                translation_result = await translate_realtime_sentence(
                     raw_text=segment,
                     target_language=target_language,
                     context=context,
@@ -1501,8 +1654,10 @@ class MeetingRealtimeTranslator:
                     previous_sentences=previous_sentences,
                     previous_context_pairs=previous_context_pairs,
                 )
+                translation_text = str(translation_result.get("text") or "")
+                translation_meta = translation_result
                 if translation_text:
-                    self.translation_cache[cache_key] = translation_text
+                    self.translation_cache[cache_key] = translation_meta
             if self.closed or not translation_text:
                 return
             self.translated_context_pairs.append({
@@ -1526,6 +1681,9 @@ class MeetingRealtimeTranslator:
                     "committed": True,
                     "commit_policy": "sentence_or_phrase_group",
                     "realtime_profile": parameters.get("meeting_realtime_profile") or "frontier_simulst",
+                    "translation_engine": translation_meta.get("translation_engine") or "llm",
+                    "translation_latency_ms": translation_meta.get("translation_latency_ms"),
+                    "local_model_status": translation_meta.get("local_model_status"),
                 },
             )
         except asyncio.CancelledError:
@@ -1554,6 +1712,21 @@ async def refine_voice_flow_text(
     parameters: dict | None,
 ) -> tuple[str, dict]:
     if mode != "meeting_notes":
+        if mode == "translation":
+            target_language = ""
+            if isinstance(parameters, dict):
+                target_language = str(parameters.get("output_language") or parameters.get("target_language") or "")
+            translation_result = await translate_text_with_engine(
+                raw_text=raw_text,
+                target_language=target_language or "en",
+                context=context or {},
+                parameters=parameters or {},
+            )
+            return str(translation_result.get("text") or ""), {
+                "translation_engine": translation_result.get("translation_engine"),
+                "translation_latency_ms": translation_result.get("translation_latency_ms"),
+                "local_model_status": translation_result.get("local_model_status"),
+            }
         refined = await refine_text(
             raw_text=raw_text,
             mode=mode,
@@ -1585,15 +1758,18 @@ async def refine_voice_flow_text(
         **(parameters if isinstance(parameters, dict) else {}),
         "output_language": target_language,
     }
-    translation_text = await refine_text(
+    translation_result = await translate_text_with_engine(
         raw_text=raw_text,
-        mode="translation",
-        context=context,
+        target_language=target_language,
+        context=context or {},
         parameters=translation_parameters,
     )
     return refined, {
         **meeting_extra,
-        "translation_text": translation_text,
+        "translation_text": str(translation_result.get("text") or ""),
+        "translation_engine": translation_result.get("translation_engine"),
+        "translation_latency_ms": translation_result.get("translation_latency_ms"),
+        "local_model_status": translation_result.get("local_model_status"),
         "meeting_structured": structured_result,
     }
 
@@ -2042,6 +2218,10 @@ def create_app(
             preload_task = getattr(app.state, "voice_preload_task", None)
             if preload_task:
                 preload_task.cancel()
+            translation_task = getattr(app.state, "translation_model_task", None)
+            if translation_task:
+                translation_task.cancel()
+            await asyncio.to_thread(unload_translation_model)
 
     app = FastAPI(title="Typeless Local Server", lifespan=lifespan)
     app.add_middleware(
@@ -2075,6 +2255,28 @@ def create_app(
         apply_model_cache_dir(await read_model_cache_dir_from_request(request))
         start_voice_model_task(app, preload_model, exit_scheduler, exit_on_failure=False)
         return get_voice_model_status(app)
+
+    @app.get("/translation-model/status")
+    async def translation_model_status(request: Request):
+        apply_translation_model_cache_dir(request.query_params.get("cache_dir"))
+        return get_translation_model_status()
+
+    @app.post("/translation-model/download")
+    async def translation_model_download(request: Request):
+        apply_translation_model_cache_dir(await read_translation_model_cache_dir_from_request(request))
+        start_translation_model_download_task(app)
+        return get_translation_model_status()
+
+    @app.post("/translation-model/load")
+    async def translation_model_load(request: Request):
+        apply_translation_model_cache_dir(await read_translation_model_cache_dir_from_request(request))
+        start_translation_model_load_task(app)
+        return get_translation_model_status()
+
+    @app.post("/translation-model/unload")
+    async def translation_model_unload():
+        await asyncio.to_thread(unload_translation_model)
+        return get_translation_model_status()
 
     @app.post("/config/reload")
     async def reload_config():

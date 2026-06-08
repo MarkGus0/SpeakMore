@@ -10,6 +10,7 @@ function createFakeRegisters(calls) {
     'registerDictionaryIpcHandlers',
     'registerAudioIpcHandlers',
     'registerVoiceModelIpcHandlers',
+    'registerTranslationModelIpcHandlers',
     'registerShortcutCommandIpcHandlers',
     'registerMeetingNoteIpcHandlers',
     'registerVoiceDiagnosticsIpcHandlers',
@@ -90,6 +91,10 @@ test('createMainIpcRegistry 只注册一次并按固定顺序分发依赖', () =
     ensureVoiceServer: () => undefined,
     getVoiceModelStatus: () => undefined,
     startVoiceModelDownload: () => undefined,
+    getTranslationModelStatus: () => undefined,
+    startTranslationModelDownload: () => undefined,
+    loadTranslationModel: () => undefined,
+    unloadTranslationModel: () => undefined,
     muteBackgroundSessionsForRecording: () => undefined,
     restoreMutedBackgroundSessions: () => undefined,
     isMuted: () => false,
@@ -121,7 +126,7 @@ test('createMainIpcRegistry 只注册一次并按固定顺序分发依赖', () =
   registry.registerIpcHandlers();
   registry.registerIpcHandlers();
 
-  assert.equal(calls.length, 15);
+  assert.equal(calls.length, 16);
   assert.deepEqual(calls.map(([name]) => name), [
     'registerClipboardUserIpcHandlers',
     'registerHistoryIpcHandlers',
@@ -129,6 +134,7 @@ test('createMainIpcRegistry 只注册一次并按固定顺序分发依赖', () =
     'registerDictionaryIpcHandlers',
     'registerAudioIpcHandlers',
     'registerVoiceModelIpcHandlers',
+    'registerTranslationModelIpcHandlers',
     'registerShortcutCommandIpcHandlers',
     'registerMeetingNoteIpcHandlers',
     'registerVoiceDiagnosticsIpcHandlers',
@@ -150,14 +156,15 @@ test('createMainIpcRegistry 只注册一次并按固定顺序分发依赖', () =
   assert.equal(calls[3][1].emitDictionaryChanged, emitDictionaryChanged);
   assert.equal(typeof calls[4][1].ensureVoiceServer, 'function');
   assert.equal(typeof calls[5][1].startVoiceModelDownload, 'function');
-  assert.equal(calls[10][1].dialog, dialog);
-  assert.equal(calls[11][1].randomUUID(), 'uuid-1');
-  assert.equal(calls[11][1].macosPlatformCapabilities, macosPlatformCapabilities);
-  assert.equal(calls[11][1].platform, 'win32');
-  assert.equal(calls[12][1].createMainWindow(), 'main-window');
-  assert.equal(typeof calls[12][1].handleFloatingWindowsBringToFront, 'function');
-  assert.equal(calls[13][1].macosPlatformCapabilities, macosPlatformCapabilities);
-  assert.equal(calls[13][1].processPlatform, 'win32');
-  assert.equal(calls[14][1].localStores, localCompatState.localStores);
-  assert.equal('getSystemInfo' in calls[14][1], false);
+  assert.equal(typeof calls[6][1].loadTranslationModel, 'function');
+  assert.equal(calls[11][1].dialog, dialog);
+  assert.equal(calls[12][1].randomUUID(), 'uuid-1');
+  assert.equal(calls[12][1].macosPlatformCapabilities, macosPlatformCapabilities);
+  assert.equal(calls[12][1].platform, 'win32');
+  assert.equal(calls[13][1].createMainWindow(), 'main-window');
+  assert.equal(typeof calls[13][1].handleFloatingWindowsBringToFront, 'function');
+  assert.equal(calls[14][1].macosPlatformCapabilities, macosPlatformCapabilities);
+  assert.equal(calls[14][1].processPlatform, 'win32');
+  assert.equal(calls[15][1].localStores, localCompatState.localStores);
+  assert.equal('getSystemInfo' in calls[15][1], false);
 });

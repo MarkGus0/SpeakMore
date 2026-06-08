@@ -10,6 +10,7 @@ const { registerPageIpcHandlers } = require('./page-ipc');
 const { registerPermissionIpcHandlers } = require('./permission-ipc');
 const { registerCompatIpcHandlers } = require('./compat-ipc');
 const { registerVoiceModelIpcHandlers } = require('./voice-model-ipc');
+const { registerTranslationModelIpcHandlers } = require('./translation-model-ipc');
 const { registerShortcutCommandIpcHandlers } = require('./shortcut-command-ipc');
 const { registerMeetingNoteIpcHandlers } = require('./meeting-note-ipc');
 const { registerVoiceDiagnosticsIpcHandlers } = require('./voice-diagnostics-ipc');
@@ -27,6 +28,7 @@ const defaultRegisters = {
   registerPermissionIpcHandlers,
   registerSettingsIpcHandlers,
   registerShortcutCommandIpcHandlers,
+  registerTranslationModelIpcHandlers,
   registerVoiceModelIpcHandlers,
   registerMeetingNoteIpcHandlers,
   registerVoiceDiagnosticsIpcHandlers,
@@ -60,6 +62,7 @@ function createMainIpcRegistry({
   getInteractiveCardPayload,
   getMainWindow,
   getVoiceModelStatus,
+  getTranslationModelStatus,
   handleFloatingWindowsBringToFront,
   handleFloatingBarSetAlwaysOnTopForWindows,
   handleFloatingBarUpdatePositions,
@@ -104,6 +107,9 @@ function createMainIpcRegistry({
   shell,
   spawnProcess,
   startVoiceModelDownload,
+  startTranslationModelDownload,
+  loadTranslationModel,
+  unloadTranslationModel,
   systemPreferences,
   shortcutCommandRepository,
   shortcutCommandRegistrar,
@@ -172,6 +178,14 @@ function createMainIpcRegistry({
       ensureVoiceBackendStarted,
       getVoiceModelStatus,
       startVoiceModelDownload,
+    });
+    registers.registerTranslationModelIpcHandlers({
+      ipcMain,
+      ensureVoiceBackendStarted,
+      getTranslationModelStatus,
+      startTranslationModelDownload,
+      loadTranslationModel,
+      unloadTranslationModel,
     });
     registers.registerShortcutCommandIpcHandlers({
       ipcMain,

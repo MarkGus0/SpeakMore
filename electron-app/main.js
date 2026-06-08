@@ -164,6 +164,10 @@ function getConfiguredModelCacheDir(settings = readLocalSettings()) {
   return typeof settings.modelCacheDir === 'string' ? settings.modelCacheDir.trim() : '';
 }
 
+function getConfiguredTranslationModelCacheDir(settings = readLocalSettings()) {
+  return typeof settings.translationModelCacheDir === 'string' ? settings.translationModelCacheDir.trim() : '';
+}
+
 function getConfiguredAsrDeviceMode(settings = readLocalSettings()) {
   return ['mps', 'cuda', 'cpu'].includes(settings.asrDeviceMode) ? settings.asrDeviceMode : 'default';
 }
@@ -173,12 +177,19 @@ function resolveModelCacheDirOption(options = {}) {
   return requestedCacheDir || getConfiguredModelCacheDir();
 }
 
+function resolveTranslationModelCacheDirOption(options = {}) {
+  const requestedCacheDir = typeof options.cacheDir === 'string' ? options.cacheDir.trim() : '';
+  return requestedCacheDir || getConfiguredTranslationModelCacheDir();
+}
+
 const voiceBackendService = createVoiceBackendService({
   isPackaged: app.isPackaged,
   backendExecutablePath: () => appPaths.backendExecutablePath(),
   ffmpegBinDir: () => path.dirname(appPaths.ffmpegExecutablePath()),
   getModelCacheDir: () => getConfiguredModelCacheDir(),
+  getTranslationModelCacheDir: () => getConfiguredTranslationModelCacheDir(),
   getAsrDeviceMode: () => getConfiguredAsrDeviceMode(),
+  llamaServerPath: () => appPaths.llamaServerPath(),
   spawnProcess: spawn,
   probeReady: () => voiceBackendClient.checkVoiceServerReady(),
   probeModelStatus: () => voiceBackendClient.getVoiceModelStatus({ cacheDir: getConfiguredModelCacheDir() }),
@@ -489,6 +500,22 @@ async function startVoiceModelDownload(options = {}) {
   return voiceBackendClient.startVoiceModelDownload({ cacheDir: resolveModelCacheDirOption(options) });
 }
 
+async function getTranslationModelStatus(options = {}) {
+  return voiceBackendClient.getTranslationModelStatus({ cacheDir: resolveTranslationModelCacheDirOption(options) });
+}
+
+async function startTranslationModelDownload(options = {}) {
+  return voiceBackendClient.startTranslationModelDownload({ cacheDir: resolveTranslationModelCacheDirOption(options) });
+}
+
+async function loadTranslationModel(options = {}) {
+  return voiceBackendClient.loadTranslationModel({ cacheDir: resolveTranslationModelCacheDirOption(options) });
+}
+
+async function unloadTranslationModel(options = {}) {
+  return voiceBackendClient.unloadTranslationModel({ cacheDir: resolveTranslationModelCacheDirOption(options) });
+}
+
 async function reloadVoiceServerConfig() {
   return voiceBackendClient.reloadVoiceServerConfig();
 }
@@ -615,6 +642,7 @@ const mainIpcRegistry = createMainIpcRegistry({
   getInteractiveCardPayload: () => pendingInteractiveCardPayload,
   getMainWindow,
   getVoiceModelStatus,
+  getTranslationModelStatus,
   handleFloatingWindowsBringToFront: () => windowManager.handleFloatingWindowsBringToFront(),
   handleFloatingBarSetAlwaysOnTopForWindows: () => windowManager.handleFloatingBarSetAlwaysOnTopForWindows(),
   handleFloatingBarUpdatePositions: (payload) => windowManager.handleFloatingBarUpdatePositions(payload),
@@ -663,6 +691,9 @@ const mainIpcRegistry = createMainIpcRegistry({
   shell,
   spawnProcess: spawn,
   startVoiceModelDownload,
+  startTranslationModelDownload,
+  loadTranslationModel,
+  unloadTranslationModel,
   meetingNoteRepository,
   voiceDiagnosticsRepository,
   textObservationManager,

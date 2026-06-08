@@ -58,6 +58,7 @@ function createAppPaths({
     macosPlatformHelperPath: () => unpackedAppPath('macos-platform-helper.m'),
     audioSessionControlPath: () => unpackedAppPath('audio-session-control.ps1'),
     backendExecutablePath: () => packagedResourcePath('backend', executableName('speakmore-backend')),
+    llamaServerPath: () => packagedResourcePath('llama', executableName('llama-server')),
     ffmpegExecutablePath: () => packagedResourcePath('ffmpeg', 'bin', executableName('ffmpeg')),
     textObserverExecutablePath: () => packagedResourcePath('helper', executableName('WindowsTextObserver')),
     dotnetRootPath: () => packagedResourcePath('dotnet'),

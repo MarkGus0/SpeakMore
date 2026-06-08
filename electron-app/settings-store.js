@@ -11,9 +11,11 @@ const DEFAULT_TRANSLATION_TARGET_LANGUAGE = TRANSLATION_TARGET_LANGUAGES.some((l
 const DEFAULT_ASR_DEVICE_MODE = 'default';
 const DEFAULT_MEETING_LIVE_AUDIO_SOURCE = 'microphone';
 const DEFAULT_MEETING_LIVE_TARGET_LANGUAGE = 'off';
+const DEFAULT_TRANSLATION_ENGINE_PREFERENCE = 'auto';
 const SUPPORTED_INTERFACE_LANGUAGES = new Set(INTERFACE_LANGUAGES.map((language) => language.id));
 const SUPPORTED_ASR_DEVICE_MODES = new Set(['default', 'mps', 'cuda', 'cpu']);
 const SUPPORTED_MEETING_AUDIO_SOURCES = new Set(['microphone', 'system', 'microphone_system']);
+const SUPPORTED_TRANSLATION_ENGINE_PREFERENCES = new Set(['auto', 'local', 'llm']);
 const SUPPORTED_TRANSLATION_TARGET_LANGUAGES = new Set(
   TRANSLATION_TARGET_LANGUAGES.map((language) => language.id),
 );
@@ -44,6 +46,9 @@ function createDefaultLocalSettings() {
     meetingDetectionEnabled: true,
     meetingLiveAudioSource: DEFAULT_MEETING_LIVE_AUDIO_SOURCE,
     meetingLiveTargetLanguage: DEFAULT_MEETING_LIVE_TARGET_LANGUAGE,
+    translationEnginePreference: DEFAULT_TRANSLATION_ENGINE_PREFERENCE,
+    localTranslationModelEnabled: true,
+    translationModelCacheDir: '',
     showFloatingBar: true,
     hideMainWindowOnClose: true,
     llm: createDefaultLlmSettings(),
@@ -79,6 +84,10 @@ function normalizeMeetingLiveAudioSource(value) {
 
 function normalizeMeetingLiveTargetLanguage(value) {
   return SUPPORTED_MEETING_TRANSLATION_TARGETS.has(value) ? value : DEFAULT_MEETING_LIVE_TARGET_LANGUAGE;
+}
+
+function normalizeTranslationEnginePreference(value) {
+  return SUPPORTED_TRANSLATION_ENGINE_PREFERENCES.has(value) ? value : DEFAULT_TRANSLATION_ENGINE_PREFERENCE;
 }
 
 function normalizeLlmProvider(candidate, fallback) {
@@ -155,6 +164,9 @@ function normalizeLocalSettings(value = {}) {
     meetingDetectionEnabled: normalizeBoolean(settings.meetingDetectionEnabled, true),
     meetingLiveAudioSource: normalizeMeetingLiveAudioSource(settings.meetingLiveAudioSource),
     meetingLiveTargetLanguage: normalizeMeetingLiveTargetLanguage(settings.meetingLiveTargetLanguage),
+    translationEnginePreference: normalizeTranslationEnginePreference(settings.translationEnginePreference),
+    localTranslationModelEnabled: normalizeBoolean(settings.localTranslationModelEnabled, true),
+    translationModelCacheDir: normalizeOptionalPath(settings.translationModelCacheDir),
     showFloatingBar: normalizeBoolean(settings.showFloatingBar, true),
     hideMainWindowOnClose: normalizeBoolean(settings.hideMainWindowOnClose, true),
     modelCacheDir: normalizeOptionalPath(settings.modelCacheDir),
@@ -220,11 +232,13 @@ module.exports = {
   INTERFACE_LANGUAGES,
   DEFAULT_MEETING_LIVE_AUDIO_SOURCE,
   DEFAULT_MEETING_LIVE_TARGET_LANGUAGE,
+  DEFAULT_TRANSLATION_ENGINE_PREFERENCE,
   DEFAULT_TRANSLATION_TARGET_LANGUAGE,
   SUPPORTED_ASR_DEVICE_MODES,
   SUPPORTED_INTERFACE_LANGUAGES,
   SUPPORTED_MEETING_AUDIO_SOURCES,
   SUPPORTED_MEETING_TRANSLATION_TARGETS,
+  SUPPORTED_TRANSLATION_ENGINE_PREFERENCES,
   SUPPORTED_TRANSLATION_TARGET_LANGUAGES,
   createDefaultLlmSettings,
   createDefaultLocalSettings,
@@ -233,6 +247,7 @@ module.exports = {
   normalizeAsrDeviceMode,
   normalizeMeetingLiveAudioSource,
   normalizeMeetingLiveTargetLanguage,
+  normalizeTranslationEnginePreference,
   normalizeLlmProvider,
   normalizeLlmSettings,
   normalizeLlmRequestConfig,

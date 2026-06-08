@@ -7,6 +7,7 @@ import LanguageSettingsSection from './settings/LanguageSettingsSection'
 import LlmSettingsSection from './settings/LlmSettingsSection'
 import MacOSPermissionSection from './settings/MacOSPermissionSection'
 import ShortcutSettingsSection from './settings/ShortcutSettingsSection'
+import TranslationModelSettingsSection from './settings/TranslationModelSettingsSection'
 import VoiceDiagnosticsSettingsSection from './settings/VoiceDiagnosticsSettingsSection'
 import VoiceModelSettingsSection from './settings/VoiceModelSettingsSection'
 import { useSettingsPageState } from './settings/useSettingsPageState'
@@ -81,6 +82,9 @@ export default function Settings() {
         </Box>
         <Box sx={settingsSectionSx}>
           <VoiceModelSettingsSection settings={settings} updateSettings={updateSettings} />
+        </Box>
+        <Box sx={settingsSectionSx}>
+          <TranslationModelSettingsSection settings={settings} updateSettings={updateSettings} />
         </Box>
         <Box sx={settingsSectionSx}>
           <AsrRuntimeSettingsSection settings={settings} updateSettings={updateSettings} />

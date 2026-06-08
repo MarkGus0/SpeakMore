@@ -16,6 +16,7 @@ export type LlmAuthType = 'bearer' | 'anthropic'
 export type AsrDeviceMode = 'default' | 'mps' | 'cuda' | 'cpu'
 export type MeetingLiveAudioSource = 'microphone' | 'system' | 'microphone_system'
 export type MeetingLiveTargetLanguage = 'off' | TranslationTargetLanguage
+export type TranslationEnginePreference = 'auto' | 'local' | 'llm'
 
 export type TranslationTargetLanguageConfig = {
   id: string
@@ -45,6 +46,7 @@ const interfaceLanguageIds = new Set<InterfaceLanguage>(INTERFACE_LANGUAGES.map(
 const asrDeviceModes = new Set<AsrDeviceMode>(['default', 'mps', 'cuda', 'cpu'])
 const meetingLiveAudioSources = new Set<MeetingLiveAudioSource>(['microphone', 'system', 'microphone_system'])
 const meetingLiveTargetLanguageIds = new Set<MeetingLiveTargetLanguage>(['off', ...MEETING_LIVE_TARGET_LANGUAGES.map((language) => language.id)])
+const translationEnginePreferences = new Set<TranslationEnginePreference>(['auto', 'local', 'llm'])
 
 export type LlmProvider = {
   id: string
@@ -107,6 +109,9 @@ export type LocalSettings = {
   meetingDetectionEnabled: boolean
   meetingLiveAudioSource: MeetingLiveAudioSource
   meetingLiveTargetLanguage: MeetingLiveTargetLanguage
+  translationEnginePreference: TranslationEnginePreference
+  localTranslationModelEnabled: boolean
+  translationModelCacheDir: string
   showFloatingBar: boolean
   hideMainWindowOnClose: boolean
   modelCacheDir: string
@@ -126,6 +131,9 @@ export const defaultSettings: LocalSettings = {
   meetingDetectionEnabled: true,
   meetingLiveAudioSource: 'microphone',
   meetingLiveTargetLanguage: 'off',
+  translationEnginePreference: 'auto',
+  localTranslationModelEnabled: true,
+  translationModelCacheDir: '',
   showFloatingBar: true,
   hideMainWindowOnClose: true,
   modelCacheDir: '',
@@ -208,6 +216,12 @@ function normalizeMeetingLiveTargetLanguage(value: unknown): MeetingLiveTargetLa
     : 'off'
 }
 
+function normalizeTranslationEnginePreference(value: unknown): TranslationEnginePreference {
+  return typeof value === 'string' && translationEnginePreferences.has(value as TranslationEnginePreference)
+    ? value as TranslationEnginePreference
+    : 'auto'
+}
+
 export function normalizeLlmSettings(value: unknown): LlmSettings {
   const settings = isRecord(value) ? value : {}
   const providedProviders = Array.isArray(settings.providers) ? settings.providers : []
@@ -244,6 +258,9 @@ export function normalizeSettings(settings?: Partial<LocalSettings> | null): Loc
     meetingDetectionEnabled: normalizeBoolean(settings?.meetingDetectionEnabled, true),
     meetingLiveAudioSource: normalizeMeetingLiveAudioSource(settings?.meetingLiveAudioSource),
     meetingLiveTargetLanguage: normalizeMeetingLiveTargetLanguage(settings?.meetingLiveTargetLanguage),
+    translationEnginePreference: normalizeTranslationEnginePreference(settings?.translationEnginePreference),
+    localTranslationModelEnabled: normalizeBoolean(settings?.localTranslationModelEnabled, true),
+    translationModelCacheDir: normalizeOptionalPath(settings?.translationModelCacheDir),
     showFloatingBar: normalizeBoolean(settings?.showFloatingBar, true),
     hideMainWindowOnClose: normalizeBoolean(settings?.hideMainWindowOnClose, true),
     modelCacheDir: normalizeOptionalPath(settings?.modelCacheDir),

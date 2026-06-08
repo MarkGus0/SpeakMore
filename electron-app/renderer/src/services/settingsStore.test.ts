@@ -75,6 +75,9 @@ test('loadSettings 会补齐默认大模型 provider 配置', async () => {
   assert.equal(settings.meetingDetectionEnabled, true)
   assert.equal(settings.meetingLiveAudioSource, 'microphone')
   assert.equal(settings.meetingLiveTargetLanguage, 'off')
+  assert.equal(settings.translationEnginePreference, 'auto')
+  assert.equal(settings.localTranslationModelEnabled, true)
+  assert.equal(settings.translationModelCacheDir, '')
   assert.equal(settings.showFloatingBar, true)
   assert.equal(settings.hideMainWindowOnClose, true)
 })
@@ -88,6 +91,9 @@ test('loadSettings 会保留音频和应用行为开关', async () => {
     meetingDetectionEnabled: false,
     meetingLiveAudioSource: 'microphone_system',
     meetingLiveTargetLanguage: 'ja',
+    translationEnginePreference: 'local',
+    localTranslationModelEnabled: false,
+    translationModelCacheDir: '  D:\\Models\\HyMT  ',
     showFloatingBar: false,
     hideMainWindowOnClose: false,
   })
@@ -102,6 +108,9 @@ test('loadSettings 会保留音频和应用行为开关', async () => {
   assert.equal(settings.meetingDetectionEnabled, false)
   assert.equal(settings.meetingLiveAudioSource, 'microphone_system')
   assert.equal(settings.meetingLiveTargetLanguage, 'ja')
+  assert.equal(settings.translationEnginePreference, 'local')
+  assert.equal(settings.localTranslationModelEnabled, false)
+  assert.equal(settings.translationModelCacheDir, 'D:\\Models\\HyMT')
   assert.equal(settings.showFloatingBar, false)
   assert.equal(settings.hideMainWindowOnClose, false)
 })
@@ -301,6 +310,21 @@ test('loadSettings 遇到未知翻译目标语言会回退默认英文', async (
   const settings = await settingsStore.loadSettings()
 
   assert.equal(settings.translationTargetLanguage, 'en')
+})
+
+test('loadSettings normalizes local translation engine settings', async () => {
+  installSettingsResponse({
+    translationEnginePreference: 'bad',
+    localTranslationModelEnabled: 0,
+    translationModelCacheDir: '  E:\\HyMT  ',
+  })
+  const settingsStore = await loadSettingsStore('local-translation-settings')
+
+  const settings = await settingsStore.loadSettings()
+
+  assert.equal(settings.translationEnginePreference, 'auto')
+  assert.equal(settings.localTranslationModelEnabled, false)
+  assert.equal(settings.translationModelCacheDir, 'E:\\HyMT')
 })
 
 test('loadSettings 会保留截图中的界面语言', async () => {

@@ -33,7 +33,34 @@ const pcm16AudioFormat = {
 function withPcm16AudioFormat(parameters: Record<string, unknown>) {
   return {
     ...parameters,
+    translation_engine_preference: 'auto',
+    local_translation_model_enabled: true,
     audio_format: pcm16AudioFormat,
+  }
+}
+
+function createSettingsWithEmptyApiKey(overrides: Record<string, unknown> = {}) {
+  return {
+    selectedAudioDeviceId: 'default',
+    translationTargetLanguage: 'en',
+    translationEnginePreference: 'auto',
+    localTranslationModelEnabled: true,
+    translationModelCacheDir: '',
+    launchAtSystemStartup: false,
+    llm: {
+      providerId: 'deepseek',
+      apiKeys: { deepseek: '' },
+      models: { deepseek: testLlmConfig.model },
+      providers: [{
+        id: 'deepseek',
+        label: 'DeepSeek',
+        baseUrl: testLlmConfig.base_url,
+        defaultModel: testLlmConfig.model,
+        allowBaseUrlEdit: false,
+        authType: 'bearer',
+      }],
+    },
+    ...overrides,
   }
 }
 
@@ -59,6 +86,7 @@ function createTestEnvironment(options: {
   pasteShouldFail?: boolean
   pasteResult?: unknown
   translationTargetLanguage?: string
+  translationModelStatus?: unknown
   audioContextSampleRate?: number
 } = {}) {
   const originalWindow = globalThis.window
@@ -292,6 +320,11 @@ function createTestEnvironment(options: {
         const defaultSettings = {
           selectedAudioDeviceId: 'default',
           translationTargetLanguage: options.translationTargetLanguage ?? 'en',
+          translationEnginePreference: 'auto',
+          localTranslationModelEnabled: true,
+          translationModelCacheDir: '',
+          meetingLiveAudioSource: 'microphone',
+          meetingLiveTargetLanguage: 'off',
           showFloatingBar: true,
           launchAtSystemStartup: false,
           llm: {
@@ -309,6 +342,15 @@ function createTestEnvironment(options: {
           },
         }
         return (options.settingsPromise ?? Promise.resolve(defaultSettings)) as never
+      }
+      if (channel === 'translation-model:get-status') {
+        return (options.translationModelStatus ?? {
+          success: true,
+          status: 'idle',
+          detail: '',
+          ready: false,
+          cached: false,
+        }) as never
       }
       if (channel === 'dictionary:prompt-terms') {
         return (options.dictionaryTermsPromise ?? Promise.resolve([])) as never
@@ -2243,6 +2285,77 @@ test('meeting_notes 完成后使用最终 payload 翻译并清空实时片段', 
     assert.equal(diagnosticText.includes('clean final translation'), false)
     assert.match(diagnosticText, /first_translation/)
     assert.match(diagnosticText, /end_audio_sent/)
+  } finally {
+    recorder?.disposeRecorder()
+    env.restore()
+  }
+})
+
+test('local translation model ready lets Translate start without an LLM API Key', async () => {
+  const env = createTestEnvironment({
+    settingsPromise: Promise.resolve(createSettingsWithEmptyApiKey()),
+    translationModelStatus: {
+      success: true,
+      status: 'ready',
+      ready: true,
+      cached: true,
+      detail: '',
+    },
+  })
+  let recorder: Awaited<ReturnType<typeof loadRecorderModule>> | null = null
+
+  try {
+    recorder = await loadRecorderModule('local-translation-without-api-key')
+    await recorder.startRecording('Translate')
+
+    const startAudioMessage = env.sentPayloads
+      .filter((payload): payload is string => typeof payload === 'string')
+      .map((payload) => JSON.parse(payload))
+      .find((message) => message.type === 'start_audio')
+
+    assert.equal(recorder.getVoiceSession().status, 'recording')
+    assert.equal(env.getUserMediaCalls() > 0, true)
+    assert.equal(startAudioMessage.mode, 'translation')
+    assert.equal(startAudioMessage.parameters.output_language, 'en')
+  } finally {
+    recorder?.disposeRecorder()
+    env.restore()
+  }
+})
+
+test('local translation model ready lets meeting live translation start without an LLM API Key', async () => {
+  const env = createTestEnvironment({
+    settingsPromise: Promise.resolve(createSettingsWithEmptyApiKey()),
+    translationModelStatus: {
+      success: true,
+      status: 'ready',
+      ready: true,
+      cached: true,
+      detail: '',
+    },
+  })
+  let recorder: Awaited<ReturnType<typeof loadRecorderModule>> | null = null
+
+  try {
+    recorder = await loadRecorderModule('local-meeting-live-translation-without-api-key')
+    await recorder.toggleMeetingNotesRecording({
+      audioSource: 'microphone',
+      targetLanguage: 'en',
+      showOriginal: true,
+      showTranslation: true,
+      module: 'live_translation',
+    })
+
+    const startAudioMessage = env.sentPayloads
+      .filter((payload): payload is string => typeof payload === 'string')
+      .map((payload) => JSON.parse(payload))
+      .find((message) => message.type === 'start_audio')
+
+    assert.equal(recorder.getVoiceSession().status, 'recording')
+    assert.equal(env.getUserMediaCalls() > 0, true)
+    assert.equal(startAudioMessage.mode, 'meeting_notes')
+    assert.equal(startAudioMessage.parameters.meeting_module, 'live_translation')
+    assert.equal(startAudioMessage.parameters.meeting_translation_target_language, 'en')
   } finally {
     recorder?.disposeRecorder()
     env.restore()

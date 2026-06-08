@@ -8,10 +8,13 @@ import { loadPromptDictionaryTerms, type PromptDictionaryTerm } from '../diction
 import { ipcClient } from '../ipc'
 import {
   getCurrentLlmConfig,
+  loadSettings,
   getTranslationTargetLanguage,
   type LlmRequestConfig,
+  type LocalSettings,
   type TranslationTargetLanguage,
 } from '../settingsStore'
+import { getTranslationModelStatus, type TranslationModelStatus } from '../translationModelStore'
 import type { VoiceTask } from './voiceTaskResolver'
 import { createVoiceError, type VoiceMode } from './voiceTypes'
 
@@ -37,7 +40,11 @@ type StartAudioParameterInputs = {
   dictionaryTerms: PromptDictionaryTerm[]
   llm: LlmRequestConfig
   translationTargetLanguage: TranslationTargetLanguage | null
+  settings: LocalSettings
+  translationModelStatus: TranslationModelStatus | null
 }
+
+type StartAudioGateInputs = Omit<StartAudioParameterInputs, 'dictionaryTerms'>
 
 type StartAudioCustomCommand = {
   id: string
@@ -49,6 +56,29 @@ function assertLlmConfigReady(llm: LlmRequestConfig) {
   if (!llm.api_key.trim()) {
     throw createVoiceError('llm_api_key_missing')
   }
+}
+
+function canUseLocalTranslationForTask(task: VoiceTask, inputs: StartAudioParameterInputs) {
+  if (inputs.settings.localTranslationModelEnabled === false) return false
+  if (inputs.settings.translationEnginePreference === 'llm') return false
+  if (!inputs.translationModelStatus?.ready) return false
+
+  if (task.mode === 'Translate') {
+    return Boolean(inputs.translationTargetLanguage)
+  }
+
+  if (task.mode === 'MeetingNotes') {
+    return task.meetingOptions?.module === 'live_translation'
+      && Boolean(task.meetingOptions?.targetLanguage)
+      && task.meetingOptions.targetLanguage !== 'off'
+  }
+
+  return false
+}
+
+function assertVoiceTaskCanStart(task: VoiceTask, inputs: StartAudioParameterInputs) {
+  if (canUseLocalTranslationForTask(task, inputs)) return
+  assertLlmConfigReady(inputs.llm)
 }
 
 function summarizeSelectedText(text: string) {
@@ -107,15 +137,18 @@ export async function prepareRecordingStart(
 
   try {
     const llm = await getCurrentLlmConfig()
-    assertLlmConfigReady(llm)
+    const gateInputs = await prepareStartAudioGateInputs(task.mode, llm)
+    assertVoiceTaskCanStart(task, { ...gateInputs, dictionaryTerms: [] })
 
     // 启动前资源可以并行准备，但失败时必须把已经打开的麦克风和连接收掉。
     const readyPromise = measurePromise(diagnosticTimings, 'readyMs', ensureVoiceServerReady())
     const transportPromise = Promise.resolve<RecordingTransport>('pcm16')
     const socketPromise = measurePromise(diagnosticTimings, 'socketMs', socketControls.ensureOpenWebSocket())
-    const parameterInputsPromise = prepareStartAudioParameterInputs(task.mode, llm).finally(() => {
-      diagnosticTimings.parametersMs = Math.max(0, Math.round(nowMs() - parametersStartedAt))
-    })
+    const parameterInputsPromise = loadPromptDictionaryTerms()
+      .then((dictionaryTerms) => ({ ...gateInputs, dictionaryTerms }))
+      .finally(() => {
+        diagnosticTimings.parametersMs = Math.max(0, Math.round(nowMs() - parametersStartedAt))
+      })
     const streamPromise = measurePromise(diagnosticTimings, 'microphoneMs', (task.mode === 'MeetingNotes'
       ? getMeetingAudioStream(task.meetingOptions?.audioSource || 'microphone')
       : getAudioStream()
@@ -164,17 +197,31 @@ export async function prepareStartAudioParameterInputs(
   mode: VoiceMode,
   currentLlm?: LlmRequestConfig,
 ): Promise<StartAudioParameterInputs> {
+  const [gateInputs, dictionaryTerms] = await Promise.all([
+    prepareStartAudioGateInputs(mode, currentLlm),
+    loadPromptDictionaryTerms(),
+  ])
+
+  return { ...gateInputs, dictionaryTerms }
+}
+
+async function prepareStartAudioGateInputs(
+  mode: VoiceMode,
+  currentLlm?: LlmRequestConfig,
+): Promise<StartAudioGateInputs> {
   const translationTargetLanguagePromise = mode === 'Translate'
     ? getTranslationTargetLanguage()
     : Promise.resolve(null)
-  const [dictionaryTerms, llm, translationTargetLanguage] = await Promise.all([
-    loadPromptDictionaryTerms(),
+  const [llm, translationTargetLanguage, settings] = await Promise.all([
     currentLlm ? Promise.resolve(currentLlm) : getCurrentLlmConfig(),
     translationTargetLanguagePromise,
+    loadSettings(),
   ])
-  assertLlmConfigReady(llm)
+  const translationModelStatus = mode === 'Translate' || mode === 'MeetingNotes'
+    ? await getTranslationModelStatus(settings.translationModelCacheDir)
+    : null
 
-  return { dictionaryTerms, llm, translationTargetLanguage }
+  return { llm, translationTargetLanguage, settings, translationModelStatus }
 }
 
 export function getStartAudioParameters(
@@ -190,6 +237,8 @@ export function getStartAudioParameters(
   const dictionaryParameters = dictionaryTerms.length ? { dictionary_terms: dictionaryTerms } : {}
   const baseParameters = {
     llm,
+    translation_engine_preference: inputs.settings.translationEnginePreference,
+    local_translation_model_enabled: inputs.settings.localTranslationModelEnabled,
     ...dictionaryParameters,
     audio_format: { type: 'pcm_s16le', sample_rate: 16000, channels: 1 },
   }

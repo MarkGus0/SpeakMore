@@ -33,7 +33,9 @@ function createVoiceBackendService({
   backendExecutablePath = () => '',
   ffmpegBinDir = () => '',
   getModelCacheDir = () => '',
+  getTranslationModelCacheDir = () => '',
   getAsrDeviceMode = () => 'default',
+  llamaServerPath = () => '',
   spawnProcess,
   probeReady,
   probeModelStatus,
@@ -60,6 +62,14 @@ function createVoiceBackendService({
     };
     const modelCacheDir = typeof getModelCacheDir === 'function' ? String(getModelCacheDir() || '').trim() : '';
     if (modelCacheDir) env.TYPELESS_MODEL_CACHE_DIR = modelCacheDir;
+    const translationModelCacheDir = typeof getTranslationModelCacheDir === 'function'
+      ? String(getTranslationModelCacheDir() || '').trim()
+      : '';
+    if (translationModelCacheDir) env.SPEAKMORE_TRANSLATION_MODEL_CACHE_DIR = translationModelCacheDir;
+    const resolvedLlamaServerPath = typeof llamaServerPath === 'function' ? String(llamaServerPath() || '').trim() : '';
+    if (resolvedLlamaServerPath && !env.SPEAKMORE_LLAMA_SERVER_PATH) {
+      env.SPEAKMORE_LLAMA_SERVER_PATH = resolvedLlamaServerPath;
+    }
     const asrDeviceMode = normalizeAsrDeviceMode(
       typeof getAsrDeviceMode === 'function' ? String(getAsrDeviceMode() || '').trim() : '',
     );

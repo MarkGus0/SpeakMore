@@ -56,6 +56,7 @@ const readMainProcessSurface = () => readProjectFiles([
   '../voice-backend-urls.js',
   '../voice-backend-client.js',
   '../voice-model-ipc.js',
+  '../translation-model-ipc.js',
   '../voice-config-client.js',
   '../voice-flow-form-data.js',
   '../window-manager.js',
@@ -385,6 +386,8 @@ test('旧模型管理能力已删除，语音模型初始化并入设置页', as
   const appShell = await readProjectFile('src/components/AppShell.tsx');
   const settingsPage = await readProjectFile('src/pages/Settings.tsx');
   const voiceModelSection = await readProjectFile('src/pages/settings/VoiceModelSettingsSection.tsx');
+  const translationModelSection = await readProjectFile('src/pages/settings/TranslationModelSettingsSection.tsx');
+  const translationModelStore = await readProjectFile('src/services/translationModelStore.ts');
 
   await assert.rejects(
     () => readProjectFile('src/pages/Models.tsx'),
@@ -418,9 +421,18 @@ test('旧模型管理能力已删除，语音模型初始化并入设置页', as
   assert.doesNotMatch(appShell, /<Setup|pages\/Setup/);
   assert.match(appShell, /useState<Page>\(['"]home['"]\)/);
   assert.match(settingsPage, /VoiceModelSettingsSection/);
+  assert.match(settingsPage, /TranslationModelSettingsSection/);
   assert.match(voiceModelSection, /getVoiceModelStatus/);
   assert.match(voiceModelSection, /startVoiceModelDownload/);
   assert.match(voiceModelSection, /chooseModelCacheDirectory/);
+  assert.match(translationModelSection, /getTranslationModelStatus/);
+  assert.match(translationModelSection, /startTranslationModelDownload/);
+  assert.match(translationModelSection, /loadTranslationModel/);
+  assert.match(translationModelSection, /unloadTranslationModel/);
+  assert.match(translationModelStore, /translation-model:get-status/);
+  assert.match(translationModelStore, /translation-model:start-download/);
+  assert.match(translationModelStore, /translation-model:load/);
+  assert.match(translationModelStore, /translation-model:unload/);
 });
 
 test('项目根启动脚本指向本地 Electron 壳而不是逆向资料目录', async () => {
@@ -1215,6 +1227,8 @@ test('P1 设置页与设置 store 统一走主进程 JSON 数据源', async () =
   const applicationBehaviorSection = await readProjectFile('src/pages/settings/ApplicationBehaviorSettingsSection.tsx');
   const asrRuntimeSection = await readProjectFile('src/pages/settings/AsrRuntimeSettingsSection.tsx');
   const voiceModelSection = await readProjectFile('src/pages/settings/VoiceModelSettingsSection.tsx');
+  const translationModelSection = await readProjectFile('src/pages/settings/TranslationModelSettingsSection.tsx');
+  const translationModelStore = await readProjectFile('src/services/translationModelStore.ts');
   const voiceDiagnosticsSection = await readProjectFile('src/pages/settings/VoiceDiagnosticsSettingsSection.tsx');
   const voiceDiagnosticsStore = await readProjectFile('src/services/voiceDiagnosticsStore.ts');
   const languageSection = await readProjectFile('src/pages/settings/LanguageSettingsSection.tsx');
@@ -1227,6 +1241,7 @@ test('P1 设置页与设置 store 统一走主进程 JSON 数据源', async () =
     applicationBehaviorSection,
     asrRuntimeSection,
     voiceModelSection,
+    translationModelSection,
     voiceDiagnosticsSection,
     languageSection,
     llmSection,
@@ -1295,6 +1310,7 @@ test('P1 设置页与设置 store 统一走主进程 JSON 数据源', async () =
   assert.match(settingsPage, /ShortcutSettingsSection/);
   assert.match(settingsPage, /AudioSettingsSection/);
   assert.match(settingsPage, /VoiceModelSettingsSection/);
+  assert.match(settingsPage, /TranslationModelSettingsSection/);
   assert.match(settingsPage, /ApplicationBehaviorSettingsSection/);
   assert.match(settingsPage, /VoiceDiagnosticsSettingsSection/);
   assert.match(settingsPage, /AsrRuntimeSettingsSection/);
@@ -1311,13 +1327,27 @@ test('P1 设置页与设置 store 统一走主进程 JSON 数据源', async () =
   assert.match(audioSection, /muteBackgroundAudioDuringRecording/);
   assert.match(audioSection, /showActiveMicrophoneHint/);
   assert.match(audioSection, /remindOnNewAudioDevice/);
-  assert.match(settingsPage, /<AudioSettingsSection[\s\S]*<VoiceModelSettingsSection[\s\S]*<AsrRuntimeSettingsSection/);
+  assert.match(settingsPage, /<AudioSettingsSection[\s\S]*<VoiceModelSettingsSection[\s\S]*<TranslationModelSettingsSection[\s\S]*<AsrRuntimeSettingsSection/);
   assert.match(voiceModelSection, /settings\.modelCacheDir/);
   assert.match(voiceModelSection, /getVoiceModelStatus/);
   assert.match(voiceModelSection, /startVoiceModelDownload/);
   assert.match(voiceModelSection, /chooseModelCacheDirectory/);
   assert.match(voiceModelSection, /settings\.voiceModel\.title/);
   assert.match(voiceModelSection, /settings\.voiceModel\.modelFilesProgress/);
+  assert.match(settingsStore, /translationModelCacheDir:\s*string/);
+  assert.match(settingsStore, /translationEnginePreference/);
+  assert.match(settingsStore, /localTranslationModelEnabled/);
+  assert.match(translationModelSection, /getTranslationModelStatus/);
+  assert.match(translationModelSection, /startTranslationModelDownload/);
+  assert.match(translationModelSection, /loadTranslationModel/);
+  assert.match(translationModelSection, /unloadTranslationModel/);
+  assert.match(translationModelSection, /settings\.translationModel\.title/);
+  assert.match(translationModelSection, /translationEnginePreference/);
+  assert.match(translationModelSection, /localTranslationModelEnabled/);
+  assert.match(translationModelStore, /translation-model:get-status/);
+  assert.match(translationModelStore, /translation-model:start-download/);
+  assert.match(translationModelStore, /translation-model:load/);
+  assert.match(translationModelStore, /translation-model:unload/);
   assert.match(applicationBehaviorSection, /launchAtSystemStartup/);
   assert.match(applicationBehaviorSection, /meetingDetectionEnabled/);
   assert.match(applicationBehaviorSection, /showFloatingBar/);

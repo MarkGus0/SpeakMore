@@ -20,6 +20,9 @@ function createDefaultLocalStores({
       selectedMicrophoneDevice: null,
       preferredLanguage: defaultLanguage,
       translationTargetLanguage: defaultTranslationTargetLanguage,
+      translationEnginePreference: 'auto',
+      localTranslationModelEnabled: true,
+      translationModelCacheDir: '',
       selectedLanguages: [],
       autoSelectLanguages: false,
       launchAtSystemStartup: false,
@@ -87,6 +90,9 @@ function createLocalCompatState({
     localStores['app-settings'].showFloatingBar = settings.showFloatingBar !== false;
     localStores['app-settings'].hideMainWindowOnClose = settings.hideMainWindowOnClose !== false;
     localStores['app-settings'].translationTargetLanguage = settings.translationTargetLanguage;
+    localStores['app-settings'].translationEnginePreference = settings.translationEnginePreference;
+    localStores['app-settings'].localTranslationModelEnabled = settings.localTranslationModelEnabled !== false;
+    localStores['app-settings'].translationModelCacheDir = settings.translationModelCacheDir || '';
     localStores['app-settings'].selectedMicrophoneDevice = settings.selectedAudioDeviceId === 'default'
       ? null
       : settings.selectedAudioDeviceId;

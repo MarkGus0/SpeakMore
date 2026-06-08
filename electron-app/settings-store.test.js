@@ -6,6 +6,7 @@ const {
   DEFAULT_LLM_PROVIDERS,
   DEFAULT_MEETING_LIVE_AUDIO_SOURCE,
   DEFAULT_MEETING_LIVE_TARGET_LANGUAGE,
+  DEFAULT_TRANSLATION_ENGINE_PREFERENCE,
   DEFAULT_TRANSLATION_TARGET_LANGUAGE,
   INTERFACE_LANGUAGES,
   SUPPORTED_INTERFACE_LANGUAGES,
@@ -70,6 +71,8 @@ test('normalizeLocalSettings 会回退不支持的翻译目标语言和空设备
     launchAtSystemStartup: 1,
     modelCacheDir: 123,
     asrDeviceMode: 'gpu',
+    translationEnginePreference: 'bad',
+    translationModelCacheDir: 123,
   });
 
   assert.equal(settings.preferredLanguage, DEFAULT_LANGUAGE);
@@ -80,10 +83,13 @@ test('normalizeLocalSettings 会回退不支持的翻译目标语言和空设备
   assert.equal(settings.muteBackgroundAudioDuringRecording, true);
   assert.equal(settings.showActiveMicrophoneHint, true);
   assert.equal(settings.remindOnNewAudioDevice, true);
-  assert.equal(settings.meetingDetectionEnabled, true);
-  assert.equal(settings.meetingLiveAudioSource, DEFAULT_MEETING_LIVE_AUDIO_SOURCE);
-  assert.equal(settings.meetingLiveTargetLanguage, DEFAULT_MEETING_LIVE_TARGET_LANGUAGE);
-  assert.equal(settings.showFloatingBar, true);
+    assert.equal(settings.meetingDetectionEnabled, true);
+    assert.equal(settings.meetingLiveAudioSource, DEFAULT_MEETING_LIVE_AUDIO_SOURCE);
+    assert.equal(settings.meetingLiveTargetLanguage, DEFAULT_MEETING_LIVE_TARGET_LANGUAGE);
+    assert.equal(settings.translationEnginePreference, DEFAULT_TRANSLATION_ENGINE_PREFERENCE);
+    assert.equal(settings.localTranslationModelEnabled, true);
+    assert.equal(settings.translationModelCacheDir, '');
+    assert.equal(settings.showFloatingBar, true);
   assert.equal(settings.hideMainWindowOnClose, true);
   assert.equal(settings.modelCacheDir, '');
   assert.equal(settings.asrDeviceMode, DEFAULT_ASR_DEVICE_MODE);
@@ -98,6 +104,9 @@ test('normalizeLocalSettings 会保留音频和应用行为开关', () => {
     meetingDetectionEnabled: false,
     meetingLiveAudioSource: 'system',
     meetingLiveTargetLanguage: 'ko',
+    translationEnginePreference: 'local',
+    localTranslationModelEnabled: false,
+    translationModelCacheDir: '  D:\\Models\\HyMT  ',
     showFloatingBar: false,
     hideMainWindowOnClose: false,
   });
@@ -109,6 +118,9 @@ test('normalizeLocalSettings 会保留音频和应用行为开关', () => {
   assert.equal(settings.meetingDetectionEnabled, false);
   assert.equal(settings.meetingLiveAudioSource, 'system');
   assert.equal(settings.meetingLiveTargetLanguage, 'ko');
+  assert.equal(settings.translationEnginePreference, 'local');
+  assert.equal(settings.localTranslationModelEnabled, false);
+  assert.equal(settings.translationModelCacheDir, 'D:\\Models\\HyMT');
   assert.equal(settings.showFloatingBar, false);
   assert.equal(settings.hideMainWindowOnClose, false);
 });
@@ -186,6 +198,9 @@ test('createSettingsStore 读取和写入时都会同步 legacy store', () => {
       launchAtSystemStartup: true,
       meetingLiveAudioSource: 'microphone_system',
       meetingLiveTargetLanguage: 'es',
+      translationEnginePreference: 'llm',
+      localTranslationModelEnabled: false,
+      translationModelCacheDir: 'D:\\Models\\HyMT',
       muteBackgroundAudioDuringRecording: false,
       showFloatingBar: false,
       llm: {
@@ -211,6 +226,9 @@ test('createSettingsStore 读取和写入时都会同步 legacy store', () => {
   assert.equal(settings.asrDeviceMode, 'mps');
   assert.equal(settings.meetingLiveAudioSource, 'microphone_system');
   assert.equal(settings.meetingLiveTargetLanguage, 'es');
+  assert.equal(settings.translationEnginePreference, 'llm');
+  assert.equal(settings.localTranslationModelEnabled, false);
+  assert.equal(settings.translationModelCacheDir, 'D:\\Models\\HyMT');
   assert.equal(settings.muteBackgroundAudioDuringRecording, false);
   assert.equal(synced.showFloatingBar, false);
 
@@ -227,6 +245,9 @@ test('createSettingsStore 读取和写入时都会同步 legacy store', () => {
     meetingDetectionEnabled: false,
     meetingLiveAudioSource: 'system',
     meetingLiveTargetLanguage: 'de',
+    translationEnginePreference: 'local',
+    localTranslationModelEnabled: true,
+    translationModelCacheDir: 'E:\\HyMT',
     showFloatingBar: true,
     hideMainWindowOnClose: false,
     llm: settings.llm,
@@ -239,6 +260,9 @@ test('createSettingsStore 读取和写入时都会同步 legacy store', () => {
   assert.equal(written.meetingDetectionEnabled, false);
   assert.equal(written.meetingLiveAudioSource, 'system');
   assert.equal(written.meetingLiveTargetLanguage, 'de');
+  assert.equal(written.translationEnginePreference, 'local');
+  assert.equal(written.localTranslationModelEnabled, true);
+  assert.equal(written.translationModelCacheDir, 'E:\\HyMT');
   assert.equal(written.hideMainWindowOnClose, false);
   assert.equal(next.translationTargetLanguage, 'zh-CN');
   assert.equal(synced.translationTargetLanguage, 'zh-CN');
