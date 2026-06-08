@@ -429,6 +429,9 @@ test('旧模型管理能力已删除，语音模型初始化并入设置页', as
   assert.match(translationModelSection, /startTranslationModelDownload/);
   assert.match(translationModelSection, /loadTranslationModel/);
   assert.match(translationModelSection, /chooseModelCacheDirectory/);
+  assert.match(translationModelSection, /runtime_profile/);
+  assert.match(translationModelSection, /Hy-MT2/);
+  assert.doesNotMatch(translationModelSection, /AngelSlim|Hy-MT1\.5/);
   assert.doesNotMatch(translationModelSection, /unloadTranslationModel/);
   assert.doesNotMatch(translationModelSection, /translationEnginePreference|localTranslationModelEnabled/);
   assert.match(translationModelStore, /translation-model:get-status/);
@@ -759,7 +762,9 @@ test('Electron 只通过打包后端服务管理语音后端进程', async () =>
   assert.match(main, /createVoiceBackendService/);
   assert.match(main, /backendExecutablePath:\s*\(\)\s*=>\s*appPaths\.backendExecutablePath\(\)/);
   assert.match(main, /llamaServerPath:\s*\(\)\s*=>\s*appPaths\.llamaServerPath\(\)/);
+  assert.match(main, /hyMtLlamaServerPath:\s*\(\)\s*=>\s*appPaths\.hyMtLlamaServerPath\(\)/);
   assert.match(packagingConfig, /from:\s*release-artifacts\/llama[\s\S]*to:\s*llama/);
+  assert.match(packagingConfig, /from:\s*release-artifacts\/llama-stq[\s\S]*to:\s*llama-stq/);
   assert.match(main, /voiceBackendService\.stop\(\)/);
 });
 
@@ -1353,8 +1358,12 @@ test('P1 设置页与设置 store 统一走主进程 JSON 数据源', async () =
   assert.match(translationModelSection, /settings\.translationModel\.modelLoadFailedDetail/);
   assert.match(translationModelSection, /settings\.translationModel\.runtimeStartFailedDetail/);
   assert.match(translationModelSection, /settings\.translationModel\.modelFilesProgress/);
+  assert.match(translationModelSection, /settings\.translationModel\.runtimeMode/);
+  assert.match(translationModelSection, /settings\.translationModel\.runtimeProfile\.stq/);
+  assert.doesNotMatch(translationModelSection, /AngelSlim|Hy-MT1\.5/);
   assert.match(i18n, /settings\.translationModel\.modelLoadFailedDetail/);
   assert.match(i18n, /settings\.translationModel\.runtimeStartFailedDetail/);
+  assert.match(i18n, /Hy-MT2/);
   assert.doesNotMatch(translationModelSection, /unloadTranslationModel/);
   assert.doesNotMatch(translationModelSection, /translationEnginePreference|localTranslationModelEnabled/);
   assert.match(translationModelStore, /translation-model:get-status/);

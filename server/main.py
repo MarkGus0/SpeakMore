@@ -33,7 +33,6 @@ from model_manager import (
     get_managed_model_cache_root,
 )
 from local_translation_model import (
-    TRANSLATION_MODEL_GGUF_REPO_ID,
     configure_translation_model_cache_dir,
     download_translation_model,
     get_translation_model_cache_root,
@@ -466,7 +465,7 @@ def can_auto_preload_translation_model() -> bool:
 
 
 async def run_translation_model_download_task(app: FastAPI) -> None:
-    set_translation_model_task_state("downloading", f"Downloading {TRANSLATION_MODEL_GGUF_REPO_ID}", time.time())
+    set_translation_model_task_state("downloading", "Downloading local Hy-MT2 translation model", time.time())
     try:
         await asyncio.to_thread(download_translation_model, update_translation_model_task_progress)
         if can_auto_preload_translation_model():

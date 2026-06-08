@@ -59,6 +59,7 @@ function createAppPaths({
     audioSessionControlPath: () => unpackedAppPath('audio-session-control.ps1'),
     backendExecutablePath: () => packagedResourcePath('backend', executableName('speakmore-backend')),
     llamaServerPath: () => packagedResourcePath('llama', executableName('llama-server')),
+    hyMtLlamaServerPath: () => packagedResourcePath('llama-stq', executableName('llama-server')),
     ffmpegExecutablePath: () => packagedResourcePath('ffmpeg', 'bin', executableName('ffmpeg')),
     textObserverExecutablePath: () => packagedResourcePath('helper', executableName('WindowsTextObserver')),
     dotnetRootPath: () => packagedResourcePath('dotnet'),

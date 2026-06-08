@@ -17,6 +17,9 @@ export type TranslationModelStatus = {
   repo_id?: string
   gguf_repo_id?: string
   model_file?: string
+  runtime_profile?: 'stq' | 'standard' | string
+  available_profiles?: string[]
+  fallback_reason?: string
   cache_dir?: string
   cached?: boolean
   ready?: boolean
@@ -26,6 +29,10 @@ export type TranslationModelStatus = {
   runtime_path?: string
   runtime_source?: string
   runtime_kind_available?: string
+  stq_runtime_available?: boolean
+  stq_runtime_path?: string
+  standard_runtime_available?: boolean
+  standard_runtime_path?: string
   runtime_pid?: number | null
   runtime_missing?: boolean
   elapsed_ms?: number
@@ -69,6 +76,11 @@ export function normalizeTranslationModelStatus(value: unknown): TranslationMode
     repo_id: typeof status.repo_id === 'string' ? status.repo_id : '',
     gguf_repo_id: typeof status.gguf_repo_id === 'string' ? status.gguf_repo_id : '',
     model_file: typeof status.model_file === 'string' ? status.model_file : '',
+    runtime_profile: typeof status.runtime_profile === 'string' ? status.runtime_profile : '',
+    available_profiles: Array.isArray(status.available_profiles)
+      ? status.available_profiles.filter((item): item is string => typeof item === 'string')
+      : [],
+    fallback_reason: typeof status.fallback_reason === 'string' ? status.fallback_reason : '',
     cache_dir: typeof status.cache_dir === 'string' ? status.cache_dir : '',
     cached: Boolean(status.cached),
     ready: Boolean(status.ready || normalizedStatus === 'ready'),
@@ -78,6 +90,10 @@ export function normalizeTranslationModelStatus(value: unknown): TranslationMode
     runtime_path: typeof status.runtime_path === 'string' ? status.runtime_path : '',
     runtime_source: typeof status.runtime_source === 'string' ? status.runtime_source : '',
     runtime_kind_available: typeof status.runtime_kind_available === 'string' ? status.runtime_kind_available : '',
+    stq_runtime_available: Boolean(status.stq_runtime_available),
+    stq_runtime_path: typeof status.stq_runtime_path === 'string' ? status.stq_runtime_path : '',
+    standard_runtime_available: Boolean(status.standard_runtime_available),
+    standard_runtime_path: typeof status.standard_runtime_path === 'string' ? status.standard_runtime_path : '',
     runtime_pid: typeof status.runtime_pid === 'number' ? status.runtime_pid : null,
     runtime_missing: Boolean(status.runtime_missing || normalizedStatus === 'runtime_missing'),
     elapsed_ms: normalizeNumber(status.elapsed_ms),

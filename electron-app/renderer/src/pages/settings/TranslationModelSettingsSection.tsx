@@ -75,6 +75,21 @@ function getDetailText(status: TranslationModelStatus | null, t: (key: Translati
   return status.detail
 }
 
+function getRuntimeProfileLabel(status: TranslationModelStatus | null, t: (key: TranslationKey) => string) {
+  if (status?.runtime_profile === 'stq') return t('settings.translationModel.runtimeProfile.stq')
+  return t('settings.translationModel.runtimeProfile.standard')
+}
+
+function getFallbackReasonText(status: TranslationModelStatus | null, t: (key: TranslationKey) => string) {
+  if (status?.fallback_reason === 'stq_runtime_unavailable') {
+    return t('settings.translationModel.fallbackReason.stqRuntimeUnavailable')
+  }
+  if (status?.fallback_reason === 'using_stable_profile') {
+    return t('settings.translationModel.fallbackReason.usingStableProfile')
+  }
+  return status?.fallback_reason || ''
+}
+
 export default function TranslationModelSettingsSection({
   settings,
   updateSettings,
@@ -137,6 +152,7 @@ export default function TranslationModelSettingsSection({
     && (modelStatus.total_files ?? 0) > 0
   const statusText = t(getStatusKey(modelStatus))
   const detailText = getDetailText(modelStatus, t)
+  const fallbackReasonText = getFallbackReasonText(modelStatus, t)
   const modelActionText = isReady
     ? t('settings.translationModel.modelReady')
     : isCached
@@ -166,7 +182,13 @@ export default function TranslationModelSettingsSection({
         <Box sx={rowSx}>
           <Typography sx={{ ...bodyTextSx, color: 'text.secondary' }}>{t('settings.translationModel.modelName')}</Typography>
           <Typography sx={{ ...bodyTextSx, textAlign: { xs: 'left', sm: 'right' } }}>
-            {modelStatus?.repo_id || 'AngelSlim/Hy-MT1.5-1.8B-2bit'}
+            {modelStatus?.repo_id || 'tencent/Hy-MT2-1.8B-GGUF'}
+          </Typography>
+        </Box>
+        <Box sx={rowSx}>
+          <Typography sx={{ ...bodyTextSx, color: 'text.secondary' }}>{t('settings.translationModel.runtimeMode')}</Typography>
+          <Typography sx={{ ...bodyTextSx, textAlign: { xs: 'left', sm: 'right' } }}>
+            {getRuntimeProfileLabel(modelStatus, t)}
           </Typography>
         </Box>
         <Box sx={rowSx}>
@@ -175,6 +197,14 @@ export default function TranslationModelSettingsSection({
             {effectiveCacheDir || '-'}
           </Typography>
         </Box>
+        {fallbackReasonText ? (
+          <Box sx={rowSx}>
+            <Typography sx={{ ...bodyTextSx, color: 'text.secondary' }}>{t('settings.translationModel.fallbackReason')}</Typography>
+            <Typography sx={{ ...bodyTextSx, textAlign: { xs: 'left', sm: 'right' }, color: 'text.secondary' }}>
+              {fallbackReasonText}
+            </Typography>
+          </Box>
+        ) : null}
         {detailText ? (
           <Typography sx={{ ...helperTextSx, color: modelStatus?.status === 'failed' ? 'error.main' : 'text.secondary', mt: 1 }}>
             {detailText}
@@ -214,7 +244,14 @@ export default function TranslationModelSettingsSection({
             startIcon={<CloudDownloadIcon />}
             onClick={() => void handlePrimaryAction()}
             disabled={busy || isReady}
-            sx={{ borderRadius: '8px' }}
+            sx={{
+              borderRadius: '8px',
+              bgcolor: 'grey.800',
+              color: 'common.white',
+              boxShadow: 'none',
+              '&:hover': { bgcolor: 'grey.700', boxShadow: 'none' },
+              '&.Mui-disabled': { bgcolor: 'grey.200' },
+            }}
           >
             {modelActionText}
           </Button>

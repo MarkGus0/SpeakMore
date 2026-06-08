@@ -17,13 +17,34 @@ from download_progress import DownloadProgress, create_hf_tqdm_class
 from model_manager import get_managed_models_root, repo_cache_dir_name
 
 
-TRANSLATION_MODEL_ID = "hy-mt-1.5-1.8b-2bit"
-TRANSLATION_MODEL_DISPLAY_REPO_ID = "AngelSlim/Hy-MT1.5-1.8B-2bit"
-TRANSLATION_MODEL_GGUF_REPO_ID = "AngelSlim/Hy-MT1.5-1.8B-2bit-GGUF"
-TRANSLATION_MODEL_GGUF_FILE = "Hy-MT1.5-1.8B-2bit.gguf"
+TRANSLATION_MODEL_ID = "hy-mt2-1.8b"
+STQ_TRANSLATION_PROFILE = "stq"
+STANDARD_TRANSLATION_PROFILE = "standard"
+TRANSLATION_MODEL_PROFILES = {
+    STQ_TRANSLATION_PROFILE: {
+        "model_id": "hy-mt2-1.8b-1.25bit",
+        "repo_id": "tencent/Hy-MT2-1.8B-1.25Bit",
+        "gguf_repo_id": "tencent/Hy-MT2-1.8B-1.25Bit-GGUF",
+        "model_file": "Hy-MT2-1.8B-1.25Bit.gguf",
+        "runtime_profile": STQ_TRANSLATION_PROFILE,
+    },
+    STANDARD_TRANSLATION_PROFILE: {
+        "model_id": "hy-mt2-1.8b-q4-k-m",
+        "repo_id": "tencent/Hy-MT2-1.8B Q4_K_M",
+        "gguf_repo_id": "tencent/Hy-MT2-1.8B-GGUF",
+        "model_file": "Hy-MT2-1.8B-Q4_K_M.gguf",
+        "runtime_profile": STANDARD_TRANSLATION_PROFILE,
+    },
+}
+LEGACY_TRANSLATION_MODEL_GGUF_REPO_ID = "AngelSlim/Hy-MT1.5-1.8B-2bit-GGUF"
 TRANSLATION_MODEL_CACHE_DIR_ENV = "SPEAKMORE_TRANSLATION_MODEL_CACHE_DIR"
 BUNDLED_LLAMA_SERVER_PATH_ENV = "SPEAKMORE_BUNDLED_LLAMA_SERVER_PATH"
+BUNDLED_HYMT_LLAMA_SERVER_PATH_ENV = "SPEAKMORE_BUNDLED_HYMT_LLAMA_SERVER_PATH"
 LLAMA_SERVER_PATH_ENVS = ("SPEAKMORE_LLAMA_SERVER_PATH", "LLAMA_SERVER_PATH", BUNDLED_LLAMA_SERVER_PATH_ENV)
+HYMT_LLAMA_SERVER_PATH_ENVS = (
+    "SPEAKMORE_HYMT_LLAMA_SERVER_PATH",
+    BUNDLED_HYMT_LLAMA_SERVER_PATH_ENV,
+)
 LLAMA_SERVER_URL_ENV = "SPEAKMORE_LOCAL_TRANSLATION_SERVER_URL"
 LLAMA_SERVER_PORT_ENV = "SPEAKMORE_LLAMA_SERVER_PORT"
 DEFAULT_LLAMA_SERVER_PORT = 8105
@@ -81,6 +102,7 @@ _state_lock = Lock()
 _runtime_process: subprocess.Popen | None = None
 _runtime_url = ""
 _runtime_kind = ""
+_runtime_profile = STANDARD_TRANSLATION_PROFILE
 _translation_model_state: dict = {
     "status": "idle",
     "detail": "",
@@ -108,17 +130,26 @@ def get_translation_model_cache_root() -> Path:
     return get_managed_models_root() / "translation"
 
 
-def get_translation_model_snapshot_root(cache_root: Path | None = None) -> Path:
+def normalize_translation_profile(value: str | None = None) -> str:
+    return value if value in TRANSLATION_MODEL_PROFILES else STANDARD_TRANSLATION_PROFILE
+
+
+def get_translation_profile(profile: str | None = None) -> dict[str, str]:
+    return TRANSLATION_MODEL_PROFILES[normalize_translation_profile(profile)]
+
+
+def get_translation_model_snapshot_root(cache_root: Path | None = None, profile: str | None = None) -> Path:
     root = Path(cache_root) if cache_root is not None else get_translation_model_cache_root()
-    return root / repo_cache_dir_name(TRANSLATION_MODEL_GGUF_REPO_ID) / "snapshots"
+    return root / repo_cache_dir_name(get_translation_profile(profile)["gguf_repo_id"]) / "snapshots"
 
 
-def is_valid_translation_model_snapshot(path: Path) -> bool:
-    return path.is_dir() and (path / TRANSLATION_MODEL_GGUF_FILE).is_file()
+def is_valid_translation_model_snapshot(path: Path, profile: str | None = None) -> bool:
+    return path.is_dir() and (path / get_translation_profile(profile)["model_file"]).is_file()
 
 
-def find_cached_translation_model_snapshot(cache_root: Path | None = None) -> Path | None:
-    snapshots_root = get_translation_model_snapshot_root(cache_root)
+def find_cached_translation_model_snapshot(cache_root: Path | None = None, profile: str | None = None) -> Path | None:
+    profile_id = normalize_translation_profile(profile)
+    snapshots_root = get_translation_model_snapshot_root(cache_root, profile_id)
     try:
         candidates = list(snapshots_root.iterdir())
     except (FileNotFoundError, OSError):
@@ -134,20 +165,27 @@ def find_cached_translation_model_snapshot(cache_root: Path | None = None) -> Pa
 
     sortable_snapshots.sort(key=lambda item: item[0], reverse=True)
     for _mtime, snapshot in sortable_snapshots:
-        if is_valid_translation_model_snapshot(snapshot):
+        if is_valid_translation_model_snapshot(snapshot, profile_id):
             return snapshot
     return None
 
 
-def find_cached_translation_model_file(cache_root: Path | None = None) -> Path | None:
+def find_cached_translation_model_file(cache_root: Path | None = None, profile: str | None = None) -> Path | None:
+    profile_id = normalize_translation_profile(profile)
+    model_file_name = get_translation_profile(profile_id)["model_file"]
     root = Path(cache_root) if cache_root is not None else get_translation_model_cache_root()
-    direct_file = root / TRANSLATION_MODEL_GGUF_FILE
+    direct_file = root / model_file_name
     if direct_file.is_file():
         return direct_file
-    snapshot = find_cached_translation_model_snapshot(root)
+    snapshot = find_cached_translation_model_snapshot(root, profile_id)
     if snapshot:
-        return snapshot / TRANSLATION_MODEL_GGUF_FILE
+        return snapshot / model_file_name
     return None
+
+
+def find_legacy_translation_model_cache_root(cache_root: Path | None = None) -> Path:
+    root = Path(cache_root) if cache_root is not None else get_translation_model_cache_root()
+    return root / repo_cache_dir_name(LEGACY_TRANSLATION_MODEL_GGUF_REPO_ID)
 
 
 def normalize_download_progress(progress: dict | None = None) -> dict[str, int | None]:
@@ -243,27 +281,68 @@ def is_translation_model_ready() -> bool:
     return get_translation_model_status()["ready"] is True
 
 
+def get_cached_translation_profiles() -> dict[str, Path]:
+    return {
+        profile_id: model_file
+        for profile_id in TRANSLATION_MODEL_PROFILES
+        if (model_file := find_cached_translation_model_file(profile=profile_id)) is not None
+    }
+
+
+def select_download_profile() -> str:
+    stq_runtime = resolve_llama_server_runtime(STQ_TRANSLATION_PROFILE)
+    return STQ_TRANSLATION_PROFILE if stq_runtime["path"] else STANDARD_TRANSLATION_PROFILE
+
+
+def select_status_profile(cached_profiles: dict[str, Path], current_profile: str = "") -> str:
+    requested_profile = current_profile if current_profile in TRANSLATION_MODEL_PROFILES else ""
+    if requested_profile and requested_profile in cached_profiles:
+        return requested_profile
+    stq_runtime = resolve_llama_server_runtime(STQ_TRANSLATION_PROFILE)
+    standard_runtime = resolve_llama_server_runtime(STANDARD_TRANSLATION_PROFILE)
+    if STQ_TRANSLATION_PROFILE in cached_profiles and stq_runtime["path"]:
+        return STQ_TRANSLATION_PROFILE
+    if STANDARD_TRANSLATION_PROFILE in cached_profiles and standard_runtime["path"]:
+        return STANDARD_TRANSLATION_PROFILE
+    if STQ_TRANSLATION_PROFILE in cached_profiles and not standard_runtime["path"]:
+        return STQ_TRANSLATION_PROFILE
+    if STANDARD_TRANSLATION_PROFILE in cached_profiles:
+        return STANDARD_TRANSLATION_PROFILE
+    return select_download_profile()
+
+
 def get_translation_model_status() -> dict:
     now = time.time()
     with _state_lock:
         current = dict(_translation_model_state)
 
-    cached_file = find_cached_translation_model_file()
+    cached_profiles = get_cached_translation_profiles()
     status = str(current.get("status") or "idle")
     runtime_url = get_runtime_url()
     runtime_ready = bool(runtime_url and (str(os.environ.get(LLAMA_SERVER_URL_ENV, "")).strip() or is_runtime_process_alive()))
     if status == "ready" and not runtime_ready:
         status = "runtime_missing"
 
-    available_runtime = get_available_runtime_info()
+    selected_profile = select_status_profile(cached_profiles, _runtime_profile if runtime_ready else "")
+    profile = get_translation_profile(selected_profile)
+    cached_file = cached_profiles.get(selected_profile)
+    available_runtime = get_available_runtime_info(selected_profile)
+    fallback_reason = ""
+    if selected_profile == STANDARD_TRANSLATION_PROFILE and not resolve_llama_server_runtime(STQ_TRANSLATION_PROFILE)["path"]:
+        fallback_reason = "stq_runtime_unavailable"
+    if selected_profile == STANDARD_TRANSLATION_PROFILE and STQ_TRANSLATION_PROFILE in cached_profiles and STANDARD_TRANSLATION_PROFILE in cached_profiles:
+        fallback_reason = fallback_reason or "using_stable_profile"
     started_at = current.get("started_at")
     return {
         "status": status,
         "detail": str(current.get("detail") or ""),
-        "model_id": TRANSLATION_MODEL_ID,
-        "repo_id": TRANSLATION_MODEL_DISPLAY_REPO_ID,
-        "gguf_repo_id": TRANSLATION_MODEL_GGUF_REPO_ID,
-        "model_file": TRANSLATION_MODEL_GGUF_FILE,
+        "model_id": profile["model_id"],
+        "repo_id": profile["repo_id"],
+        "gguf_repo_id": profile["gguf_repo_id"],
+        "model_file": profile["model_file"],
+        "runtime_profile": selected_profile,
+        "available_profiles": sorted(cached_profiles.keys()),
+        "fallback_reason": fallback_reason,
         "cache_dir": str(get_translation_model_cache_root()),
         "cached": cached_file is not None,
         "model_path": str(cached_file) if cached_file else "",
@@ -285,31 +364,39 @@ def download_translation_model(progress_callback: Callable[[DownloadProgress], N
     from huggingface_hub import snapshot_download
 
     os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+    profile_id = select_download_profile()
+    profile = get_translation_profile(profile_id)
     cache_root = get_translation_model_cache_root()
     cache_root.mkdir(parents=True, exist_ok=True)
     tqdm_class = create_hf_tqdm_class(progress_callback) if progress_callback else None
     kwargs = {
-        "repo_id": TRANSLATION_MODEL_GGUF_REPO_ID,
+        "repo_id": profile["gguf_repo_id"],
         "cache_dir": cache_root,
-        "allow_patterns": [TRANSLATION_MODEL_GGUF_FILE, "README.md", "License.txt"],
+        "allow_patterns": [profile["model_file"], "README.md", "README_CN.md", "LICENSE.txt", "License.txt"],
     }
     if tqdm_class:
         kwargs["tqdm_class"] = tqdm_class
     snapshot_path = Path(snapshot_download(**kwargs))
-    model_file = snapshot_path / TRANSLATION_MODEL_GGUF_FILE
+    model_file = snapshot_path / profile["model_file"]
     if not model_file.is_file():
-        raise RuntimeError(f"Downloaded snapshot does not contain {TRANSLATION_MODEL_GGUF_FILE}")
+        raise RuntimeError(f"Downloaded snapshot does not contain {profile['model_file']}")
     return model_file
 
 
-def resolve_llama_server_runtime() -> dict[str, str]:
-    for env_name in LLAMA_SERVER_PATH_ENVS:
+def resolve_llama_server_runtime(runtime_profile: str = STANDARD_TRANSLATION_PROFILE) -> dict[str, str]:
+    env_names = HYMT_LLAMA_SERVER_PATH_ENVS if runtime_profile == STQ_TRANSLATION_PROFILE else LLAMA_SERVER_PATH_ENVS
+    for env_name in env_names:
         candidate = str(os.environ.get(env_name, "") or "").strip()
         if candidate and Path(candidate).is_file():
             return {
                 "path": candidate,
-                "source": "bundled" if env_name == BUNDLED_LLAMA_SERVER_PATH_ENV else "configured",
+                "source": "bundled" if env_name in {BUNDLED_LLAMA_SERVER_PATH_ENV, BUNDLED_HYMT_LLAMA_SERVER_PATH_ENV} else "configured",
             }
+    if runtime_profile == STQ_TRANSLATION_PROFILE:
+        return {
+            "path": "",
+            "source": "",
+        }
     path_candidate = shutil.which("llama-server") or ""
     if path_candidate:
         return {
@@ -323,30 +410,45 @@ def resolve_llama_server_runtime() -> dict[str, str]:
 
 
 def resolve_llama_server_path() -> str:
-    return resolve_llama_server_runtime()["path"]
+    return resolve_llama_server_runtime(STANDARD_TRANSLATION_PROFILE)["path"]
 
 
-def get_available_runtime_info() -> dict:
-    runtime = resolve_llama_server_runtime()
+def get_available_runtime_info(runtime_profile: str = STANDARD_TRANSLATION_PROFILE) -> dict:
+    runtime_profile = normalize_translation_profile(runtime_profile)
+    runtime = resolve_llama_server_runtime(runtime_profile)
+    stq_runtime = resolve_llama_server_runtime(STQ_TRANSLATION_PROFILE)
+    standard_runtime = resolve_llama_server_runtime(STANDARD_TRANSLATION_PROFILE)
     if runtime["path"]:
         return {
             "runtime_available": True,
             "runtime_path": runtime["path"],
             "runtime_source": runtime["source"],
             "runtime_kind_available": "llama-server",
+            "stq_runtime_available": bool(stq_runtime["path"]),
+            "stq_runtime_path": stq_runtime["path"],
+            "standard_runtime_available": bool(standard_runtime["path"]),
+            "standard_runtime_path": standard_runtime["path"],
         }
-    if has_llama_cpp_python_server():
+    if runtime_profile == STANDARD_TRANSLATION_PROFILE and has_llama_cpp_python_server():
         return {
             "runtime_available": True,
             "runtime_path": sys.executable,
             "runtime_source": "python",
             "runtime_kind_available": "llama-cpp-python",
+            "stq_runtime_available": bool(stq_runtime["path"]),
+            "stq_runtime_path": stq_runtime["path"],
+            "standard_runtime_available": True,
+            "standard_runtime_path": standard_runtime["path"] or sys.executable,
         }
     return {
         "runtime_available": False,
         "runtime_path": "",
         "runtime_source": "",
         "runtime_kind_available": "",
+        "stq_runtime_available": bool(stq_runtime["path"]),
+        "stq_runtime_path": stq_runtime["path"],
+        "standard_runtime_available": bool(standard_runtime["path"]) or has_llama_cpp_python_server(),
+        "standard_runtime_path": standard_runtime["path"] or (sys.executable if has_llama_cpp_python_server() else ""),
     }
 
 
@@ -389,11 +491,12 @@ def wait_for_local_server(
 
 
 def unload_translation_model() -> dict:
-    global _runtime_process, _runtime_url, _runtime_kind
+    global _runtime_process, _runtime_url, _runtime_kind, _runtime_profile
     process = _runtime_process
     _runtime_process = None
     _runtime_url = ""
     _runtime_kind = ""
+    _runtime_profile = STANDARD_TRANSLATION_PROFILE
     if process and process.poll() is None:
         process.terminate()
         try:
@@ -404,35 +507,29 @@ def unload_translation_model() -> dict:
     return get_translation_model_status()
 
 
-def load_translation_model() -> dict:
-    global _runtime_process, _runtime_url, _runtime_kind
-    external_url = str(os.environ.get(LLAMA_SERVER_URL_ENV, "") or "").strip().rstrip("/")
-    if external_url:
-        _runtime_url = external_url
-        _runtime_kind = "external"
-        wait_for_local_server(external_url, timeout_seconds=5.0)
-        set_translation_model_state("ready", "Using external local translation runtime")
-        return get_translation_model_status()
+def build_load_candidates() -> list[tuple[str, Path]]:
+    candidates: list[tuple[str, Path]] = []
+    stq_runtime = resolve_llama_server_runtime(STQ_TRANSLATION_PROFILE)
+    standard_runtime = resolve_llama_server_runtime(STANDARD_TRANSLATION_PROFILE)
+    stq_file = find_cached_translation_model_file(profile=STQ_TRANSLATION_PROFILE)
+    standard_file = find_cached_translation_model_file(profile=STANDARD_TRANSLATION_PROFILE)
+    if stq_file and stq_runtime["path"]:
+        candidates.append((STQ_TRANSLATION_PROFILE, stq_file))
+    if standard_file and (standard_runtime["path"] or has_llama_cpp_python_server()):
+        candidates.append((STANDARD_TRANSLATION_PROFILE, standard_file))
+    return candidates
 
-    model_file = find_cached_translation_model_file()
-    if not model_file:
-        set_translation_model_state("failed", "Local translation model is not downloaded")
-        return get_translation_model_status()
 
-    if is_runtime_process_alive() and _runtime_url:
-        set_translation_model_state("ready", "Local translation model is already loaded")
-        return get_translation_model_status()
-
-    llama_server_runtime = resolve_llama_server_runtime()
-    llama_server_path = llama_server_runtime["path"]
+def create_runtime_args(profile_id: str, model_file: Path) -> tuple[list[str], str, str | None]:
+    profile_id = normalize_translation_profile(profile_id)
     port = resolve_llama_server_port()
-    url = f"http://127.0.0.1:{port}"
     thread_count = str(max(2, min(8, os.cpu_count() or 4)))
-    runtime_kind = ""
-    if llama_server_path:
-        runtime_kind = "llama-server"
-        args = [
-            llama_server_path,
+    if profile_id == STQ_TRANSLATION_PROFILE:
+        runtime = resolve_llama_server_runtime(STQ_TRANSLATION_PROFILE)
+        if not runtime["path"]:
+            raise RuntimeError("Hy-MT STQ runtime is missing")
+        return ([
+            runtime["path"],
             "--model",
             str(model_file),
             "--host",
@@ -444,10 +541,26 @@ def load_translation_model() -> dict:
             "--threads",
             thread_count,
             "--no-webui",
-        ]
-    elif has_llama_cpp_python_server():
-        runtime_kind = "llama-cpp-python"
-        args = [
+        ], "llama-server-stq", runtime["path"])
+
+    runtime = resolve_llama_server_runtime(STANDARD_TRANSLATION_PROFILE)
+    if runtime["path"]:
+        return ([
+            runtime["path"],
+            "--model",
+            str(model_file),
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+            "--ctx-size",
+            "4096",
+            "--threads",
+            thread_count,
+            "--no-webui",
+        ], "llama-server", runtime["path"])
+    if has_llama_cpp_python_server():
+        return ([
             sys.executable,
             "-m",
             "llama_cpp.server",
@@ -461,10 +574,15 @@ def load_translation_model() -> dict:
             "4096",
             "--n_threads",
             thread_count,
-        ]
-    else:
-        set_translation_model_state("runtime_missing", RUNTIME_MISSING_DETAIL)
-        return get_translation_model_status()
+        ], "llama-cpp-python", None)
+    raise RuntimeError(RUNTIME_MISSING_DETAIL)
+
+
+def start_translation_runtime(profile_id: str, model_file: Path) -> dict:
+    global _runtime_process, _runtime_url, _runtime_kind, _runtime_profile
+    port = resolve_llama_server_port()
+    url = f"http://127.0.0.1:{port}"
+    args, runtime_kind, runtime_path = create_runtime_args(profile_id, model_file)
 
     try:
         with socket.create_connection(("127.0.0.1", port), timeout=0.25):
@@ -481,21 +599,57 @@ def load_translation_model() -> dict:
             stdout=log_file,
             stderr=subprocess.STDOUT,
             env=os.environ.copy(),
-            cwd=str(Path(llama_server_path).parent) if llama_server_path else None,
+            cwd=str(Path(runtime_path).parent) if runtime_path else None,
         )
     finally:
         log_file.close()
     _runtime_url = url
     _runtime_kind = runtime_kind
-    try:
-        wait_for_local_server(url, process=_runtime_process, log_path=log_path)
-    except Exception as error:
-        detail = build_runtime_failure_detail(error, read_runtime_log_tail(log_path))
-        unload_translation_model()
-        set_translation_model_state("failed", detail)
-        raise RuntimeError(detail) from error
+    _runtime_profile = normalize_translation_profile(profile_id)
+    wait_for_local_server(url, process=_runtime_process, log_path=log_path)
     set_translation_model_state("ready", f"Local translation model loaded with {runtime_kind}")
     return get_translation_model_status()
+
+
+def load_translation_model() -> dict:
+    global _runtime_url, _runtime_kind, _runtime_profile
+    external_url = str(os.environ.get(LLAMA_SERVER_URL_ENV, "") or "").strip().rstrip("/")
+    if external_url:
+        _runtime_url = external_url
+        _runtime_kind = "external"
+        _runtime_profile = STANDARD_TRANSLATION_PROFILE
+        wait_for_local_server(external_url, timeout_seconds=5.0)
+        set_translation_model_state("ready", "Using external local translation runtime")
+        return get_translation_model_status()
+
+    candidates = build_load_candidates()
+    if not candidates:
+        if get_cached_translation_profiles():
+            set_translation_model_state("runtime_missing", RUNTIME_MISSING_DETAIL)
+            return get_translation_model_status()
+        set_translation_model_state("failed", "Local translation model is not downloaded")
+        return get_translation_model_status()
+
+    if is_runtime_process_alive() and _runtime_url:
+        set_translation_model_state("ready", "Local translation model is already loaded")
+        return get_translation_model_status()
+
+    last_error: Exception | None = None
+    for profile_id, model_file in candidates:
+        try:
+            return start_translation_runtime(profile_id, model_file)
+        except Exception as error:
+            last_error = error
+            detail = build_runtime_failure_detail(error, read_runtime_log_tail(get_runtime_log_path()))
+            unload_translation_model()
+            if profile_id == STQ_TRANSLATION_PROFILE and len(candidates) > 1:
+                set_translation_model_state("idle", f"STQ runtime failed, falling back to stable model: {detail}")
+                continue
+            set_translation_model_state("failed", detail)
+            raise RuntimeError(detail) from error
+    detail = build_runtime_failure_detail(last_error or "unknown error", read_runtime_log_tail(get_runtime_log_path()))
+    set_translation_model_state("failed", detail)
+    raise RuntimeError(detail) from last_error
 
 
 def build_local_translation_messages(
@@ -552,7 +706,7 @@ async def translate_with_local_model(
         raise RuntimeError("Local translation runtime URL is empty")
 
     payload = {
-        "model": TRANSLATION_MODEL_ID,
+        "model": str(status.get("model_id") or TRANSLATION_MODEL_ID),
         "messages": build_local_translation_messages(
             raw_text=raw_text,
             target_language_name=target_language_name,

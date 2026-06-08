@@ -31,6 +31,10 @@ export const getBundledLlamaServerPath = ({ rootDir, platform = process.platform
   path.join(rootDir, 'release-artifacts', 'llama', getLlamaServerExecutableName({ platform }))
 );
 
+export const getBundledHyMtLlamaServerPath = ({ rootDir, platform = process.platform }) => (
+  path.join(rootDir, 'release-artifacts', 'llama-stq', getLlamaServerExecutableName({ platform }))
+);
+
 export const resolveDevLlamaServerPath = ({
   env = process.env,
   existsSync,
@@ -45,6 +49,22 @@ export const resolveDevLlamaServerPath = ({
   ).trim();
   if (existingEnvPath) return existingEnvPath;
   const bundledPath = getBundledLlamaServerPath({ rootDir, platform });
+  return existsSync(bundledPath) ? bundledPath : '';
+};
+
+export const resolveDevHyMtLlamaServerPath = ({
+  env = process.env,
+  existsSync,
+  platform = process.platform,
+  rootDir,
+}) => {
+  const existingEnvPath = String(
+    env.SPEAKMORE_HYMT_LLAMA_SERVER_PATH
+    || env.SPEAKMORE_BUNDLED_HYMT_LLAMA_SERVER_PATH
+    || '',
+  ).trim();
+  if (existingEnvPath) return existingEnvPath;
+  const bundledPath = getBundledHyMtLlamaServerPath({ rootDir, platform });
   return existsSync(bundledPath) ? bundledPath : '';
 };
 

@@ -1,4 +1,6 @@
 import asyncio
+import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -7,22 +9,55 @@ import local_translation_model
 import main
 
 
-def test_translation_model_status_detects_cached_gguf(tmp_path, monkeypatch):
-    monkeypatch.setenv(local_translation_model.TRANSLATION_MODEL_CACHE_DIR_ENV, str(tmp_path))
+@pytest.fixture(autouse=True)
+def reset_translation_model_runtime():
+    local_translation_model.unload_translation_model()
+    yield
+    local_translation_model.unload_translation_model()
+
+
+def create_cached_translation_model(tmp_path, profile_id=local_translation_model.STANDARD_TRANSLATION_PROFILE, snapshot_name="snapshot-a"):
+    profile = local_translation_model.get_translation_profile(profile_id)
     snapshot = (
         tmp_path
-        / local_translation_model.repo_cache_dir_name(local_translation_model.TRANSLATION_MODEL_GGUF_REPO_ID)
+        / local_translation_model.repo_cache_dir_name(profile["gguf_repo_id"])
         / "snapshots"
-        / "snapshot-a"
+        / snapshot_name
     )
     snapshot.mkdir(parents=True)
-    (snapshot / local_translation_model.TRANSLATION_MODEL_GGUF_FILE).write_bytes(b"gguf")
+    model_file = snapshot / profile["model_file"]
+    model_file.write_bytes(b"gguf")
+    return model_file
+
+
+def test_translation_model_status_detects_cached_gguf(tmp_path, monkeypatch):
+    monkeypatch.setenv(local_translation_model.TRANSLATION_MODEL_CACHE_DIR_ENV, str(tmp_path))
+    model_file = create_cached_translation_model(tmp_path)
 
     status = local_translation_model.get_translation_model_status()
 
     assert status["cached"] is True
-    assert status["model_path"].endswith(local_translation_model.TRANSLATION_MODEL_GGUF_FILE)
-    assert status["repo_id"] == local_translation_model.TRANSLATION_MODEL_DISPLAY_REPO_ID
+    assert status["model_path"] == str(model_file)
+    assert status["repo_id"] == "tencent/Hy-MT2-1.8B Q4_K_M"
+    assert status["runtime_profile"] == local_translation_model.STANDARD_TRANSLATION_PROFILE
+
+
+def test_translation_model_status_ignores_legacy_hymt15_cache(tmp_path, monkeypatch):
+    monkeypatch.setenv(local_translation_model.TRANSLATION_MODEL_CACHE_DIR_ENV, str(tmp_path))
+    legacy_snapshot = (
+        tmp_path
+        / local_translation_model.repo_cache_dir_name(local_translation_model.LEGACY_TRANSLATION_MODEL_GGUF_REPO_ID)
+        / "snapshots"
+        / "snapshot-a"
+    )
+    legacy_snapshot.mkdir(parents=True)
+    (legacy_snapshot / "Hy-MT1.5-1.8B-2bit.gguf").write_bytes(b"legacy")
+
+    status = local_translation_model.get_translation_model_status()
+
+    assert status["cached"] is False
+    assert status["available_profiles"] == []
+    assert "Hy-MT1.5" not in status["repo_id"]
 
 
 def test_translation_model_load_reports_runtime_missing_for_cached_model(tmp_path, monkeypatch):
@@ -33,14 +68,7 @@ def test_translation_model_load_reports_runtime_missing_for_cached_model(tmp_pat
     monkeypatch.delenv("SPEAKMORE_LOCAL_TRANSLATION_SERVER_URL", raising=False)
     monkeypatch.setattr(local_translation_model.shutil, "which", lambda _name: None)
     monkeypatch.setattr(local_translation_model, "has_llama_cpp_python_server", lambda: False)
-    snapshot = (
-        tmp_path
-        / local_translation_model.repo_cache_dir_name(local_translation_model.TRANSLATION_MODEL_GGUF_REPO_ID)
-        / "snapshots"
-        / "snapshot-a"
-    )
-    snapshot.mkdir(parents=True)
-    (snapshot / local_translation_model.TRANSLATION_MODEL_GGUF_FILE).write_bytes(b"gguf")
+    create_cached_translation_model(tmp_path)
 
     status = local_translation_model.load_translation_model()
 
@@ -65,6 +93,7 @@ def test_translation_model_status_reports_bundled_llama_server(tmp_path, monkeyp
     assert status["runtime_path"] == str(llama_server)
     assert status["runtime_source"] == "bundled"
     assert status["runtime_kind_available"] == "llama-server"
+    assert status["standard_runtime_available"] is True
 
 
 def test_llama_cpp_python_server_probe_handles_missing_parent_package(monkeypatch):
@@ -90,15 +119,7 @@ def test_translation_model_load_can_use_llama_cpp_python_server(tmp_path, monkey
         "create_connection",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError()),
     )
-    snapshot = (
-        tmp_path
-        / local_translation_model.repo_cache_dir_name(local_translation_model.TRANSLATION_MODEL_GGUF_REPO_ID)
-        / "snapshots"
-        / "snapshot-a"
-    )
-    snapshot.mkdir(parents=True)
-    model_file = snapshot / local_translation_model.TRANSLATION_MODEL_GGUF_FILE
-    model_file.write_bytes(b"gguf")
+    model_file = create_cached_translation_model(tmp_path)
     popen_calls = []
 
     class FakeProcess:
@@ -145,15 +166,7 @@ def test_translation_model_load_uses_bundled_llama_server(tmp_path, monkeypatch)
         "create_connection",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError()),
     )
-    snapshot = (
-        tmp_path
-        / local_translation_model.repo_cache_dir_name(local_translation_model.TRANSLATION_MODEL_GGUF_REPO_ID)
-        / "snapshots"
-        / "snapshot-a"
-    )
-    snapshot.mkdir(parents=True)
-    model_file = snapshot / local_translation_model.TRANSLATION_MODEL_GGUF_FILE
-    model_file.write_bytes(b"gguf")
+    model_file = create_cached_translation_model(tmp_path)
     llama_server = tmp_path / "llama-server.exe"
     llama_server.write_bytes(b"runtime")
     monkeypatch.setenv(local_translation_model.BUNDLED_LLAMA_SERVER_PATH_ENV, str(llama_server))
@@ -183,6 +196,7 @@ def test_translation_model_load_uses_bundled_llama_server(tmp_path, monkeypatch)
 
     assert status["status"] == "ready"
     assert status["runtime_kind"] == "llama-server"
+    assert status["runtime_profile"] == local_translation_model.STANDARD_TRANSLATION_PROFILE
     args = popen_calls[0][0]
     assert args[0] == str(llama_server)
     assert "--model" in args
@@ -201,14 +215,7 @@ def test_translation_model_load_reports_model_log_failure(tmp_path, monkeypatch)
         "create_connection",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError()),
     )
-    snapshot = (
-        tmp_path
-        / local_translation_model.repo_cache_dir_name(local_translation_model.TRANSLATION_MODEL_GGUF_REPO_ID)
-        / "snapshots"
-        / "snapshot-a"
-    )
-    snapshot.mkdir(parents=True)
-    (snapshot / local_translation_model.TRANSLATION_MODEL_GGUF_FILE).write_bytes(b"gguf")
+    create_cached_translation_model(tmp_path)
     llama_server = tmp_path / "llama-server.exe"
     llama_server.write_bytes(b"runtime")
     monkeypatch.setenv(local_translation_model.BUNDLED_LLAMA_SERVER_PATH_ENV, str(llama_server))
@@ -242,6 +249,130 @@ def test_translation_model_load_reports_model_log_failure(tmp_path, monkeypatch)
     assert status["status"] == "failed"
     assert "cached GGUF" in status["detail"]
     assert status["runtime_log_path"].endswith("llama-server.log")
+
+
+def test_translation_model_status_prefers_stq_profile_when_runtime_exists(tmp_path, monkeypatch):
+    monkeypatch.setenv(local_translation_model.TRANSLATION_MODEL_CACHE_DIR_ENV, str(tmp_path))
+    stq_model_file = create_cached_translation_model(tmp_path, local_translation_model.STQ_TRANSLATION_PROFILE)
+    create_cached_translation_model(tmp_path, local_translation_model.STANDARD_TRANSLATION_PROFILE)
+    stq_runtime = tmp_path / "stq" / "llama-server.exe"
+    stq_runtime.parent.mkdir()
+    stq_runtime.write_bytes(b"runtime")
+    monkeypatch.setenv(local_translation_model.BUNDLED_HYMT_LLAMA_SERVER_PATH_ENV, str(stq_runtime))
+    monkeypatch.delenv(local_translation_model.BUNDLED_LLAMA_SERVER_PATH_ENV, raising=False)
+    monkeypatch.setattr(local_translation_model.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(local_translation_model, "has_llama_cpp_python_server", lambda: False)
+
+    status = local_translation_model.get_translation_model_status()
+
+    assert status["cached"] is True
+    assert status["runtime_profile"] == local_translation_model.STQ_TRANSLATION_PROFILE
+    assert status["model_path"] == str(stq_model_file)
+    assert status["repo_id"] == "tencent/Hy-MT2-1.8B-1.25Bit"
+    assert status["stq_runtime_available"] is True
+
+
+def test_translation_model_download_chooses_stq_when_runtime_exists(tmp_path, monkeypatch):
+    monkeypatch.setenv(local_translation_model.TRANSLATION_MODEL_CACHE_DIR_ENV, str(tmp_path))
+    stq_runtime = tmp_path / "stq" / "llama-server.exe"
+    stq_runtime.parent.mkdir()
+    stq_runtime.write_bytes(b"runtime")
+    monkeypatch.setenv(local_translation_model.BUNDLED_HYMT_LLAMA_SERVER_PATH_ENV, str(stq_runtime))
+    calls = []
+
+    def fake_snapshot_download(**kwargs):
+        calls.append(kwargs)
+        profile = local_translation_model.get_translation_profile(local_translation_model.STQ_TRANSLATION_PROFILE)
+        snapshot = tmp_path / "downloaded-stq"
+        snapshot.mkdir()
+        (snapshot / profile["model_file"]).write_bytes(b"gguf")
+        return str(snapshot)
+
+    monkeypatch.setitem(sys.modules, "huggingface_hub", types.SimpleNamespace(snapshot_download=fake_snapshot_download))
+
+    model_file = local_translation_model.download_translation_model()
+
+    assert model_file.name == "Hy-MT2-1.8B-1.25Bit.gguf"
+    assert calls[0]["repo_id"] == "tencent/Hy-MT2-1.8B-1.25Bit-GGUF"
+
+
+def test_translation_model_download_uses_standard_when_stq_runtime_missing(tmp_path, monkeypatch):
+    monkeypatch.setenv(local_translation_model.TRANSLATION_MODEL_CACHE_DIR_ENV, str(tmp_path))
+    monkeypatch.delenv(local_translation_model.BUNDLED_HYMT_LLAMA_SERVER_PATH_ENV, raising=False)
+    calls = []
+
+    def fake_snapshot_download(**kwargs):
+        calls.append(kwargs)
+        profile = local_translation_model.get_translation_profile(local_translation_model.STANDARD_TRANSLATION_PROFILE)
+        snapshot = tmp_path / "downloaded-standard"
+        snapshot.mkdir()
+        (snapshot / profile["model_file"]).write_bytes(b"gguf")
+        return str(snapshot)
+
+    monkeypatch.setitem(sys.modules, "huggingface_hub", types.SimpleNamespace(snapshot_download=fake_snapshot_download))
+
+    model_file = local_translation_model.download_translation_model()
+
+    assert model_file.name == "Hy-MT2-1.8B-Q4_K_M.gguf"
+    assert calls[0]["repo_id"] == "tencent/Hy-MT2-1.8B-GGUF"
+
+
+def test_translation_model_load_falls_back_to_standard_when_stq_runtime_fails(tmp_path, monkeypatch):
+    monkeypatch.setenv(local_translation_model.TRANSLATION_MODEL_CACHE_DIR_ENV, str(tmp_path))
+    stq_model_file = create_cached_translation_model(tmp_path, local_translation_model.STQ_TRANSLATION_PROFILE)
+    standard_model_file = create_cached_translation_model(tmp_path, local_translation_model.STANDARD_TRANSLATION_PROFILE)
+    stq_runtime = tmp_path / "stq" / "llama-server.exe"
+    standard_runtime = tmp_path / "standard" / "llama-server.exe"
+    stq_runtime.parent.mkdir()
+    standard_runtime.parent.mkdir()
+    stq_runtime.write_bytes(b"runtime")
+    standard_runtime.write_bytes(b"runtime")
+    monkeypatch.setenv(local_translation_model.BUNDLED_HYMT_LLAMA_SERVER_PATH_ENV, str(stq_runtime))
+    monkeypatch.setenv(local_translation_model.BUNDLED_LLAMA_SERVER_PATH_ENV, str(standard_runtime))
+    monkeypatch.delenv("SPEAKMORE_LOCAL_TRANSLATION_SERVER_URL", raising=False)
+    monkeypatch.setattr(local_translation_model.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(local_translation_model, "has_llama_cpp_python_server", lambda: False)
+    monkeypatch.setattr(
+        local_translation_model.socket,
+        "create_connection",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError()),
+    )
+    starts = []
+
+    class FakeProcess:
+        pid = 12345
+        returncode = None
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            pass
+
+        def wait(self, timeout=None):
+            del timeout
+            return 0
+
+    def fake_popen(args, **kwargs):
+        starts.append(args)
+        return FakeProcess()
+
+    def fake_wait(_url, **kwargs):
+        model_path = kwargs.get("process") and starts[-1][starts[-1].index("--model") + 1]
+        if model_path == str(stq_model_file):
+            raise RuntimeError("STQ runtime failed")
+
+    monkeypatch.setattr(local_translation_model.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(local_translation_model, "wait_for_local_server", fake_wait)
+
+    status = local_translation_model.load_translation_model()
+
+    assert status["status"] == "ready"
+    assert status["runtime_profile"] == local_translation_model.STANDARD_TRANSLATION_PROFILE
+    assert starts[0][0] == str(stq_runtime)
+    assert str(stq_model_file) in starts[0]
+    assert starts[1][0] == str(standard_runtime)
+    assert str(standard_model_file) in starts[1]
 
 
 def test_translate_text_with_engine_uses_local_model_when_ready(monkeypatch):

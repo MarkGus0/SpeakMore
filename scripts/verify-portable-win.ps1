@@ -53,6 +53,15 @@ try {
     Fail '便携包缺少本地翻译运行时 llama-server.exe'
   }
 
+  $hyMtLlamaServer = $allFiles | Where-Object {
+    $_.Name -eq 'llama-server.exe' -and $_.FullName -match '\\llama-stq\\'
+  } | Select-Object -First 1
+  if ($hyMtLlamaServer) {
+    Write-Host "Hy-MT STQ runtime found: $($hyMtLlamaServer.FullName)"
+  } else {
+    Write-Host 'Hy-MT STQ runtime not bundled; stable local translation runtime will be used.'
+  }
+
   $secretPattern = 'sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+|-----BEGIN (RSA|OPENSSH|EC|DSA) PRIVATE KEY'
   foreach ($file in $allFiles | Where-Object { $_.Length -lt 5MB }) {
     $content = Get-Content -Raw -ErrorAction SilentlyContinue $file.FullName

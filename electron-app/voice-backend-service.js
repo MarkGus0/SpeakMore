@@ -36,6 +36,7 @@ function createVoiceBackendService({
   getTranslationModelCacheDir = () => '',
   getAsrDeviceMode = () => 'default',
   llamaServerPath = () => '',
+  hyMtLlamaServerPath = () => '',
   spawnProcess,
   probeReady,
   probeModelStatus,
@@ -69,6 +70,12 @@ function createVoiceBackendService({
     const resolvedLlamaServerPath = typeof llamaServerPath === 'function' ? String(llamaServerPath() || '').trim() : '';
     if (resolvedLlamaServerPath && !env.SPEAKMORE_BUNDLED_LLAMA_SERVER_PATH) {
       env.SPEAKMORE_BUNDLED_LLAMA_SERVER_PATH = resolvedLlamaServerPath;
+    }
+    const resolvedHyMtLlamaServerPath = typeof hyMtLlamaServerPath === 'function'
+      ? String(hyMtLlamaServerPath() || '').trim()
+      : '';
+    if (resolvedHyMtLlamaServerPath && !env.SPEAKMORE_BUNDLED_HYMT_LLAMA_SERVER_PATH) {
+      env.SPEAKMORE_BUNDLED_HYMT_LLAMA_SERVER_PATH = resolvedHyMtLlamaServerPath;
     }
     const asrDeviceMode = normalizeAsrDeviceMode(
       typeof getAsrDeviceMode === 'function' ? String(getAsrDeviceMode() || '').trim() : '',

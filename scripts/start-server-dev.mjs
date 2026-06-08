@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   checkServerPythonPackages,
+  resolveDevHyMtLlamaServerPath,
   resolveDevLlamaServerPath,
   resolveServerPython,
 } from './dev-prereqs.mjs';
@@ -47,6 +48,17 @@ const llamaServerPath = resolveDevLlamaServerPath({
 if (llamaServerPath && !serverEnv.SPEAKMORE_BUNDLED_LLAMA_SERVER_PATH) {
   serverEnv.SPEAKMORE_BUNDLED_LLAMA_SERVER_PATH = llamaServerPath;
   console.log(`使用本地翻译运行时: ${llamaServerPath}`);
+}
+
+const hyMtLlamaServerPath = resolveDevHyMtLlamaServerPath({
+  env: serverEnv,
+  existsSync,
+  platform: process.platform,
+  rootDir,
+});
+if (hyMtLlamaServerPath && !serverEnv.SPEAKMORE_BUNDLED_HYMT_LLAMA_SERVER_PATH) {
+  serverEnv.SPEAKMORE_BUNDLED_HYMT_LLAMA_SERVER_PATH = hyMtLlamaServerPath;
+  console.log(`Hy-MT STQ runtime: ${hyMtLlamaServerPath}`);
 }
 
 const child = spawn(pythonResult.pythonBin, ['main.py'], {

@@ -190,6 +190,7 @@ const voiceBackendService = createVoiceBackendService({
   getTranslationModelCacheDir: () => getConfiguredTranslationModelCacheDir(),
   getAsrDeviceMode: () => getConfiguredAsrDeviceMode(),
   llamaServerPath: () => appPaths.llamaServerPath(),
+  hyMtLlamaServerPath: () => appPaths.hyMtLlamaServerPath(),
   spawnProcess: spawn,
   probeReady: () => voiceBackendClient.checkVoiceServerReady(),
   probeModelStatus: () => voiceBackendClient.getVoiceModelStatus({ cacheDir: getConfiguredModelCacheDir() }),

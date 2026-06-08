@@ -5,7 +5,9 @@ import test from 'node:test';
 import {
   checkElectronDevPrereqs,
   checkServerPythonPackages,
+  getBundledHyMtLlamaServerPath,
   getBundledLlamaServerPath,
+  resolveDevHyMtLlamaServerPath,
   resolveDevLlamaServerPath,
   resolveServerPython,
 } from './dev-prereqs.mjs';
@@ -116,4 +118,29 @@ test('开发态后端不覆盖用户显式指定的 llama-server', () => {
   });
 
   assert.equal(result, 'E:\\llama\\llama-server.exe');
+});
+
+test('development backend can use prepared Hy-MT STQ runtime from release-artifacts', () => {
+  const rootDir = 'D:\\CodeWorkSpace\\SpeakMore';
+  const hyMtRuntime = getBundledHyMtLlamaServerPath({ rootDir, platform: 'win32' });
+
+  const result = resolveDevHyMtLlamaServerPath({
+    env: {},
+    existsSync: existsFor(hyMtRuntime),
+    platform: 'win32',
+    rootDir,
+  });
+
+  assert.equal(result, hyMtRuntime);
+});
+
+test('development backend keeps explicit Hy-MT STQ runtime override', () => {
+  const result = resolveDevHyMtLlamaServerPath({
+    env: { SPEAKMORE_HYMT_LLAMA_SERVER_PATH: 'E:\\hymt\\llama-server.exe' },
+    existsSync: () => true,
+    platform: 'win32',
+    rootDir: 'D:\\CodeWorkSpace\\SpeakMore',
+  });
+
+  assert.equal(result, 'E:\\hymt\\llama-server.exe');
 });
