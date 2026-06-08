@@ -1,6 +1,7 @@
 import asyncio
 import sys
 import types
+from http.client import IncompleteRead
 from pathlib import Path
 
 import pytest
@@ -315,6 +316,88 @@ def test_translation_model_download_uses_standard_when_stq_runtime_missing(tmp_p
 
     assert model_file.name == "Hy-MT2-1.8B-Q4_K_M.gguf"
     assert calls[0]["repo_id"] == "tencent/Hy-MT2-1.8B-GGUF"
+    assert calls[0]["resume_download"] is True
+    assert calls[0]["max_workers"] == 2
+
+
+def test_translation_model_download_retries_interrupted_download_and_keeps_partial_cache(tmp_path, monkeypatch):
+    monkeypatch.setenv(local_translation_model.TRANSLATION_MODEL_CACHE_DIR_ENV, str(tmp_path))
+    profile = local_translation_model.get_translation_profile(local_translation_model.STANDARD_TRANSLATION_PROFILE)
+    partial_blob = (
+        tmp_path
+        / local_translation_model.repo_cache_dir_name(profile["gguf_repo_id"])
+        / "blobs"
+        / "dc5f44fcf1fa496ee7ad725982c0c8c553a4de00259b53af84c4b89fb0c06699.incomplete"
+    )
+    partial_blob.parent.mkdir(parents=True)
+    partial_blob.write_bytes(b"partial")
+    calls = []
+
+    def fake_snapshot_download(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise IncompleteRead(b"partial", 12)
+        snapshot = tmp_path / "downloaded-standard"
+        snapshot.mkdir(exist_ok=True)
+        (snapshot / profile["model_file"]).write_bytes(b"gguf")
+        return str(snapshot)
+
+    monkeypatch.setitem(sys.modules, "huggingface_hub", types.SimpleNamespace(snapshot_download=fake_snapshot_download))
+    monkeypatch.setattr(local_translation_model.time, "sleep", lambda _seconds: None)
+
+    model_file = local_translation_model.download_translation_model()
+
+    assert model_file.name == "Hy-MT2-1.8B-Q4_K_M.gguf"
+    assert len(calls) == 2
+    assert partial_blob.is_file()
+
+
+def test_translation_model_download_normalizes_interrupted_error_after_retries(tmp_path, monkeypatch):
+    monkeypatch.setenv(local_translation_model.TRANSLATION_MODEL_CACHE_DIR_ENV, str(tmp_path))
+
+    def fake_snapshot_download(**_kwargs):
+        raise IncompleteRead(b"partial", 12)
+
+    monkeypatch.setitem(sys.modules, "huggingface_hub", types.SimpleNamespace(snapshot_download=fake_snapshot_download))
+    monkeypatch.setattr(local_translation_model.time, "sleep", lambda _seconds: None)
+
+    with pytest.raises(RuntimeError, match=local_translation_model.DOWNLOAD_INTERRUPTED_DETAIL_CODE):
+        local_translation_model.download_translation_model()
+
+
+def test_translation_model_download_failure_detail_does_not_double_prefix():
+    detail = "translation_model_download_failed: permission denied"
+
+    assert local_translation_model.build_translation_model_download_failure_detail(RuntimeError(detail)) == detail
+
+
+def test_translation_model_download_cleans_legacy_lock_without_removing_hymt2_partial(tmp_path, monkeypatch):
+    monkeypatch.setenv(local_translation_model.TRANSLATION_MODEL_CACHE_DIR_ENV, str(tmp_path))
+    legacy_lock = tmp_path / ".locks" / local_translation_model.repo_cache_dir_name(local_translation_model.LEGACY_TRANSLATION_MODEL_GGUF_REPO_ID)
+    legacy_lock.mkdir(parents=True)
+    (legacy_lock / "stale.lock").write_text("legacy", encoding="utf-8")
+    profile = local_translation_model.get_translation_profile(local_translation_model.STANDARD_TRANSLATION_PROFILE)
+    partial_blob = (
+        tmp_path
+        / local_translation_model.repo_cache_dir_name(profile["gguf_repo_id"])
+        / "blobs"
+        / "model.incomplete"
+    )
+    partial_blob.parent.mkdir(parents=True)
+    partial_blob.write_bytes(b"partial")
+
+    def fake_snapshot_download(**_kwargs):
+        snapshot = tmp_path / "downloaded-standard"
+        snapshot.mkdir(exist_ok=True)
+        (snapshot / profile["model_file"]).write_bytes(b"gguf")
+        return str(snapshot)
+
+    monkeypatch.setitem(sys.modules, "huggingface_hub", types.SimpleNamespace(snapshot_download=fake_snapshot_download))
+
+    local_translation_model.download_translation_model()
+
+    assert legacy_lock.exists() is False
+    assert partial_blob.is_file()
 
 
 def test_translation_model_load_falls_back_to_standard_when_stq_runtime_fails(tmp_path, monkeypatch):

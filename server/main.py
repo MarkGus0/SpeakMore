@@ -33,6 +33,7 @@ from model_manager import (
     get_managed_model_cache_root,
 )
 from local_translation_model import (
+    build_translation_model_download_failure_detail,
     configure_translation_model_cache_dir,
     download_translation_model,
     get_translation_model_cache_root,
@@ -473,7 +474,7 @@ async def run_translation_model_download_task(app: FastAPI) -> None:
         else:
             set_translation_model_task_state("idle", "Local translation model downloaded")
     except Exception as error:
-        set_translation_model_task_state("failed", str(error))
+        set_translation_model_task_state("failed", build_translation_model_download_failure_detail(error))
 
 
 async def run_translation_model_load_task(app: FastAPI) -> None:

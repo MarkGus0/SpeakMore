@@ -388,6 +388,7 @@ test('旧模型管理能力已删除，语音模型初始化并入设置页', as
   const voiceModelSection = await readProjectFile('src/pages/settings/VoiceModelSettingsSection.tsx');
   const translationModelSection = await readProjectFile('src/pages/settings/TranslationModelSettingsSection.tsx');
   const translationModelStore = await readProjectFile('src/services/translationModelStore.ts');
+  const i18n = await readProjectFile('src/i18n.tsx');
 
   await assert.rejects(
     () => readProjectFile('src/pages/Models.tsx'),
@@ -431,9 +432,13 @@ test('旧模型管理能力已删除，语音模型初始化并入设置页', as
   assert.match(translationModelSection, /chooseModelCacheDirectory/);
   assert.match(translationModelSection, /runtime_profile/);
   assert.match(translationModelSection, /Hy-MT2/);
+  assert.match(translationModelSection, /downloadInterruptedDetail/);
+  assert.match(translationModelSection, /translation_model_download_failed/);
   assert.doesNotMatch(translationModelSection, /AngelSlim|Hy-MT1\.5/);
   assert.doesNotMatch(translationModelSection, /unloadTranslationModel/);
   assert.doesNotMatch(translationModelSection, /translationEnginePreference|localTranslationModelEnabled/);
+  assert.match(i18n, /settings\.translationModel\.downloadInterruptedDetail/);
+  assert.match(i18n, /settings\.translationModel\.downloadFailedDetail/);
   assert.match(translationModelStore, /translation-model:get-status/);
   assert.match(translationModelStore, /translation-model:start-download/);
   assert.match(translationModelStore, /translation-model:load/);

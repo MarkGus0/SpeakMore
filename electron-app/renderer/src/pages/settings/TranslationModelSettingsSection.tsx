@@ -63,6 +63,17 @@ function getDetailText(status: TranslationModelStatus | null, t: (key: Translati
 
   const detail = status.detail.toLowerCase()
   if (
+    detail.includes('translation_model_download_interrupted')
+    || detail.includes('incompleteread')
+    || detail.includes('connection broken')
+    || detail.includes('read timed out')
+  ) {
+    return t('settings.translationModel.downloadInterruptedDetail')
+  }
+  if (detail.includes('translation_model_download_failed')) {
+    return t('settings.translationModel.downloadFailedDetail')
+  }
+  if (
     detail.includes('cached gguf')
     || detail.includes('could not be loaded')
     || detail.includes('failed to load model')

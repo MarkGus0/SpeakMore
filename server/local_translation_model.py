@@ -48,6 +48,10 @@ HYMT_LLAMA_SERVER_PATH_ENVS = (
 LLAMA_SERVER_URL_ENV = "SPEAKMORE_LOCAL_TRANSLATION_SERVER_URL"
 LLAMA_SERVER_PORT_ENV = "SPEAKMORE_LLAMA_SERVER_PORT"
 DEFAULT_LLAMA_SERVER_PORT = 8105
+TRANSLATION_MODEL_DOWNLOAD_ATTEMPTS = 3
+TRANSLATION_MODEL_DOWNLOAD_RETRY_DELAY_SECONDS = 1.5
+DOWNLOAD_INTERRUPTED_DETAIL_CODE = "translation_model_download_interrupted"
+DOWNLOAD_FAILED_DETAIL_CODE = "translation_model_download_failed"
 RUNTIME_MISSING_DETAIL = (
     "Local translation runtime is missing. Bundle llama-server with the app, set "
     "SPEAKMORE_BUNDLED_LLAMA_SERVER_PATH / SPEAKMORE_LLAMA_SERVER_PATH / LLAMA_SERVER_PATH, "
@@ -186,6 +190,68 @@ def find_cached_translation_model_file(cache_root: Path | None = None, profile: 
 def find_legacy_translation_model_cache_root(cache_root: Path | None = None) -> Path:
     root = Path(cache_root) if cache_root is not None else get_translation_model_cache_root()
     return root / repo_cache_dir_name(LEGACY_TRANSLATION_MODEL_GGUF_REPO_ID)
+
+
+def cleanup_legacy_translation_model_residue(cache_root: Path | None = None, remove_legacy_cache: bool = False) -> None:
+    root = Path(cache_root) if cache_root is not None else get_translation_model_cache_root()
+    try:
+        root_resolved = root.resolve()
+    except OSError:
+        root_resolved = root
+    legacy_cache = find_legacy_translation_model_cache_root(root)
+    legacy_lock = root / ".locks" / repo_cache_dir_name(LEGACY_TRANSLATION_MODEL_GGUF_REPO_ID)
+    cleanup_targets = [legacy_lock]
+    if remove_legacy_cache:
+        cleanup_targets.append(legacy_cache)
+    if not is_runtime_process_alive():
+        cleanup_targets.append(root / "llama-server.log")
+    try:
+        cleanup_targets.extend(root.glob(".tmp-hymt-*"))
+    except OSError:
+        pass
+
+    for target in cleanup_targets:
+        try:
+            resolved = target.resolve()
+            try:
+                resolved.relative_to(root_resolved)
+            except ValueError:
+                continue
+            if target.exists():
+                if target.is_dir():
+                    shutil.rmtree(target, ignore_errors=True)
+                else:
+                    target.unlink(missing_ok=True)
+        except OSError:
+            continue
+
+
+def is_retryable_translation_model_download_error(error: Exception | str) -> bool:
+    text = str(error or "").lower()
+    retry_markers = (
+        "incompleteread",
+        "connection broken",
+        "connection reset",
+        "connection aborted",
+        "remote end closed",
+        "read timed out",
+        "timeout",
+        "temporarily unavailable",
+        "chunkedencodingerror",
+        "protocolerror",
+        "ssl",
+        "eof occurred",
+    )
+    return any(marker in text for marker in retry_markers)
+
+
+def normalize_translation_model_download_error(error: Exception | str) -> str:
+    if is_retryable_translation_model_download_error(error):
+        return DOWNLOAD_INTERRUPTED_DETAIL_CODE
+    error_text = str(error or "").strip()
+    if not error_text:
+        return DOWNLOAD_FAILED_DETAIL_CODE
+    return f"{DOWNLOAD_FAILED_DETAIL_CODE}: {error_text[:300]}"
 
 
 def normalize_download_progress(progress: dict | None = None) -> dict[str, int | None]:
@@ -373,14 +439,36 @@ def download_translation_model(progress_callback: Callable[[DownloadProgress], N
         "repo_id": profile["gguf_repo_id"],
         "cache_dir": cache_root,
         "allow_patterns": [profile["model_file"], "README.md", "README_CN.md", "LICENSE.txt", "License.txt"],
+        "max_workers": 2,
+        "resume_download": True,
     }
     if tqdm_class:
         kwargs["tqdm_class"] = tqdm_class
-    snapshot_path = Path(snapshot_download(**kwargs))
-    model_file = snapshot_path / profile["model_file"]
-    if not model_file.is_file():
-        raise RuntimeError(f"Downloaded snapshot does not contain {profile['model_file']}")
-    return model_file
+    cleanup_legacy_translation_model_residue(cache_root, remove_legacy_cache=True)
+    last_error: Exception | None = None
+    for attempt in range(1, TRANSLATION_MODEL_DOWNLOAD_ATTEMPTS + 1):
+        try:
+            snapshot_path = Path(snapshot_download(**kwargs))
+            model_file = snapshot_path / profile["model_file"]
+            if not model_file.is_file():
+                raise RuntimeError(f"Downloaded snapshot does not contain {profile['model_file']}")
+            return model_file
+        except Exception as error:
+            last_error = error
+            if attempt >= TRANSLATION_MODEL_DOWNLOAD_ATTEMPTS or not is_retryable_translation_model_download_error(error):
+                break
+            time.sleep(TRANSLATION_MODEL_DOWNLOAD_RETRY_DELAY_SECONDS * attempt)
+    raise RuntimeError(normalize_translation_model_download_error(last_error or "unknown download error")) from last_error
+
+
+def build_translation_model_download_failure_detail(error: Exception | str) -> str:
+    text = str(error or "").strip()
+    if (
+        text in {DOWNLOAD_INTERRUPTED_DETAIL_CODE, DOWNLOAD_FAILED_DETAIL_CODE}
+        or text.startswith(f"{DOWNLOAD_FAILED_DETAIL_CODE}:")
+    ):
+        return text
+    return normalize_translation_model_download_error(error)
 
 
 def resolve_llama_server_runtime(runtime_profile: str = STANDARD_TRANSLATION_PROFILE) -> dict[str, str]:
