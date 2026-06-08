@@ -638,6 +638,9 @@ MEETING_REALTIME_STABLE_COMMIT_OBSERVATIONS = 2
 MEETING_REALTIME_STABLE_FAST_COMMIT_SECONDS = 0.05
 MEETING_REALTIME_SENTENCE_GRACE_SECONDS = 0.34
 MEETING_REALTIME_LOCAL_TRANSLATION_TIMEOUT_SECONDS = 2.2
+MEETING_REALTIME_PREVIEW_TRANSLATION_TIMEOUT_SECONDS = 0.9
+MEETING_REALTIME_PREVIEW_DEBOUNCE_SECONDS = 0.12
+MEETING_REALTIME_PREVIEW_MIN_INTERVAL_SECONDS = 0.38
 MEETING_REALTIME_TRANSLATION_ENDINGS = tuple(".!?\n\u3002\uff01\uff1f\u061f\u06d4\u0964")
 MEETING_REALTIME_LEADING_SEPARATOR_RE = re.compile(r"^[\s,，、،。.!?！？\u061f\u06d4\u0964;；؛:：]+")
 MEETING_REALTIME_CONNECTOR_PREFIX_RE = re.compile(
@@ -1487,6 +1490,47 @@ async def translate_realtime_sentence(
     )
 
 
+async def translate_realtime_preview(
+    raw_text: str,
+    target_language: str,
+    previous_sentences: list[str],
+    previous_context_pairs: list[dict] | None = None,
+) -> dict:
+    target_language_id = resolve_translation_target_language_id(target_language) or str(target_language or "").strip()
+    if not target_language_id:
+        return {"text": "", "translation_engine": "local_hy_mt", "local_model_status": "target_missing"}
+    local_status = get_translation_model_status()
+    if not local_status.get("ready"):
+        return {
+            "text": "",
+            "translation_engine": "local_hy_mt",
+            "local_model_status": str(local_status.get("status") or "missing"),
+        }
+    started_at = time.monotonic()
+    try:
+        translated = await translate_with_local_model(
+            raw_text=raw_text,
+            target_language_id=target_language_id,
+            target_language_name=format_target_language_for_prompt(target_language_id),
+            previous_sentences=previous_sentences[-1:],
+            previous_context_pairs=(previous_context_pairs or [])[-1:],
+            max_tokens=min(96, get_realtime_translation_token_budget(raw_text)),
+            timeout_seconds=MEETING_REALTIME_PREVIEW_TRANSLATION_TIMEOUT_SECONDS,
+        )
+    except Exception:
+        return {
+            "text": "",
+            "translation_engine": "local_hy_mt",
+            "local_model_status": str(local_status.get("status") or "failed"),
+        }
+    return {
+        "text": normalize_meeting_realtime_translation_output(translated),
+        "translation_engine": "local_hy_mt",
+        "translation_latency_ms": int((time.monotonic() - started_at) * 1000),
+        "local_model_status": "ready",
+    }
+
+
 class MeetingRealtimeTranslator:
     def __init__(self, websocket: WebSocket):
         self.websocket = websocket
@@ -1502,11 +1546,18 @@ class MeetingRealtimeTranslator:
         self.pending_tail_observed_at = 0.0
         self.pending_tail_wait_seconds = 0.0
         self.pending_tail_stable_count = 0
+        self.pending_sentence_index = 0
+        self.pending_sentence_id = ""
+        self.pending_source_fingerprint = ""
         self.next_sentence_index = 1
         self.translation_queue: list[dict] = []
         self.translation_cache: dict[tuple[str, str], str] = {}
         self.translated_context_pairs: list[dict] = []
         self.active_tasks: set[asyncio.Task] = set()
+        self.preview_task: asyncio.Task | None = None
+        self.preview_generation = 0
+        self.last_preview_started_at = 0.0
+        self.last_preview_compare_key = ""
         self.flush_timer_task: asyncio.Task | None = None
         self.closed = False
 
@@ -1524,11 +1575,18 @@ class MeetingRealtimeTranslator:
         self.pending_tail_observed_at = 0.0
         self.pending_tail_wait_seconds = 0.0
         self.pending_tail_stable_count = 0
+        self.pending_sentence_index = 0
+        self.pending_sentence_id = ""
+        self.pending_source_fingerprint = ""
         self.next_sentence_index = 1
         self.translation_queue = []
         self.translation_cache = {}
         self.translated_context_pairs = []
         self.active_tasks = set()
+        self.preview_task = None
+        self.preview_generation = 0
+        self.last_preview_started_at = 0.0
+        self.last_preview_compare_key = ""
         self.flush_timer_task = None
         self.closed = False
 
@@ -1553,6 +1611,9 @@ class MeetingRealtimeTranslator:
                 if not task.done():
                     task.cancel()
             self.active_tasks.clear()
+            if self.preview_task and not self.preview_task.done():
+                self.preview_task.cancel()
+            self.preview_task = None
         if self.flush_timer_task and not self.flush_timer_task.done() and self.flush_timer_task is not asyncio.current_task():
             self.flush_timer_task.cancel()
         self.flush_timer_task = None
@@ -1591,6 +1652,7 @@ class MeetingRealtimeTranslator:
         if not get_meeting_translation_target(self.parameters):
             return
         if not stable:
+            await self._observe_partial_preview(text=text, segment_text=segment_text)
             return
 
         normalized_text = normalize_meeting_realtime_source(text)
@@ -1628,7 +1690,7 @@ class MeetingRealtimeTranslator:
                     return
             merged_tail = self._merge_pending_tail(pending_tail, suffix) if self.pending_tail_text else ""
             if merged_tail:
-                self._clear_pending_tail_only()
+                self._clear_pending_tail_only(clear_identity=False)
                 suffix = merged_tail
             elif self.pending_tail_text:
                 await self._commit_pending_tail(force=False)
@@ -1692,11 +1754,53 @@ class MeetingRealtimeTranslator:
             return sentence
         return normalize_meeting_realtime_source(strip_meeting_realtime_leading_separators(sentence[boundary:]))
 
-    def _clear_pending_tail_only(self) -> None:
+    async def _observe_partial_preview(self, text: str, segment_text: str = "") -> None:
+        target_language = get_meeting_translation_target(self.parameters)
+        if not target_language:
+            return
+        normalized_segment = normalize_meeting_realtime_source(segment_text)
+        normalized_text = normalize_meeting_realtime_source(text)
+        candidate = normalized_segment or self._extract_uncommitted_suffix(normalized_text)
+        candidate = normalize_meeting_realtime_source(candidate)
+        if not candidate or is_meaningless_meeting_realtime_segment(candidate) or self._is_already_committed(candidate):
+            return
+        if self.pending_tail_text:
+            merged = self._merge_pending_tail(self.pending_tail_text, candidate)
+            candidate = merged or candidate
+        self._set_pending_tail(candidate, allow_timer=False)
+        if not self.pending_tail_text:
+            return
+        sentence_index, sentence_id, source_fingerprint = self._ensure_pending_sentence_identity()
+        await self._notify_pending_sentence(
+            self.pending_tail_text,
+            sentence_index,
+            target_language,
+            sentence_id,
+            source_fingerprint,
+            committed=False,
+            provisional=True,
+        )
+        self._schedule_preview_translation(
+            segment=self.pending_tail_text,
+            target_language=target_language,
+            sentence_index=sentence_index,
+            sentence_id=sentence_id,
+            source_fingerprint=source_fingerprint,
+        )
+
+    def _clear_pending_tail_only(self, clear_identity: bool = True) -> None:
         self.pending_tail_text = ""
         self.pending_tail_compare_key = ""
         self.pending_tail_wait_seconds = 0.0
         self.pending_tail_stable_count = 0
+        if clear_identity:
+            self.pending_sentence_index = 0
+            self.pending_sentence_id = ""
+            self.pending_source_fingerprint = ""
+            self.preview_generation += 1
+            if self.preview_task and not self.preview_task.done() and self.preview_task is not asyncio.current_task():
+                self.preview_task.cancel()
+            self.preview_task = None
         self._cancel_flush_timer()
 
     def _merge_pending_tail(self, pending_tail: str, next_suffix: str) -> str:
@@ -1751,6 +1855,7 @@ class MeetingRealtimeTranslator:
 
         self.pending_tail_text = normalized_tail
         self.pending_tail_compare_key = tail_key
+        self.pending_source_fingerprint = tail_key
         self.pending_tail_observed_at = time.monotonic()
         self.pending_tail_wait_seconds = get_meeting_realtime_pause_wait_seconds(normalized_tail)
         self.pending_tail_stable_count = 1
@@ -1786,10 +1891,24 @@ class MeetingRealtimeTranslator:
                 return
         elif not has_meeting_realtime_pause_commit_length(tail):
             return
+        sentence_index = self.pending_sentence_index
+        sentence_id = self.pending_sentence_id
+        source_fingerprint = self.pending_source_fingerprint
         self._clear_pending_tail_only()
-        await self._commit_sentence(tail)
+        await self._commit_sentence(
+            tail,
+            sentence_index=sentence_index,
+            sentence_id=sentence_id,
+            source_fingerprint=source_fingerprint,
+        )
 
-    async def _commit_sentence(self, sentence: str) -> None:
+    async def _commit_sentence(
+        self,
+        sentence: str,
+        sentence_index: int = 0,
+        sentence_id: str = "",
+        source_fingerprint: str = "",
+    ) -> None:
         normalized = normalize_meeting_realtime_source(strip_meeting_realtime_leading_separators(sentence))
         normalized = self._trim_committed_prefix_from_sentence(normalized)
         if not normalized or is_meaningless_meeting_realtime_segment(normalized):
@@ -1807,17 +1926,28 @@ class MeetingRealtimeTranslator:
         if not target_language:
             return
 
-        sentence_index = self.next_sentence_index
-        self.next_sentence_index += 1
-        sentence_id = self._make_sentence_id(sentence_index)
-        source_fingerprint = compare_key
+        if not sentence_index:
+            sentence_index = self.next_sentence_index
+            self.next_sentence_index += 1
+        else:
+            self.next_sentence_index = max(self.next_sentence_index, sentence_index + 1)
+        sentence_id = sentence_id or self._make_sentence_id(sentence_index)
+        source_fingerprint = source_fingerprint or compare_key
         previous_sentences = self.committed_sentences[-2:]
         previous_context_pairs = self.translated_context_pairs[-2:]
         self.committed_sentences.append(normalized)
         self.committed_sentence_keys.append(compare_key)
         self.committed_compare_key += compare_key
 
-        await self._notify_pending_sentence(normalized, sentence_index, target_language, sentence_id, source_fingerprint)
+        await self._notify_pending_sentence(
+            normalized,
+            sentence_index,
+            target_language,
+            sentence_id,
+            source_fingerprint,
+            committed=True,
+            provisional=False,
+        )
         if len(self.translation_queue) >= MEETING_REALTIME_TRANSLATION_MAX_QUEUE:
             self.translation_queue = self.translation_queue[-(MEETING_REALTIME_TRANSLATION_MAX_QUEUE - 1) :]
         self.translation_queue.append({
@@ -1836,6 +1966,15 @@ class MeetingRealtimeTranslator:
     def _make_sentence_id(self, sentence_index: int) -> str:
         return f"{self.audio_id or 'meeting'}:sentence:{sentence_index}"
 
+    def _ensure_pending_sentence_identity(self) -> tuple[int, str, str]:
+        if not self.pending_sentence_index:
+            self.pending_sentence_index = self.next_sentence_index
+            self.next_sentence_index += 1
+        if not self.pending_sentence_id:
+            self.pending_sentence_id = self._make_sentence_id(self.pending_sentence_index)
+        self.pending_source_fingerprint = self.pending_source_fingerprint or normalize_meeting_realtime_compare(self.pending_tail_text)
+        return self.pending_sentence_index, self.pending_sentence_id, self.pending_source_fingerprint
+
     async def _notify_pending_sentence(
         self,
         segment: str,
@@ -1843,6 +1982,8 @@ class MeetingRealtimeTranslator:
         target_language: str,
         sentence_id: str,
         source_fingerprint: str,
+        committed: bool = True,
+        provisional: bool = False,
     ) -> None:
         await send_ws_message(
             self.websocket,
@@ -1855,12 +1996,107 @@ class MeetingRealtimeTranslator:
                 "chunk_index": sentence_index,
                 "sentence_index": sentence_index,
                 "sentence_id": sentence_id,
-                "stable": False,
-                "committed": True,
+                "stable": not provisional and committed,
+                "committed": committed,
+                "provisional": provisional,
                 "commit_policy": "sentence_or_phrase_group",
                 "realtime_profile": self.parameters.get("meeting_realtime_profile") or "frontier_simulst",
             },
         )
+
+    def _should_preview_translate(self, segment: str) -> bool:
+        text = normalize_meeting_realtime_source(segment)
+        if not text or is_meaningless_meeting_realtime_segment(text) or is_tiny_meeting_realtime_fragment(text):
+            return False
+        metrics = get_meeting_realtime_commit_metrics(text)
+        if bool(metrics["compact"]):
+            return int(metrics["units"]) >= 2
+        return int(metrics["units"]) >= 1 and int(metrics["compare_length"]) >= 3
+
+    def _schedule_preview_translation(
+        self,
+        segment: str,
+        target_language: str,
+        sentence_index: int,
+        sentence_id: str,
+        source_fingerprint: str,
+    ) -> None:
+        if self.closed or get_translation_engine_preference(self.parameters) == "llm":
+            return
+        if not self._should_preview_translate(segment):
+            return
+        compare_key = normalize_meeting_realtime_compare(segment)
+        if not compare_key or compare_key == self.last_preview_compare_key:
+            return
+        now_value = time.monotonic()
+        if now_value - self.last_preview_started_at < MEETING_REALTIME_PREVIEW_MIN_INTERVAL_SECONDS:
+            return
+        self.last_preview_started_at = now_value
+        self.last_preview_compare_key = compare_key
+        self.preview_generation += 1
+        generation = self.preview_generation
+        if self.preview_task and not self.preview_task.done():
+            self.preview_task.cancel()
+        self.preview_task = asyncio.create_task(self._translate_preview_after_delay(
+            segment=segment,
+            target_language=target_language,
+            sentence_index=sentence_index,
+            sentence_id=sentence_id,
+            source_fingerprint=source_fingerprint,
+            generation=generation,
+        ))
+
+    async def _translate_preview_after_delay(
+        self,
+        segment: str,
+        target_language: str,
+        sentence_index: int,
+        sentence_id: str,
+        source_fingerprint: str,
+        generation: int,
+    ) -> None:
+        try:
+            await asyncio.sleep(MEETING_REALTIME_PREVIEW_DEBOUNCE_SECONDS)
+            if self.closed or generation != self.preview_generation:
+                return
+            translation_meta = await translate_realtime_preview(
+                raw_text=segment,
+                target_language=target_language,
+                previous_sentences=self.committed_sentences[-1:],
+                previous_context_pairs=self.translated_context_pairs[-1:],
+            )
+            translation_text = str(translation_meta.get("text") or "")
+            if self.closed or generation != self.preview_generation or not translation_text:
+                return
+            if self.pending_sentence_id and self.pending_sentence_id != sentence_id:
+                return
+            await send_ws_message(
+                self.websocket,
+                "meeting_translation",
+                {
+                    "audio_id": self.audio_id,
+                    "text": translation_text,
+                    "source_text": segment,
+                    "source_fingerprint": source_fingerprint,
+                    "target_language": target_language,
+                    "chunk_index": sentence_index,
+                    "sentence_index": sentence_index,
+                    "sentence_id": sentence_id,
+                    "partial": True,
+                    "stable": False,
+                    "committed": False,
+                    "provisional": True,
+                    "commit_policy": "sentence_or_phrase_group",
+                    "realtime_profile": self.parameters.get("meeting_realtime_profile") or "frontier_simulst",
+                    "translation_engine": translation_meta.get("translation_engine") or "local_hy_mt",
+                    "translation_latency_ms": translation_meta.get("translation_latency_ms"),
+                    "local_model_status": translation_meta.get("local_model_status"),
+                },
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return
 
     def _start_next_translations(self) -> None:
         if self.closed:
@@ -2158,6 +2394,7 @@ async def ws_voice_flow(websocket: WebSocket, app_instance: FastAPI | None = Non
                                     "asr_latency_ms": int(getattr(result, "asr_latency_ms", 0) or 0),
                                     "endpoint_reason": str(getattr(result, "endpoint_reason", "") or ""),
                                     "asr_window_ms": int(getattr(result, "asr_window_ms", 0) or 0),
+                                    "asr_full_segment_ms": int(getattr(result, "full_segment_ms", 0) or getattr(result, "asr_window_ms", 0) or 0),
                                     "audio_source_profile": parameters.get("meeting_audio_source") if isinstance(parameters, dict) else "",
                                 },
                             )

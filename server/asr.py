@@ -83,6 +83,7 @@ class MeetingEndpointEvent:
     utterance_index: int
     reason: str
     asr_window_ms: int
+    full_segment_ms: int = 0
 
 
 @dataclass(frozen=True)
@@ -99,8 +100,9 @@ PCM16_STREAM_CHUNK_BYTES = 64 * 1024
 MEETING_ENDPOINT_FRAME_MS = 30
 MEETING_ENDPOINT_PREROLL_MS = 180
 MEETING_ENDPOINT_MIN_SPEECH_MS = 240
-MEETING_ENDPOINT_END_SILENCE_MS = 720
-MEETING_ENDPOINT_PARTIAL_MS = 1200
+MEETING_ENDPOINT_END_SILENCE_MS = 520
+MEETING_ENDPOINT_PARTIAL_MS = 480
+MEETING_ENDPOINT_PARTIAL_WINDOW_MS = 2400
 MEETING_ENDPOINT_MAX_SEGMENT_MS = 10000
 MEETING_ENDPOINT_MIN_RMS = 0.008
 MEETING_ENDPOINT_PEAK_TRIGGER = 0.075
@@ -506,6 +508,7 @@ class MeetingEndpointDetector:
         min_speech_ms: int = MEETING_ENDPOINT_MIN_SPEECH_MS,
         end_silence_ms: int = MEETING_ENDPOINT_END_SILENCE_MS,
         partial_ms: int = MEETING_ENDPOINT_PARTIAL_MS,
+        partial_window_ms: int = MEETING_ENDPOINT_PARTIAL_WINDOW_MS,
         max_segment_ms: int = MEETING_ENDPOINT_MAX_SEGMENT_MS,
     ) -> None:
         self.sample_rate = max(1, int(sample_rate or 16000))
@@ -515,6 +518,8 @@ class MeetingEndpointDetector:
         self.min_speech_ms = max(self.frame_ms, int(min_speech_ms))
         self.end_silence_ms = max(self.frame_ms, int(end_silence_ms))
         self.partial_ms = max(self.frame_ms, int(partial_ms))
+        self.partial_window_ms = max(self.partial_ms, int(partial_window_ms))
+        self.partial_window_bytes = max(self.frame_bytes, int(self.sample_rate * self.partial_window_ms / 1000) * 2)
         self.max_segment_ms = max(self.partial_ms, int(max_segment_ms))
         self.pending = bytearray()
         self.preroll: deque[bytes] = deque(maxlen=self.preroll_frames)
@@ -596,11 +601,12 @@ class MeetingEndpointDetector:
         if self.segment_ms >= self.next_partial_ms:
             self.next_partial_ms += self.partial_ms
             return MeetingEndpointEvent(
-                pcm=bytes(self.segment),
+                pcm=bytes(self.segment[-self.partial_window_bytes :]),
                 stable=False,
                 utterance_index=self.next_utterance_index,
                 reason="partial",
-                asr_window_ms=self.segment_ms,
+                asr_window_ms=min(self.segment_ms, self.partial_window_ms),
+                full_segment_ms=self.segment_ms,
             )
         return None
 
@@ -611,6 +617,7 @@ class MeetingEndpointDetector:
             utterance_index=self.next_utterance_index,
             reason=reason,
             asr_window_ms=self.segment_ms,
+            full_segment_ms=self.segment_ms,
         )
         if stable:
             self.next_utterance_index += 1

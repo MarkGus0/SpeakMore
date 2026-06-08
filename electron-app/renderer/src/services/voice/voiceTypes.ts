@@ -58,6 +58,8 @@ export type MeetingLiveSegment = {
   normalizedSourceText: string
   sourceFingerprint?: string
   isDuplicate?: boolean
+  isPreview?: boolean
+  stable?: boolean
 }
 
 export type VoiceSession = {

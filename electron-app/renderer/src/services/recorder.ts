@@ -564,6 +564,26 @@ function upsertMeetingLiveSegment(
   }
 
   const existing = previousSegments[targetIndex]
+  if (segment.isPreview && existing.status === 'translated' && !existing.isPreview) {
+    return previousSegments
+  }
+  if (segment.status === 'pending' && existing.translationText) {
+    return previousSegments.map((item, index) => index === targetIndex
+      ? {
+        ...item,
+        ...segment,
+        id: item.id,
+        chunkIndex: item.chunkIndex,
+        sentenceIndex: item.sentenceIndex || item.chunkIndex,
+        sentenceId: item.sentenceId || segment.sentenceId,
+        createdAt: item.createdAt,
+        translationText: item.translationText,
+        status: item.status,
+        isPreview: item.isPreview,
+        stable: item.stable,
+      }
+      : item)
+  }
   const existingCompare = normalizeMeetingLiveCompare(existing.normalizedSourceText || existing.sourceText)
   if (
     segment.status === 'translated'
@@ -616,6 +636,8 @@ function handleMeetingTranslationPending(payload?: Record<string, unknown>) {
     normalizedSourceText: normalizeMeetingLiveSourceText(sourceText),
     sourceFingerprint,
     isDuplicate: Boolean(payload?.is_duplicate),
+    isPreview: payload?.provisional === true,
+    stable: payload?.stable === true,
   }
   const nextSegments = upsertMeetingLiveSegment(previousSegments, segment, replaceChunkIndex)
   setSession({
@@ -653,6 +675,8 @@ function handleMeetingTranslation(text: string, payload?: Record<string, unknown
     normalizedSourceText: normalizeMeetingLiveSourceText(sourceText),
     sourceFingerprint,
     isDuplicate: Boolean(payload?.is_duplicate),
+    isPreview: payload?.provisional === true,
+    stable: payload?.stable === true,
   }
   const nextSegments = upsertMeetingLiveSegment(previousSegments, segment, replaceChunkIndex)
   setSession({

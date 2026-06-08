@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import json
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -355,7 +356,7 @@ class WsProtocolContractTest(unittest.TestCase):
         self.assertNotIn("meeting_translation", [message["K"] for message in websocket.sent_messages])
         refine.assert_not_called()
 
-    def test_meeting_notes_partial_transcription_without_sentence_end_does_not_translate(self):
+    def test_meeting_notes_partial_transcription_without_sentence_end_only_creates_preview_pending(self):
         websocket = FakeWebSocket([])
         translator = MeetingRealtimeTranslator(websocket)
         translator.reset(
@@ -368,7 +369,9 @@ class WsProtocolContractTest(unittest.TestCase):
         with patch("main.refine_text", new_callable=AsyncMock) as refine:
             asyncio.run(translator.observe_transcription("we need confirm budget plan", 1, stable=False))
 
-        self.assertEqual(websocket.sent_messages, [])
+        self.assertEqual([message["K"] for message in websocket.sent_messages], ["meeting_translation_pending"])
+        self.assertFalse(websocket.sent_messages[0]["V"]["committed"])
+        self.assertTrue(websocket.sent_messages[0]["V"]["provisional"])
         refine.assert_not_called()
         translator.cancel()
 
@@ -662,6 +665,63 @@ class WsProtocolContractTest(unittest.TestCase):
         ])
         self.assertTrue(all(message["V"]["target_language"] == "de" for message in translations))
         self.assertEqual(len({message["V"]["sentence_id"] for message in translations}), 3)
+        translator.cancel()
+
+    def test_meeting_notes_partial_transcription_emits_provisional_preview_then_stable_update(self):
+        websocket = FakeWebSocket([])
+        translator = MeetingRealtimeTranslator(websocket)
+        translator.reset(
+            "audio-1",
+            "meeting_notes",
+            {},
+            {"meeting_translation_target_language": "zh"},
+        )
+
+        async def run_preview_scenario():
+            await translator.observe_transcription(
+                "Your time is limited",
+                1,
+                stable=False,
+                segment_text="Your time",
+            )
+            if translator.preview_task:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await translator.preview_task
+            await translator.observe_transcription(
+                "Your time is limited.",
+                2,
+                stable=True,
+                segment_text="is limited.",
+            )
+            await translator.drain()
+
+        with patch("main.MEETING_REALTIME_PREVIEW_DEBOUNCE_SECONDS", 0), patch(
+            "main.MEETING_REALTIME_PREVIEW_MIN_INTERVAL_SECONDS",
+            0,
+        ), patch("main.translate_realtime_preview", new_callable=AsyncMock) as preview, patch(
+            "main.refine_text",
+            new_callable=AsyncMock,
+        ) as refine:
+            preview.return_value = {
+                "text": "你的时间",
+                "translation_engine": "local_hy_mt",
+                "translation_latency_ms": 120,
+                "local_model_status": "ready",
+            }
+            refine.return_value = "你的时间有限。"
+            asyncio.run(run_preview_scenario())
+
+        pendings = [message for message in websocket.sent_messages if message["K"] == "meeting_translation_pending"]
+        translations = [message for message in websocket.sent_messages if message["K"] == "meeting_translation"]
+        preview_translation = next(message for message in translations if message["V"].get("provisional") is True)
+        stable_translation = next(message for message in translations if message["V"].get("committed") is True)
+        self.assertEqual(preview_translation["V"]["text"], "你的时间")
+        self.assertFalse(preview_translation["V"]["stable"])
+        self.assertFalse(preview_translation["V"]["committed"])
+        self.assertEqual(stable_translation["V"]["text"], "你的时间有限。")
+        self.assertTrue(stable_translation["V"]["stable"])
+        self.assertEqual(preview_translation["V"]["sentence_id"], stable_translation["V"]["sentence_id"])
+        self.assertEqual(pendings[0]["V"]["sentence_id"], stable_translation["V"]["sentence_id"])
         translator.cancel()
 
     def test_meeting_notes_unpunctuated_cumulative_asr_commits_latest_tail_once(self):
