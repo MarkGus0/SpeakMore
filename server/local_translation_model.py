@@ -205,6 +205,36 @@ def get_runtime_url() -> str:
     return _runtime_url
 
 
+def get_runtime_log_path() -> Path:
+    return get_translation_model_cache_root() / "llama-server.log"
+
+
+def read_runtime_log_tail(log_path: Path | None = None, max_chars: int = 2400) -> str:
+    path = log_path or get_runtime_log_path()
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    return text[-max_chars:].strip()
+
+
+def build_runtime_failure_detail(error: Exception | str, log_tail: str = "") -> str:
+    error_text = str(error or "").strip()
+    log_lower = log_tail.lower()
+    if "gguf_init_from_reader" in log_lower or "failed to load model" in log_lower:
+        return (
+            "Local translation model could not be loaded. The cached GGUF may be incomplete "
+            "or incompatible with the bundled llama.cpp runtime."
+        )
+    if "port" in error_text.lower() and "already in use" in error_text.lower():
+        return error_text
+    if log_tail:
+        last_line = log_tail.splitlines()[-1].strip()
+        if last_line:
+            return f"Local translation runtime failed to start: {last_line[:300]}"
+    return f"Local translation runtime failed to start: {error_text or 'unknown error'}"
+
+
 def is_runtime_process_alive() -> bool:
     return bool(_runtime_process and _runtime_process.poll() is None)
 
@@ -242,6 +272,7 @@ def get_translation_model_status() -> dict:
         "runtime_kind": _runtime_kind if runtime_url else "",
         **available_runtime,
         "runtime_pid": _runtime_process.pid if is_runtime_process_alive() else None,
+        "runtime_log_path": str(get_runtime_log_path()),
         "runtime_missing": status == "runtime_missing",
         "started_at": started_at,
         "updated_at": now,
@@ -334,10 +365,18 @@ def resolve_llama_server_port() -> int:
     return max(1024, min(65535, port or DEFAULT_LLAMA_SERVER_PORT))
 
 
-def wait_for_local_server(url: str, timeout_seconds: float = 20.0) -> None:
+def wait_for_local_server(
+    url: str,
+    timeout_seconds: float = 60.0,
+    process: subprocess.Popen | None = None,
+    log_path: Path | None = None,
+) -> None:
     deadline = time.time() + timeout_seconds
     last_error: Exception | None = None
     while time.time() < deadline:
+        if process is not None and process.poll() is not None:
+            log_tail = read_runtime_log_tail(log_path)
+            raise RuntimeError(build_runtime_failure_detail(f"process exited with code {process.returncode}", log_tail))
         try:
             response = httpx.get(f"{url}/v1/models", timeout=1.2)
             if response.status_code < 500:
@@ -345,7 +384,8 @@ def wait_for_local_server(url: str, timeout_seconds: float = 20.0) -> None:
         except Exception as error:
             last_error = error
         time.sleep(0.25)
-    raise RuntimeError(f"Local translation runtime did not become ready: {last_error or 'timeout'}")
+    log_tail = read_runtime_log_tail(log_path)
+    raise RuntimeError(build_runtime_failure_detail(last_error or "timeout", log_tail))
 
 
 def unload_translation_model() -> dict:
@@ -432,20 +472,28 @@ def load_translation_model() -> dict:
     except OSError:
         pass
 
-    _runtime_process = subprocess.Popen(
-        args,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        env=os.environ.copy(),
-    )
+    log_path = get_runtime_log_path()
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_file = log_path.open("w", encoding="utf-8")
+    try:
+        _runtime_process = subprocess.Popen(
+            args,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            env=os.environ.copy(),
+            cwd=str(Path(llama_server_path).parent) if llama_server_path else None,
+        )
+    finally:
+        log_file.close()
     _runtime_url = url
     _runtime_kind = runtime_kind
     try:
-        wait_for_local_server(url)
-    except Exception:
+        wait_for_local_server(url, process=_runtime_process, log_path=log_path)
+    except Exception as error:
+        detail = build_runtime_failure_detail(error, read_runtime_log_tail(log_path))
         unload_translation_model()
-        set_translation_model_state("failed", "Local translation runtime failed to start")
-        raise
+        set_translation_model_state("failed", detail)
+        raise RuntimeError(detail) from error
     set_translation_model_state("ready", f"Local translation model loaded with {runtime_kind}")
     return get_translation_model_status()
 

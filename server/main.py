@@ -466,11 +466,13 @@ def can_auto_preload_translation_model() -> bool:
 
 
 async def run_translation_model_download_task(app: FastAPI) -> None:
-    del app
     set_translation_model_task_state("downloading", f"Downloading {TRANSLATION_MODEL_GGUF_REPO_ID}", time.time())
     try:
         await asyncio.to_thread(download_translation_model, update_translation_model_task_progress)
-        set_translation_model_task_state("idle", "Local translation model downloaded")
+        if can_auto_preload_translation_model():
+            await run_translation_model_load_task(app)
+        else:
+            set_translation_model_task_state("idle", "Local translation model downloaded")
     except Exception as error:
         set_translation_model_task_state("failed", str(error))
 

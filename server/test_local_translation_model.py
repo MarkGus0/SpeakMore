@@ -189,6 +189,61 @@ def test_translation_model_load_uses_bundled_llama_server(tmp_path, monkeypatch)
     assert str(model_file) in args
 
 
+def test_translation_model_load_reports_model_log_failure(tmp_path, monkeypatch):
+    monkeypatch.setenv(local_translation_model.TRANSLATION_MODEL_CACHE_DIR_ENV, str(tmp_path))
+    monkeypatch.delenv("SPEAKMORE_LLAMA_SERVER_PATH", raising=False)
+    monkeypatch.delenv("LLAMA_SERVER_PATH", raising=False)
+    monkeypatch.delenv("SPEAKMORE_LOCAL_TRANSLATION_SERVER_URL", raising=False)
+    monkeypatch.setattr(local_translation_model.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(local_translation_model, "has_llama_cpp_python_server", lambda: False)
+    monkeypatch.setattr(
+        local_translation_model.socket,
+        "create_connection",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError()),
+    )
+    snapshot = (
+        tmp_path
+        / local_translation_model.repo_cache_dir_name(local_translation_model.TRANSLATION_MODEL_GGUF_REPO_ID)
+        / "snapshots"
+        / "snapshot-a"
+    )
+    snapshot.mkdir(parents=True)
+    (snapshot / local_translation_model.TRANSLATION_MODEL_GGUF_FILE).write_bytes(b"gguf")
+    llama_server = tmp_path / "llama-server.exe"
+    llama_server.write_bytes(b"runtime")
+    monkeypatch.setenv(local_translation_model.BUNDLED_LLAMA_SERVER_PATH_ENV, str(llama_server))
+
+    class FailedProcess:
+        pid = 12345
+        returncode = 1
+
+        def poll(self):
+            return 1
+
+        def terminate(self):
+            pass
+
+        def wait(self, timeout=None):
+            del timeout
+            return 1
+
+    def fake_popen(args, **kwargs):
+        del args
+        kwargs["stdout"].write("gguf_init_from_reader: failed to read tensor data\nfailed to load model\n")
+        kwargs["stdout"].flush()
+        return FailedProcess()
+
+    monkeypatch.setattr(local_translation_model.subprocess, "Popen", fake_popen)
+
+    with pytest.raises(RuntimeError, match="could not be loaded"):
+        local_translation_model.load_translation_model()
+
+    status = local_translation_model.get_translation_model_status()
+    assert status["status"] == "failed"
+    assert "cached GGUF" in status["detail"]
+    assert status["runtime_log_path"].endswith("llama-server.log")
+
+
 def test_translate_text_with_engine_uses_local_model_when_ready(monkeypatch):
     async def fake_local(**kwargs):
         assert kwargs["target_language_id"] == "en"

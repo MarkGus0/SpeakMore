@@ -1239,6 +1239,7 @@ test('P1 设置页与设置 store 统一走主进程 JSON 数据源', async () =
   const languageSection = await readProjectFile('src/pages/settings/LanguageSettingsSection.tsx');
   const llmSection = await readProjectFile('src/pages/settings/LlmSettingsSection.tsx');
   const shortcutSection = await readProjectFile('src/pages/settings/ShortcutSettingsSection.tsx');
+  const i18n = await readProjectFile('src/i18n.tsx');
   const settingsSurface = [
     settingsPage,
     settingsState,
@@ -1349,7 +1350,11 @@ test('P1 设置页与设置 store 统一走主进程 JSON 数据源', async () =
   assert.match(translationModelSection, /settings\.translationModel\.title/);
   assert.match(translationModelSection, /settings\.translationModel\.cacheDir/);
   assert.match(translationModelSection, /settings\.translationModel\.modelReady/);
+  assert.match(translationModelSection, /settings\.translationModel\.modelLoadFailedDetail/);
+  assert.match(translationModelSection, /settings\.translationModel\.runtimeStartFailedDetail/);
   assert.match(translationModelSection, /settings\.translationModel\.modelFilesProgress/);
+  assert.match(i18n, /settings\.translationModel\.modelLoadFailedDetail/);
+  assert.match(i18n, /settings\.translationModel\.runtimeStartFailedDetail/);
   assert.doesNotMatch(translationModelSection, /unloadTranslationModel/);
   assert.doesNotMatch(translationModelSection, /translationEnginePreference|localTranslationModelEnabled/);
   assert.match(translationModelStore, /translation-model:get-status/);

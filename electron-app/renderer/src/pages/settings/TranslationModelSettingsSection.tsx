@@ -57,6 +57,24 @@ function getStatusKey(status: TranslationModelStatus | null): TranslationKey {
   return 'settings.translationModel.modelStatus.idle'
 }
 
+function getDetailText(status: TranslationModelStatus | null, t: (key: TranslationKey) => string) {
+  if (!status?.detail) return ''
+  if (status.status === 'runtime_missing') return t('settings.translationModel.runtimeMissingDetail')
+
+  const detail = status.detail.toLowerCase()
+  if (
+    detail.includes('cached gguf')
+    || detail.includes('could not be loaded')
+    || detail.includes('failed to load model')
+  ) {
+    return t('settings.translationModel.modelLoadFailedDetail')
+  }
+  if (detail.includes('runtime failed to start') || detail.includes('did not become ready')) {
+    return t('settings.translationModel.runtimeStartFailedDetail')
+  }
+  return status.detail
+}
+
 export default function TranslationModelSettingsSection({
   settings,
   updateSettings,
@@ -118,9 +136,7 @@ export default function TranslationModelSettingsSection({
     && typeof modelStatus.file_progress_percent === 'number'
     && (modelStatus.total_files ?? 0) > 0
   const statusText = t(getStatusKey(modelStatus))
-  const detailText = modelStatus?.status === 'runtime_missing'
-    ? t('settings.translationModel.runtimeMissingDetail')
-    : modelStatus?.detail
+  const detailText = getDetailText(modelStatus, t)
   const modelActionText = isReady
     ? t('settings.translationModel.modelReady')
     : isCached
