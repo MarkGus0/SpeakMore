@@ -453,6 +453,18 @@ def is_translation_model_task_running(app: FastAPI) -> bool:
     return bool(task and not task.done())
 
 
+def should_auto_preload_translation_model() -> bool:
+    value = os.getenv("SPEAKMORE_AUTO_PRELOAD_TRANSLATION_MODEL", "1").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def can_auto_preload_translation_model() -> bool:
+    if is_translation_model_ready():
+        return False
+    status = get_translation_model_status()
+    return bool(status.get("cached") and status.get("runtime_available"))
+
+
 async def run_translation_model_download_task(app: FastAPI) -> None:
     del app
     set_translation_model_task_state("downloading", f"Downloading {TRANSLATION_MODEL_GGUF_REPO_ID}", time.time())
@@ -494,6 +506,14 @@ def start_translation_model_load_task(app: FastAPI) -> None:
     if is_translation_model_ready() or is_translation_model_task_running(app):
         return
     app.state.translation_model_task = asyncio.create_task(run_translation_model_load_task(app))
+
+
+def start_translation_model_auto_preload_task(app: FastAPI) -> None:
+    if not should_auto_preload_translation_model():
+        return
+    if not can_auto_preload_translation_model():
+        return
+    start_translation_model_load_task(app)
 
 
 async def preload_voice_service(
@@ -2212,6 +2232,7 @@ def create_app(
                 exit_scheduler,
                 exit_on_failure=exit_on_preload_failure,
             )
+        start_translation_model_auto_preload_task(app)
         try:
             yield
         finally:

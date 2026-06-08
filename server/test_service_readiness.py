@@ -70,6 +70,30 @@ class ServiceReadinessTest(unittest.TestCase):
         self.assertEqual(response.json()["status"], "ok")
         reload_refiner_runtime_config.assert_called_once_with()
 
+    def test_startup_auto_preloads_cached_translation_model_when_runtime_available(self):
+        app = main.create_app(preload_model=lambda: None, exit_scheduler=lambda _code: None)
+
+        with patch("main.should_auto_preload_translation_model", return_value=True), \
+            patch("main.can_auto_preload_translation_model", return_value=True), \
+            patch("main.start_translation_model_load_task") as start_translation_model_load_task, \
+            TestClient(app) as client:
+            response = client.get("/health")
+
+        self.assertEqual(response.status_code, 200)
+        start_translation_model_load_task.assert_called_once_with(app)
+
+    def test_startup_does_not_auto_preload_translation_model_when_disabled(self):
+        app = main.create_app(preload_model=lambda: None, exit_scheduler=lambda _code: None)
+
+        with patch("main.should_auto_preload_translation_model", return_value=False), \
+            patch("main.can_auto_preload_translation_model", return_value=True), \
+            patch("main.start_translation_model_load_task") as start_translation_model_load_task, \
+            TestClient(app) as client:
+            response = client.get("/health")
+
+        self.assertEqual(response.status_code, 200)
+        start_translation_model_load_task.assert_not_called()
+
     def test_model_status_is_idle_until_user_starts_download(self):
         app = main.create_app(preload_model=lambda: None, exit_scheduler=lambda _code: None)
 
