@@ -60,7 +60,7 @@ function getStatusKey(status: TranslationModelStatus | null): TranslationKey {
 function getDetailText(status: TranslationModelStatus | null, t: (key: TranslationKey) => string) {
   if (!status?.detail) return ''
   if (status.status === 'ready') {
-    return t('settings.translationModel.readyDetail')
+    return ''
   }
   if (status.status === 'runtime_missing') return t('settings.translationModel.runtimeMissingDetail')
 
@@ -87,21 +87,6 @@ function getDetailText(status: TranslationModelStatus | null, t: (key: Translati
     return t('settings.translationModel.runtimeStartFailedDetail')
   }
   return status.detail
-}
-
-function getRuntimeProfileLabel(status: TranslationModelStatus | null, t: (key: TranslationKey) => string) {
-  if (status?.runtime_profile === 'stq') return t('settings.translationModel.runtimeProfile.stq')
-  return t('settings.translationModel.runtimeProfile.standard')
-}
-
-function getFallbackReasonText(status: TranslationModelStatus | null, t: (key: TranslationKey) => string) {
-  if (status?.fallback_reason === 'stq_runtime_unavailable') {
-    return t('settings.translationModel.fallbackReason.stqRuntimeUnavailable')
-  }
-  if (status?.fallback_reason === 'using_stable_profile') {
-    return t('settings.translationModel.fallbackReason.usingStableProfile')
-  }
-  return status?.fallback_reason || ''
 }
 
 export default function TranslationModelSettingsSection({
@@ -166,7 +151,6 @@ export default function TranslationModelSettingsSection({
     && (modelStatus.total_files ?? 0) > 0
   const statusText = t(getStatusKey(modelStatus))
   const detailText = getDetailText(modelStatus, t)
-  const fallbackReasonText = getFallbackReasonText(modelStatus, t)
   const modelActionText = isReady
     ? t('settings.translationModel.modelReady')
     : isCached
@@ -200,25 +184,11 @@ export default function TranslationModelSettingsSection({
           </Typography>
         </Box>
         <Box sx={rowSx}>
-          <Typography sx={{ ...bodyTextSx, color: 'text.secondary' }}>{t('settings.translationModel.runtimeMode')}</Typography>
-          <Typography sx={{ ...bodyTextSx, textAlign: { xs: 'left', sm: 'right' } }}>
-            {getRuntimeProfileLabel(modelStatus, t)}
-          </Typography>
-        </Box>
-        <Box sx={rowSx}>
           <Typography sx={{ ...bodyTextSx, color: 'text.secondary' }}>{t('settings.translationModel.cacheDir')}</Typography>
           <Typography sx={{ ...bodyTextSx, textAlign: { xs: 'left', sm: 'right' }, wordBreak: 'break-all' }}>
             {effectiveCacheDir || '-'}
           </Typography>
         </Box>
-        {fallbackReasonText ? (
-          <Box sx={rowSx}>
-            <Typography sx={{ ...bodyTextSx, color: 'text.secondary' }}>{t('settings.translationModel.fallbackReason')}</Typography>
-            <Typography sx={{ ...bodyTextSx, textAlign: { xs: 'left', sm: 'right' }, color: 'text.secondary' }}>
-              {fallbackReasonText}
-            </Typography>
-          </Box>
-        ) : null}
         {detailText ? (
           <Typography sx={{ ...helperTextSx, color: modelStatus?.status === 'failed' ? 'error.main' : 'text.secondary', mt: 1 }}>
             {detailText}
