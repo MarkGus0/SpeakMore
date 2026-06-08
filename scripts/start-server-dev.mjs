@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   checkServerPythonPackages,
+  resolveDevLlamaServerPath,
   resolveServerPython,
 } from './dev-prereqs.mjs';
 
@@ -36,9 +37,21 @@ if (!dependencyResult.ok) {
   process.exit(1);
 }
 
+const serverEnv = { ...process.env };
+const llamaServerPath = resolveDevLlamaServerPath({
+  env: serverEnv,
+  existsSync,
+  platform: process.platform,
+  rootDir,
+});
+if (llamaServerPath && !serverEnv.SPEAKMORE_BUNDLED_LLAMA_SERVER_PATH) {
+  serverEnv.SPEAKMORE_BUNDLED_LLAMA_SERVER_PATH = llamaServerPath;
+  console.log(`使用本地翻译运行时: ${llamaServerPath}`);
+}
+
 const child = spawn(pythonResult.pythonBin, ['main.py'], {
   cwd: serverDir,
-  env: process.env,
+  env: serverEnv,
   stdio: 'inherit',
 });
 

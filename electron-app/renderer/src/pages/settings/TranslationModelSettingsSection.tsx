@@ -60,6 +60,14 @@ function getStatusKey(status: TranslationModelStatus | null): TranslationKey {
   return 'settings.translationModel.modelStatus.idle'
 }
 
+function getRuntimeSourceKey(source = ''): TranslationKey | null {
+  if (source === 'bundled') return 'settings.translationModel.runtimeSource.bundled'
+  if (source === 'configured') return 'settings.translationModel.runtimeSource.configured'
+  if (source === 'path') return 'settings.translationModel.runtimeSource.path'
+  if (source === 'python') return 'settings.translationModel.runtimeSource.python'
+  return null
+}
+
 export default function TranslationModelSettingsSection({
   settings,
   updateSettings,
@@ -124,6 +132,16 @@ export default function TranslationModelSettingsSection({
   const detailText = modelStatus?.status === 'runtime_missing'
     ? t('settings.translationModel.runtimeMissingDetail')
     : modelStatus?.detail
+  const runtimeSourceKey = getRuntimeSourceKey(modelStatus?.runtime_source)
+  const runtimePathText = modelStatus?.runtime_url || modelStatus?.runtime_path || ''
+  const runtimeKindText = modelStatus?.runtime_kind || modelStatus?.runtime_kind_available || ''
+  const runtimeStatusText = modelStatus?.runtime_available || modelStatus?.runtime_url
+    ? [
+        t('settings.translationModel.runtimeReady'),
+        runtimeKindText,
+        runtimeSourceKey ? t(runtimeSourceKey) : '',
+      ].filter(Boolean).join(' · ')
+    : t('settings.translationModel.runtimeUnavailable')
 
   return (
     <>
@@ -191,14 +209,17 @@ export default function TranslationModelSettingsSection({
             {effectiveCacheDir || '-'}
           </Typography>
         </Box>
-        {modelStatus?.runtime_url ? (
-          <Box sx={rowSx}>
-            <Typography sx={{ ...bodyTextSx, color: 'text.secondary' }}>{t('settings.translationModel.runtime')}</Typography>
-            <Typography sx={{ ...bodyTextSx, textAlign: { xs: 'left', sm: 'right' }, wordBreak: 'break-all' }}>
-              {modelStatus.runtime_url}
-            </Typography>
+        <Box sx={rowSx}>
+          <Typography sx={{ ...bodyTextSx, color: 'text.secondary' }}>{t('settings.translationModel.runtime')}</Typography>
+          <Box sx={{ minWidth: 0, textAlign: { xs: 'left', sm: 'right' } }}>
+            <Typography sx={{ ...bodyTextSx }}>{runtimeStatusText}</Typography>
+            {runtimePathText ? (
+              <Typography sx={{ ...captionTextSx, color: 'text.secondary', wordBreak: 'break-all', mt: 0.3 }}>
+                {runtimePathText}
+              </Typography>
+            ) : null}
           </Box>
-        ) : null}
+        </Box>
         {detailText ? (
           <Typography sx={{ ...helperTextSx, color: modelStatus?.status === 'failed' || modelStatus?.status === 'runtime_missing' ? 'error.main' : 'text.secondary', mt: 1 }}>
             {detailText}

@@ -747,6 +747,7 @@ test('renderer 不再保留旧文字请求链路', async () => {
 
 test('Electron 只通过打包后端服务管理语音后端进程', async () => {
   const main = await readMainProcessSurface();
+  const packagingConfig = await readProjectFile('../../packaging/electron-builder.yml');
 
   assert.doesNotMatch(main, /voiceServerProcess/);
   assert.doesNotMatch(main, /voiceServerStartPromise/);
@@ -755,6 +756,8 @@ test('Electron 只通过打包后端服务管理语音后端进程', async () =>
   assert.doesNotMatch(main, /stopVoiceServer\(\)/);
   assert.match(main, /createVoiceBackendService/);
   assert.match(main, /backendExecutablePath:\s*\(\)\s*=>\s*appPaths\.backendExecutablePath\(\)/);
+  assert.match(main, /llamaServerPath:\s*\(\)\s*=>\s*appPaths\.llamaServerPath\(\)/);
+  assert.match(packagingConfig, /from:\s*release-artifacts\/llama[\s\S]*to:\s*llama/);
   assert.match(main, /voiceBackendService\.stop\(\)/);
 });
 

@@ -23,6 +23,31 @@ export const getRendererIndexPath = ({ rootDir }) => (
   path.join(rootDir, 'electron-app', 'renderer', 'dist', 'index.html')
 );
 
+export const getLlamaServerExecutableName = ({ platform = process.platform }) => (
+  platform === 'win32' ? 'llama-server.exe' : 'llama-server'
+);
+
+export const getBundledLlamaServerPath = ({ rootDir, platform = process.platform }) => (
+  path.join(rootDir, 'release-artifacts', 'llama', getLlamaServerExecutableName({ platform }))
+);
+
+export const resolveDevLlamaServerPath = ({
+  env = process.env,
+  existsSync,
+  platform = process.platform,
+  rootDir,
+}) => {
+  const existingEnvPath = String(
+    env.SPEAKMORE_LLAMA_SERVER_PATH
+    || env.LLAMA_SERVER_PATH
+    || env.SPEAKMORE_BUNDLED_LLAMA_SERVER_PATH
+    || '',
+  ).trim();
+  if (existingEnvPath) return existingEnvPath;
+  const bundledPath = getBundledLlamaServerPath({ rootDir, platform });
+  return existsSync(bundledPath) ? bundledPath : '';
+};
+
 const serverInstallCommand = ({ platform = process.platform }) => (
   platform === 'win32'
     ? '.\\.venv\\Scripts\\python.exe -m pip install -r requirements.txt'

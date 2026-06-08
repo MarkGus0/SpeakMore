@@ -80,7 +80,7 @@ test('start injects local translation model cache and llama runtime in packaged 
   await service.start();
 
   assert.equal(calls[0].options.env.SPEAKMORE_TRANSLATION_MODEL_CACHE_DIR, 'D:\\Models\\HyMT');
-  assert.equal(calls[0].options.env.SPEAKMORE_LLAMA_SERVER_PATH, 'C:\\app\\resources\\llama\\llama-server.exe');
+  assert.equal(calls[0].options.env.SPEAKMORE_BUNDLED_LLAMA_SERVER_PATH, 'C:\\app\\resources\\llama\\llama-server.exe');
 });
 
 test('start 在打包态按 ASR 设备模式注入 FUNASR_DEVICE', async () => {

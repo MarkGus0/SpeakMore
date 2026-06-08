@@ -22,13 +22,15 @@ TRANSLATION_MODEL_DISPLAY_REPO_ID = "AngelSlim/Hy-MT1.5-1.8B-2bit"
 TRANSLATION_MODEL_GGUF_REPO_ID = "AngelSlim/Hy-MT1.5-1.8B-2bit-GGUF"
 TRANSLATION_MODEL_GGUF_FILE = "Hy-MT1.5-1.8B-2bit.gguf"
 TRANSLATION_MODEL_CACHE_DIR_ENV = "SPEAKMORE_TRANSLATION_MODEL_CACHE_DIR"
-LLAMA_SERVER_PATH_ENVS = ("SPEAKMORE_LLAMA_SERVER_PATH", "LLAMA_SERVER_PATH")
+BUNDLED_LLAMA_SERVER_PATH_ENV = "SPEAKMORE_BUNDLED_LLAMA_SERVER_PATH"
+LLAMA_SERVER_PATH_ENVS = ("SPEAKMORE_LLAMA_SERVER_PATH", "LLAMA_SERVER_PATH", BUNDLED_LLAMA_SERVER_PATH_ENV)
 LLAMA_SERVER_URL_ENV = "SPEAKMORE_LOCAL_TRANSLATION_SERVER_URL"
 LLAMA_SERVER_PORT_ENV = "SPEAKMORE_LLAMA_SERVER_PORT"
 DEFAULT_LLAMA_SERVER_PORT = 8105
 RUNTIME_MISSING_DETAIL = (
-    "未找到本地翻译运行时。请安装 llama.cpp 的 llama-server，"
-    "或在当前后端 Python 环境安装 llama-cpp-python。"
+    "Local translation runtime is missing. Bundle llama-server with the app, set "
+    "SPEAKMORE_BUNDLED_LLAMA_SERVER_PATH / SPEAKMORE_LLAMA_SERVER_PATH / LLAMA_SERVER_PATH, "
+    "install llama-server on PATH, or install llama-cpp-python in the backend Python environment."
 )
 LOCAL_TRANSLATION_TIMEOUT_SECONDS = 8.0
 LOCAL_TRANSLATION_SUPPORTED_TARGETS = {
@@ -223,6 +225,7 @@ def get_translation_model_status() -> dict:
     if status == "ready" and not runtime_ready:
         status = "runtime_missing"
 
+    available_runtime = get_available_runtime_info()
     started_at = current.get("started_at")
     return {
         "status": status,
@@ -237,6 +240,7 @@ def get_translation_model_status() -> dict:
         "ready": status == "ready",
         "runtime_url": runtime_url,
         "runtime_kind": _runtime_kind if runtime_url else "",
+        **available_runtime,
         "runtime_pid": _runtime_process.pid if is_runtime_process_alive() else None,
         "runtime_missing": status == "runtime_missing",
         "started_at": started_at,
@@ -267,12 +271,52 @@ def download_translation_model(progress_callback: Callable[[DownloadProgress], N
     return model_file
 
 
-def resolve_llama_server_path() -> str:
+def resolve_llama_server_runtime() -> dict[str, str]:
     for env_name in LLAMA_SERVER_PATH_ENVS:
         candidate = str(os.environ.get(env_name, "") or "").strip()
         if candidate and Path(candidate).is_file():
-            return candidate
-    return shutil.which("llama-server") or ""
+            return {
+                "path": candidate,
+                "source": "bundled" if env_name == BUNDLED_LLAMA_SERVER_PATH_ENV else "configured",
+            }
+    path_candidate = shutil.which("llama-server") or ""
+    if path_candidate:
+        return {
+            "path": path_candidate,
+            "source": "path",
+        }
+    return {
+        "path": "",
+        "source": "",
+    }
+
+
+def resolve_llama_server_path() -> str:
+    return resolve_llama_server_runtime()["path"]
+
+
+def get_available_runtime_info() -> dict:
+    runtime = resolve_llama_server_runtime()
+    if runtime["path"]:
+        return {
+            "runtime_available": True,
+            "runtime_path": runtime["path"],
+            "runtime_source": runtime["source"],
+            "runtime_kind_available": "llama-server",
+        }
+    if has_llama_cpp_python_server():
+        return {
+            "runtime_available": True,
+            "runtime_path": sys.executable,
+            "runtime_source": "python",
+            "runtime_kind_available": "llama-cpp-python",
+        }
+    return {
+        "runtime_available": False,
+        "runtime_path": "",
+        "runtime_source": "",
+        "runtime_kind_available": "",
+    }
 
 
 def has_llama_cpp_python_server() -> bool:
@@ -339,7 +383,8 @@ def load_translation_model() -> dict:
         set_translation_model_state("ready", "Local translation model is already loaded")
         return get_translation_model_status()
 
-    llama_server_path = resolve_llama_server_path()
+    llama_server_runtime = resolve_llama_server_runtime()
+    llama_server_path = llama_server_runtime["path"]
     port = resolve_llama_server_port()
     url = f"http://127.0.0.1:{port}"
     thread_count = str(max(2, min(8, os.cpu_count() or 4)))

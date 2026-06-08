@@ -25,9 +25,12 @@ rm -f "$FFMPEG_DIR/ffmpeg"
 cp "$FFMPEG_SOURCE" "$FFMPEG_DIR/ffmpeg"
 chmod +x "$FFMPEG_DIR/ffmpeg"
 
+node "$ROOT/scripts/prepare-llama-runtime.mjs" --platform darwin
+
 mkdir -p "$HELPER_DIR"
 
 echo "macOS resources prepared:"
 echo "  assets: $ASSETS_DIR"
 echo "  ffmpeg: $FFMPEG_DIR/ffmpeg"
+echo "  llama: $ROOT/release-artifacts/llama/llama-server"
 echo "  helper: $HELPER_DIR"

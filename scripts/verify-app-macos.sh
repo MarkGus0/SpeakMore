@@ -18,8 +18,10 @@ fi
 RESOURCES="$APP_PATH/Contents/Resources"
 BACKEND="$RESOURCES/backend/speakmore-backend"
 FFMPEG="$RESOURCES/ffmpeg/bin/ffmpeg"
+LLAMA_SERVER="$RESOURCES/llama/llama-server"
 OPTION_LISTENER="$RESOURCES/app.asar.unpacked/electron-app/macos-option-listener.c"
 PLATFORM_HELPER="$RESOURCES/app.asar.unpacked/electron-app/macos-platform-helper.m"
+[[ -x "$LLAMA_SERVER" ]] || fail "打包产物缺少本地翻译运行时: $LLAMA_SERVER"
 
 [[ -x "$BACKEND" ]] || fail "打包产物缺少后端可执行文件: $BACKEND"
 [[ -x "$FFMPEG" ]] || fail "打包产物缺少 ffmpeg: $FFMPEG"

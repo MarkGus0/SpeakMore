@@ -25,6 +25,8 @@ extraResources:
     to: assets
   - from: release-artifacts/ffmpeg
     to: ffmpeg
+  - from: release-artifacts/llama
+    to: llama
 asar: true
 asarUnpack:
   - electron-app/right-alt-listener.ps1

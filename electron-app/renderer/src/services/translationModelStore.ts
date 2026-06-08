@@ -22,6 +22,10 @@ export type TranslationModelStatus = {
   ready?: boolean
   runtime_url?: string
   runtime_kind?: string
+  runtime_available?: boolean
+  runtime_path?: string
+  runtime_source?: string
+  runtime_kind_available?: string
   runtime_pid?: number | null
   runtime_missing?: boolean
   elapsed_ms?: number
@@ -70,6 +74,10 @@ export function normalizeTranslationModelStatus(value: unknown): TranslationMode
     ready: Boolean(status.ready || normalizedStatus === 'ready'),
     runtime_url: typeof status.runtime_url === 'string' ? status.runtime_url : '',
     runtime_kind: typeof status.runtime_kind === 'string' ? status.runtime_kind : '',
+    runtime_available: Boolean(status.runtime_available),
+    runtime_path: typeof status.runtime_path === 'string' ? status.runtime_path : '',
+    runtime_source: typeof status.runtime_source === 'string' ? status.runtime_source : '',
+    runtime_kind_available: typeof status.runtime_kind_available === 'string' ? status.runtime_kind_available : '',
     runtime_pid: typeof status.runtime_pid === 'number' ? status.runtime_pid : null,
     runtime_missing: Boolean(status.runtime_missing || normalizedStatus === 'runtime_missing'),
     elapsed_ms: normalizeNumber(status.elapsed_ms),

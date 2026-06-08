@@ -16,6 +16,7 @@
     "verify:app:mac": "bash scripts/verify-app-macos.sh",
     "smoke:app-mps:mac": "bash scripts/smoke-packaged-macos-mps.sh",
     "verify:open-source": "powershell -ExecutionPolicy Bypass -File scripts/verify-open-source.ps1",
+    "prepare:llama-runtime": "node scripts/prepare-llama-runtime.mjs",
     "build:backend:win": "powershell -ExecutionPolicy Bypass -File scripts/build-backend-win.ps1",
     "build:helper:win": "powershell -ExecutionPolicy Bypass -File scripts/build-helper-win.ps1",
     "build:portable:win": "powershell -ExecutionPolicy Bypass -File scripts/build-portable-win.ps1",

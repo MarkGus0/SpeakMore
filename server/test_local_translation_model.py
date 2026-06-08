@@ -27,6 +27,7 @@ def test_translation_model_status_detects_cached_gguf(tmp_path, monkeypatch):
 
 def test_translation_model_load_reports_runtime_missing_for_cached_model(tmp_path, monkeypatch):
     monkeypatch.setenv(local_translation_model.TRANSLATION_MODEL_CACHE_DIR_ENV, str(tmp_path))
+    monkeypatch.delenv(local_translation_model.BUNDLED_LLAMA_SERVER_PATH_ENV, raising=False)
     monkeypatch.delenv("SPEAKMORE_LLAMA_SERVER_PATH", raising=False)
     monkeypatch.delenv("LLAMA_SERVER_PATH", raising=False)
     monkeypatch.delenv("SPEAKMORE_LOCAL_TRANSLATION_SERVER_URL", raising=False)
@@ -49,6 +50,23 @@ def test_translation_model_load_reports_runtime_missing_for_cached_model(tmp_pat
     assert "llama-cpp-python" in status["detail"]
 
 
+def test_translation_model_status_reports_bundled_llama_server(tmp_path, monkeypatch):
+    llama_server = tmp_path / "llama-server.exe"
+    llama_server.write_bytes(b"runtime")
+    monkeypatch.setenv(local_translation_model.BUNDLED_LLAMA_SERVER_PATH_ENV, str(llama_server))
+    monkeypatch.delenv("SPEAKMORE_LLAMA_SERVER_PATH", raising=False)
+    monkeypatch.delenv("LLAMA_SERVER_PATH", raising=False)
+    monkeypatch.setattr(local_translation_model.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(local_translation_model, "has_llama_cpp_python_server", lambda: False)
+
+    status = local_translation_model.get_translation_model_status()
+
+    assert status["runtime_available"] is True
+    assert status["runtime_path"] == str(llama_server)
+    assert status["runtime_source"] == "bundled"
+    assert status["runtime_kind_available"] == "llama-server"
+
+
 def test_llama_cpp_python_server_probe_handles_missing_parent_package(monkeypatch):
     def fake_find_spec(_name):
         raise ModuleNotFoundError("No module named 'llama_cpp'")
@@ -60,6 +78,7 @@ def test_llama_cpp_python_server_probe_handles_missing_parent_package(monkeypatc
 
 def test_translation_model_load_can_use_llama_cpp_python_server(tmp_path, monkeypatch):
     monkeypatch.setenv(local_translation_model.TRANSLATION_MODEL_CACHE_DIR_ENV, str(tmp_path))
+    monkeypatch.delenv(local_translation_model.BUNDLED_LLAMA_SERVER_PATH_ENV, raising=False)
     monkeypatch.delenv("SPEAKMORE_LLAMA_SERVER_PATH", raising=False)
     monkeypatch.delenv("LLAMA_SERVER_PATH", raising=False)
     monkeypatch.delenv("SPEAKMORE_LOCAL_TRANSLATION_SERVER_URL", raising=False)
@@ -109,6 +128,63 @@ def test_translation_model_load_can_use_llama_cpp_python_server(tmp_path, monkey
     assert popen_calls
     args = popen_calls[0][0]
     assert args[:3] == [local_translation_model.sys.executable, "-m", "llama_cpp.server"]
+    assert "--model" in args
+    assert str(model_file) in args
+
+
+def test_translation_model_load_uses_bundled_llama_server(tmp_path, monkeypatch):
+    monkeypatch.setenv(local_translation_model.TRANSLATION_MODEL_CACHE_DIR_ENV, str(tmp_path))
+    monkeypatch.delenv("SPEAKMORE_LLAMA_SERVER_PATH", raising=False)
+    monkeypatch.delenv("LLAMA_SERVER_PATH", raising=False)
+    monkeypatch.delenv("SPEAKMORE_LOCAL_TRANSLATION_SERVER_URL", raising=False)
+    monkeypatch.setattr(local_translation_model.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(local_translation_model, "has_llama_cpp_python_server", lambda: False)
+    monkeypatch.setattr(local_translation_model, "wait_for_local_server", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        local_translation_model.socket,
+        "create_connection",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError()),
+    )
+    snapshot = (
+        tmp_path
+        / local_translation_model.repo_cache_dir_name(local_translation_model.TRANSLATION_MODEL_GGUF_REPO_ID)
+        / "snapshots"
+        / "snapshot-a"
+    )
+    snapshot.mkdir(parents=True)
+    model_file = snapshot / local_translation_model.TRANSLATION_MODEL_GGUF_FILE
+    model_file.write_bytes(b"gguf")
+    llama_server = tmp_path / "llama-server.exe"
+    llama_server.write_bytes(b"runtime")
+    monkeypatch.setenv(local_translation_model.BUNDLED_LLAMA_SERVER_PATH_ENV, str(llama_server))
+    popen_calls = []
+
+    class FakeProcess:
+        pid = 12345
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            pass
+
+        def wait(self, timeout=None):
+            del timeout
+            return 0
+
+    def fake_popen(args, **kwargs):
+        popen_calls.append((args, kwargs))
+        return FakeProcess()
+
+    monkeypatch.setattr(local_translation_model.subprocess, "Popen", fake_popen)
+
+    status = local_translation_model.load_translation_model()
+    local_translation_model.unload_translation_model()
+
+    assert status["status"] == "ready"
+    assert status["runtime_kind"] == "llama-server"
+    args = popen_calls[0][0]
+    assert args[0] == str(llama_server)
     assert "--model" in args
     assert str(model_file) in args
 

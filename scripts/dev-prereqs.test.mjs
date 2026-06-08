@@ -5,6 +5,8 @@ import test from 'node:test';
 import {
   checkElectronDevPrereqs,
   checkServerPythonPackages,
+  getBundledLlamaServerPath,
+  resolveDevLlamaServerPath,
   resolveServerPython,
 } from './dev-prereqs.mjs';
 
@@ -89,4 +91,29 @@ test('Electron 依赖已安装但缺 renderer dist 时只提示构建前端', ()
   assert.deepEqual(result.missing, ['renderer_dist']);
   assert.doesNotMatch(result.message, /npm install/);
   assert.match(result.message, /npm run renderer:build/);
+});
+
+test('开发态后端优先使用 release-artifacts 中的 llama-server', () => {
+  const rootDir = 'D:\\CodeWorkSpace\\SpeakMore';
+  const llamaServer = getBundledLlamaServerPath({ rootDir, platform: 'win32' });
+
+  const result = resolveDevLlamaServerPath({
+    env: {},
+    existsSync: existsFor(llamaServer),
+    platform: 'win32',
+    rootDir,
+  });
+
+  assert.equal(result, llamaServer);
+});
+
+test('开发态后端不覆盖用户显式指定的 llama-server', () => {
+  const result = resolveDevLlamaServerPath({
+    env: { SPEAKMORE_LLAMA_SERVER_PATH: 'E:\\llama\\llama-server.exe' },
+    existsSync: () => true,
+    platform: 'win32',
+    rootDir: 'D:\\CodeWorkSpace\\SpeakMore',
+  });
+
+  assert.equal(result, 'E:\\llama\\llama-server.exe');
 });

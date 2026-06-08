@@ -48,6 +48,11 @@ try {
     Fail '便携包缺少 ffmpeg.exe'
   }
 
+  $llamaServer = $allFiles | Where-Object { $_.Name -eq 'llama-server.exe' } | Select-Object -First 1
+  if (!$llamaServer) {
+    Fail '便携包缺少本地翻译运行时 llama-server.exe'
+  }
+
   $secretPattern = 'sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+|-----BEGIN (RSA|OPENSSH|EC|DSA) PRIVATE KEY'
   foreach ($file in $allFiles | Where-Object { $_.Length -lt 5MB }) {
     $content = Get-Content -Raw -ErrorAction SilentlyContinue $file.FullName

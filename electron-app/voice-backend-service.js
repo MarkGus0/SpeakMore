@@ -67,8 +67,8 @@ function createVoiceBackendService({
       : '';
     if (translationModelCacheDir) env.SPEAKMORE_TRANSLATION_MODEL_CACHE_DIR = translationModelCacheDir;
     const resolvedLlamaServerPath = typeof llamaServerPath === 'function' ? String(llamaServerPath() || '').trim() : '';
-    if (resolvedLlamaServerPath && !env.SPEAKMORE_LLAMA_SERVER_PATH) {
-      env.SPEAKMORE_LLAMA_SERVER_PATH = resolvedLlamaServerPath;
+    if (resolvedLlamaServerPath && !env.SPEAKMORE_BUNDLED_LLAMA_SERVER_PATH) {
+      env.SPEAKMORE_BUNDLED_LLAMA_SERVER_PATH = resolvedLlamaServerPath;
     }
     const asrDeviceMode = normalizeAsrDeviceMode(
       typeof getAsrDeviceMode === 'function' ? String(getAsrDeviceMode() || '').trim() : '',

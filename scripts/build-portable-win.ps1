@@ -9,6 +9,7 @@ try {
   npm run renderer:build
   npm run build:backend:win
   npm run build:helper:win
+  npm run prepare:llama-runtime
 
   if (Test-Path $assetsDir) {
     Remove-Item -LiteralPath $assetsDir -Recurse -Force
